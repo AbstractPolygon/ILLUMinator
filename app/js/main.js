@@ -724,7 +724,7 @@ async function focusAt(event) {
     return;
   }
   const [x, y] = viewPoint(event);
-  const res = await engine.request('focusAt', { x, y }, { onProgress: showProgress });
+  const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v }, { onProgress: showProgress });
   hideProgress();
   if (!res || typeof res.alpha !== 'number') return;
   $('focus').value = res.alpha.toFixed(2);

@@ -8,7 +8,7 @@ import {
   colorMatrix, autoExposure, toneMap, sensorToOutput,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { estimateDepth } from './core/depth.js';
+import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { renderSuperRes, estimateVignetting } from './core/superres.js';
 
@@ -388,14 +388,31 @@ async function depthMap({ id }) {
   return undefined;
 }
 
-// Focus value (alpha) that makes the picture sharp at output pixel (x, y).
-async function focusAt({ id, x, y }) {
+// Focus value (alpha) that makes the picture sharp at output pixel (x, y)
+// of the camera view. Measured at the point itself; where the spot has no
+// texture to judge by, the (filled-in) depth map is used instead. The point
+// is shifted back by the parallax of the current viewpoint, since the views
+// are centered.
+async function focusAt({ id, x, y, u = 0, v = 0 }) {
   requireRaw();
-  if (!(await ensureDepth(id))) return { cancelled: true };
+  if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
+  const views = state.refocusViews;
+  const d = state.settings.detail;
+  // Grow the window until it contains enough texture to judge by.
+  let est = null;
+  for (const radius of [5, 10, 20]) {
+    const opts = { radius, min: -1.6, max: 1.6 };
+    est = focusAtPoint(views, outW, outH, x, y, opts);
+    // A viewpoint away from the center sees a point at depth alpha displaced
+    // by -alpha * (u, v): measure again at the matching centered position.
+    if (u || v) est = focusAtPoint(views, outW, outH, x - est.alpha * u * d, y - est.alpha * v * d, opts);
+    if (est.confidence >= 0.15) return { alpha: est.alpha, confidence: est.confidence };
+  }
+  if (!(await ensureDepth(id))) return { cancelled: true };
   const xi = Math.max(0, Math.min(outW - 1, Math.round(x)));
   const yi = Math.max(0, Math.min(outH - 1, Math.round(y)));
-  return { alpha: state.depth.alpha[yi * outW + xi] };
+  return { alpha: state.depth.alpha[yi * outW + xi], confidence: est.confidence };
 }
 
 async function readSection({ ref }) {

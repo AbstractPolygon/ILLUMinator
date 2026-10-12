@@ -95,7 +95,7 @@ function fillSmooth(values, conf, w, h, r) {
 
 // views: [{ u, v, rgb, gain, detail }] as used by refocus().
 // Returns { alpha: Float32Array (per pixel), confidence: Float32Array }.
-export function estimateDepth(views, width, height, { min = -1.2, max = 1.2, steps = 25, window = 3, onProgress } = {}) {
+export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, steps = 33, window = 3, onProgress } = {}) {
   const n = width * height;
   const alphas = Array.from({ length: steps }, (_, i) => min + ((max - min) * i) / (steps - 1));
   const lums = views.map((v) => luminance(v.rgb, n).map((x) => x * v.gain));
@@ -146,4 +146,60 @@ export function estimateDepth(views, width, height, { min = -1.2, max = 1.2, ste
   }
   if (onProgress) onProgress(1);
   return { alpha: fillSmooth(alpha, new Float32Array(n).fill(1), width, height, 1), confidence, range: [min, max] };
+}
+
+// Focus value that makes the neighborhood of (x, y) sharpest, measured
+// directly in a small window around the point (more faithful to the exact
+// spot than the smoothed depth map). Returns { alpha, confidence }.
+export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2, step = 0.025, radius = 5 } = {}) {
+  const n = width * height;
+  const lums = views.map((v) => luminance(v.rgb, n).map((l) => l * v.gain));
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  const costs = [];
+  const alphas = [];
+  for (let a = min; a <= max + 1e-9; a += step) {
+    let cost = 0;
+    let count = 0;
+    for (let yy = cy - radius; yy <= cy + radius; yy++) {
+      for (let xx = cx - radius; xx <= cx + radius; xx++) {
+        let sum = 0;
+        let sq = 0;
+        let m = 0;
+        for (let k = 0; k < views.length; k++) {
+          const view = views[k];
+          const sx = xx + a * view.u * view.detail;
+          const sy = yy + a * view.v * view.detail;
+          const ix = Math.floor(sx);
+          const iy = Math.floor(sy);
+          if (ix < 0 || iy < 0 || ix >= width - 1 || iy >= height - 1) continue;
+          const ax = sx - ix;
+          const ay = sy - iy;
+          const lum = lums[k];
+          const p = iy * width + ix;
+          const val = (lum[p] * (1 - ax) + lum[p + 1] * ax) * (1 - ay) + (lum[p + width] * (1 - ax) + lum[p + width + 1] * ax) * ay;
+          sum += val;
+          sq += val * val;
+          m++;
+        }
+        if (m < 2) continue;
+        const mean = sum / m;
+        cost += Math.max(0, sq / m - mean * mean) / (mean * mean + 1e-4);
+        count++;
+      }
+    }
+    costs.push(count ? cost / count : Infinity);
+    alphas.push(a);
+  }
+  let best = 0;
+  for (let k = 1; k < costs.length; k++) if (costs[k] < costs[best]) best = k;
+  let offset = 0;
+  if (best > 0 && best < costs.length - 1) {
+    const [a, b, c] = [costs[best - 1], costs[best], costs[best + 1]];
+    const d = a - 2 * b + c;
+    if (d > 0) offset = Math.max(-0.5, Math.min(0.5, (0.5 * (a - c)) / d));
+  }
+  const finite = costs.filter(Number.isFinite);
+  const mean = finite.reduce((s, c) => s + c, 0) / Math.max(1, finite.length);
+  return { alpha: alphas[best] + offset * step, confidence: mean > 0 ? (mean - costs[best]) / mean : 0 };
 }
