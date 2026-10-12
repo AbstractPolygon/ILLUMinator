@@ -11,7 +11,8 @@ import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe } from './core/defringe.js';
-import { renderSuperRes, estimateVignetting } from './core/superres.js';
+import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
+import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
   lf: null,
@@ -25,6 +26,7 @@ const state = {
   refocusViews: null,
   vignetting: null,
   depth: null,
+  gpu: null, // GpuRenderer when WebGL2 is available
   refocusBuild: null,
   jobs: {},
   scratch: null,
@@ -67,6 +69,7 @@ function equalize(rgb) {
 }
 
 function render(u, v) {
+  if (state.gpu) return state.gpu.renderView(u, v);
   const { lf, dev, sampler } = state;
   const per = sampler.lenses.cx.length * 3;
   if (!state.scratch || state.scratch.length !== per) state.scratch = new Float32Array(per);
@@ -117,6 +120,11 @@ function rebuildSampler() {
   state.refocusViews = null;
   state.vignetting = null;
   state.depth = null;
+  if (state.gpu) {
+    state.vignetting = estimateVignetting(lf.raw, lf.cam, state.dev, lf.grid);
+    const vg = state.vignetting;
+    state.gpu.setSampler(state.sampler, (u, v) => vignettingGainAt(vg, u, v));
+  }
   updateColor();
 }
 
@@ -143,6 +151,7 @@ function summary() {
     height: sampler.outH,
     radius: apertureRadius(),
     settings: state.settings,
+    renderer: state.gpu ? `GPU (${state.gpu.name})` : 'CPU',
   };
 }
 
@@ -163,6 +172,8 @@ async function open({ id, bytes, synthetic }) {
   state.lf = await decodeLightField(data, { onProgress });
   if (state.lf.raw) {
     state.dev = makeDevelopParams(state.lf.cam);
+    if (state.gpu === null && state.settings.gpu !== false) state.gpu = GpuRenderer.create(state.lf.cam) || false;
+    if (state.gpu) state.gpu.setRaw(state.lf.raw, state.lf.cam, state.dev);
     rebuildSampler();
   }
   return summary();
@@ -179,7 +190,7 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
     if (state.jobs.frames !== job) return { cancelled: true };
     const { u, v } = path[i];
     const rgb = aperture > 0
-      ? refocus(state.refocusViews, outW, outH, alpha, apertureOptions({ u, v, aperture }))
+      ? refocusRGB(alpha, apertureOptions({ u, v, aperture }))
       : equalize(render(u, v));
     frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alpha, dof, 1, bokeh));
     await tick();
@@ -199,11 +210,14 @@ async function ensureRefocusViews(id) {
     const build = (async () => {
       const samples = apertureSamples(apertureRadius(), 7);
       const views = [];
+      // On the GPU all views render at once into GPU memory (for refocusing
+      // there); copies are read back for depth estimation on the CPU.
+      const readGpuView = state.gpu ? state.gpu.buildViews(samples, state.settings.detail) : null;
       for (let i = 0; i < samples.length; i++) {
         if (state.sampler !== sampler) return null;
         const { u, v } = samples[i];
         // Stored as 16 bit to keep ~37 full views affordable in memory.
-        const rgb = equalize(render(u, v));
+        const rgb = readGpuView ? readGpuView(i) : equalize(render(u, v));
         const q = new Uint16Array(rgb.length);
         for (let k = 0; k < rgb.length; k++) q[k] = Math.min(65535, rgb[k] * VIEW_SCALE + 0.5);
         views.push({ u, v, rgb: q, gain: 1 / VIEW_SCALE, detail: state.settings.detail });
@@ -222,6 +236,12 @@ async function ensureRefocusViews(id) {
   if (!views || state.sampler !== sampler) return false;
   state.refocusViews = views;
   return true;
+}
+
+// Refocused picture (linear RGB) at `alpha` with aperture options `opts`.
+function refocusRGB(alpha, opts) {
+  if (state.gpu && state.gpu.views) return state.gpu.refocus(alpha, opts);
+  return refocus(state.refocusViews, state.sampler.outW, state.sampler.outH, alpha, opts);
 }
 
 // Synthetic aperture options from a request: viewpoint (u, v) and aperture
@@ -250,7 +270,7 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
   const opts = apertureOptions({ u, v, aperture });
   for (let i = 0; i < alphas.length; i++) {
     if (state.jobs.refocus !== job) return { cancelled: true };
-    const rgb = refocus(state.refocusViews, outW, outH, alphas[i], opts);
+    const rgb = refocusRGB(alphas[i], opts);
     frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh));
     await tick();
   }
@@ -273,7 +293,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   if (!(await ensureDepth(id))) return { cancelled: true };
   const allInFocus = aperture <= 0;
   const opts = apertureOptions({ u, v, aperture });
-  const base = allInFocus ? equalize(render(u, v)) : refocus(state.refocusViews, sampler.outW, sampler.outH, alpha, opts);
+  const base = allInFocus ? equalize(render(u, v)) : refocusRGB(alpha, opts);
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
     scale, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
@@ -294,7 +314,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
   let rgb;
   if (aperture > 0) {
     if (!(await ensureRefocusViews(id))) return { cancelled: true };
-    rgb = refocus(state.refocusViews, state.sampler.outW, state.sampler.outH, alpha, apertureOptions({ u, v, aperture }));
+    rgb = refocusRGB(alpha, apertureOptions({ u, v, aperture }));
   } else {
     rgb = equalize(render(u, v));
   }

@@ -343,3 +343,19 @@ function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, u
   }
   return Math.sqrt(var2 / (n * n));
 }
+
+// Vignetting correction for a whole view at aperture offset (u, v):
+// [r, g, b] gains, bilinear between the table's bins (first tile).
+export function vignettingGainAt(vg, u, v) {
+  const n = vg.bins;
+  const fx = ((u / vg.rMax + 1) / 2) * n - 0.5;
+  const fy = ((v / vg.rMax + 1) / 2) * n - 0.5;
+  const x0 = Math.max(0, Math.min(n - 2, Math.floor(fx)));
+  const y0 = Math.max(0, Math.min(n - 2, Math.floor(fy)));
+  const ax = Math.max(0, Math.min(1, fx - x0));
+  const ay = Math.max(0, Math.min(1, fy - y0));
+  return [0, 1, 2].map((ch) => {
+    const at = (x, y) => vg.gain[(y * n + x) * 3 + ch] || 0;
+    return (at(x0, y0) * (1 - ax) + at(x0 + 1, y0) * ax) * (1 - ay) + (at(x0, y0 + 1) * (1 - ax) + at(x0 + 1, y0 + 1) * ax) * ay;
+  });
+}

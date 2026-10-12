@@ -622,6 +622,7 @@ function renderInfo() {
     rows.push(['Sensor', `${info.cam.width}×${info.cam.height}, ${info.cam.bits} bit`]);
     rows.push(['Views', `${info.width}×${info.height}`]);
     rows.push(['Lens pitch', `${fmt(info.grid.pitch, 3)} px`]);
+    if (info.renderer) rows.push(['Rendering', info.renderer]);
   } else if (info.stacks.length) {
     rows.push(['Content', info.stacks.map((s) => `${s.kind} (${s.images.length})`).join(', ')]);
   }

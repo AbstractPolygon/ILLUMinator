@@ -75,7 +75,7 @@ export function buildSampler(grid, cam, detail = 1, kernel = 1.0) {
       for (let k = 0; k < TAPS; k++) wts[o + k] /= sum || 1;
     }
   }
-  return { grid, lenses, outW, outH, idx, wts, taps: TAPS, spacing, detail, xMin, yMin };
+  return { grid, lenses, outW, outH, idx, wts, taps: TAPS, spacing, detail, xMin, yMin, kernel };
 }
 
 // Maps a sensor position to output image coordinates (used by the UI to draw
