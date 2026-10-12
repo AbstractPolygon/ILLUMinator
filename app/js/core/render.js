@@ -125,19 +125,61 @@ function latticeOrigins(cfa) {
   return out;
 }
 
+// Box sum over a (2r+1)^2 window of lenses on the lens grid.
+function lensBoxSum(src, rows, cols, r) {
+  const tmp = new Float32Array(src.length);
+  const out = new Float32Array(src.length);
+  for (let y = 0; y < rows; y++) {
+    let acc = 0;
+    const row = y * cols;
+    for (let x = -r; x <= r; x++) if (x >= 0 && x < cols) acc += src[row + x];
+    for (let x = 0; x < cols; x++) {
+      tmp[row + x] = acc;
+      if (x + r + 1 < cols) acc += src[row + x + r + 1];
+      if (x - r >= 0) acc -= src[row + x - r];
+    }
+  }
+  for (let x = 0; x < cols; x++) {
+    let acc = 0;
+    for (let y = -r; y <= r; y++) if (y >= 0 && y < rows) acc += tmp[y * cols + x];
+    for (let y = 0; y < rows; y++) {
+      out[y * cols + x] = acc;
+      if (y + r + 1 < rows) acc += tmp[(y + r + 1) * cols + x];
+      if (y - r >= 0) acc -= tmp[(y - r) * cols + x];
+    }
+  }
+  return out;
+}
+
+const CHROMA_RADIUS = 3; // lenses
+const LUMA_SIGMA = 0.9; // sensor pixels
+
 // Linear RGB for each lens at offset (u, v) (sensor pixels, grid axes).
+//
+// Lenses are 14.29 pixels apart but the color filter pattern repeats every 2,
+// so each lens samples the pattern at a slightly different place. Very sharp
+// detail inside a lens image (a bright point such as the sun in lens flare
+// can be a single pixel) lands on a red, green or blue pixel depending on
+// the lens, and plain demosaicing turns that into red and blue stripes. So:
+//  - color is averaged over neighboring lenses, which see the same detail
+//    through every filter color;
+//  - brightness comes from every raw pixel near the sample point, each
+//    converted to brightness using that color, so it does not depend on
+//    which filter a detail landed on.
 function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
   const { width, height } = cam;
   const cos = Math.cos(grid.rotation);
   const sin = Math.sin(grid.rotation);
   const du = cos * u - sin * v;
   const dv = sin * u + cos * v;
-  const origins = latticeOrigins(dev.cfa);
-  const [rO, gO, bO] = origins;
-  const [bR, bG, bB] = dev.black;
-  const [sR, sG, sB] = dev.scale;
+  const [rO, gO, bO] = latticeOrigins(dev.cfa);
+  const { black, scale } = dev;
   const clip = dev.clip ?? Infinity;
   const n = lenses.cx.length;
+  const R = new Float32Array(n);
+  const G = new Float32Array(n);
+  const B = new Float32Array(n);
+  const Y = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const x = lenses.cx[i] + du;
     const y = lenses.cy[i] + dv;
@@ -146,9 +188,52 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
     for (const [gx, gy] of gO) g += sampleLattice(raw, width, height, gx, gy, x, y);
     g /= gO.length;
     const b = sampleLattice(raw, width, height, bO[0][0], bO[0][1], x, y);
-    out[3 * i] = Math.min(clip, Math.max(0, (r - bR) * sR));
-    out[3 * i + 1] = Math.min(clip, Math.max(0, (g - bG) * sG));
-    out[3 * i + 2] = Math.min(clip, Math.max(0, (b - bB) * sB));
+    R[i] = Math.min(clip, Math.max(0, (r - black[0]) * scale[0]));
+    G[i] = Math.min(clip, Math.max(0, (g - black[1]) * scale[1]));
+    B[i] = Math.min(clip, Math.max(0, (b - black[2]) * scale[2]));
+    Y[i] = 0.2126 * R[i] + 0.7152 * G[i] + 0.0722 * B[i];
+  }
+  // Neighborhood color as fractions of brightness.
+  const { rows, cols } = lenses;
+  const sR = lensBoxSum(R, rows, cols, CHROMA_RADIUS);
+  const sG = lensBoxSum(G, rows, cols, CHROMA_RADIUS);
+  const sB = lensBoxSum(B, rows, cols, CHROMA_RADIUS);
+  const sY = lensBoxSum(Y, rows, cols, CHROMA_RADIUS);
+  const reach = Math.ceil(2 * LUMA_SIGMA);
+  const inv2s2 = 1 / (2 * LUMA_SIGMA * LUMA_SIGMA);
+  for (let i = 0; i < n; i++) {
+    const yN = sY[i];
+    if (!(yN > 1e-9)) {
+      out[3 * i] = out[3 * i + 1] = out[3 * i + 2] = 0;
+      continue;
+    }
+    const frac = [sR[i] / yN, sG[i] / yN, sB[i] / yN];
+    // Brightness per unit of each channel's value, from the local color.
+    const toY = frac.map((f) => (f > 1e-4 ? 1 / f : 0));
+    const x = lenses.cx[i] + du;
+    const y = lenses.cy[i] + dv;
+    const x0 = Math.round(x);
+    const y0 = Math.round(y);
+    let acc = 0;
+    let wsum = 0;
+    for (let yy = y0 - reach; yy <= y0 + reach; yy++) {
+      if (yy < 0 || yy >= height) continue;
+      const ey = yy - y;
+      const crow = dev.cfa[yy & 1];
+      for (let xx = x0 - reach; xx <= x0 + reach; xx++) {
+        if (xx < 0 || xx >= width) continue;
+        const ex = xx - x;
+        const w = Math.exp(-(ex * ex + ey * ey) * inv2s2);
+        const ch = crow[xx & 1];
+        const val = Math.min(clip, Math.max(0, (raw[yy * width + xx] - black[ch]) * scale[ch]));
+        acc += w * val * toY[ch];
+        wsum += w;
+      }
+    }
+    const lum = wsum > 0 ? Math.min(clip, acc / wsum) : Y[i];
+    out[3 * i] = lum * frac[0];
+    out[3 * i + 1] = lum * frac[1];
+    out[3 * i + 2] = lum * frac[2];
   }
 }
 

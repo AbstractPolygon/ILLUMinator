@@ -36,8 +36,28 @@ function boxSum(src, w, h, r) {
   return out;
 }
 
+// Fine detail of a view: brightness minus its local (9x9) average. Views
+// from different parts of the lens can differ in overall brightness (lens
+// flare veils some more than others); comparing only detail ignores that.
+// Returns { detail, local } where local is the local average.
+function detailOf(lum, w, h) {
+  const local = boxSum(lum, w, h, 4);
+  const detail = new Float32Array(lum.length);
+  for (let i = 0; i < lum.length; i++) detail[i] = lum[i] - local[i];
+  return { detail, local };
+}
+
+// (15% of the picture's mean brightness)^2: the smallest brightness the
+// depth measures normalize by.
+function brightnessFloor(lum) {
+  let s = 0;
+  for (let i = 0; i < lum.length; i++) s += lum[i];
+  const mean = s / Math.max(1, lum.length);
+  return (0.15 * mean) ** 2 + 1e-8;
+}
+
 // Mean squared deviation of the shifted views from their mean, per pixel.
-function angularVariance(lums, views, w, h, alpha) {
+function angularVariance(lums, views, w, h, alpha, floor, level) {
   const sum = new Float32Array(w * h);
   const sq = new Float32Array(w * h);
   const cnt = new Float32Array(w * h);
@@ -69,8 +89,9 @@ function angularVariance(lums, views, w, h, alpha) {
   for (let i = 0; i < out.length; i++) {
     const n = cnt[i] || 1;
     const m = sum[i] / n;
-    // Relative to brightness so dark and bright regions are judged alike.
-    out[i] = Math.max(0, sq[i] / n - m * m) / (m * m + 1e-4);
+    // Relative to local brightness so dark and bright regions are judged
+    // alike, but not below `floor`: in dark areas that amplifies noise.
+    out[i] = Math.max(0, sq[i] / n - m * m) / (level[i] * level[i] + floor);
   }
   return out;
 }
@@ -93,16 +114,50 @@ function fillSmooth(values, conf, w, h, r) {
   return out;
 }
 
+// 5x5 median: removes isolated speckles of wrong depth.
+function median5(src, w, h) {
+  const out = new Float32Array(src.length);
+  const win = new Float32Array(25);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let k = 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        const yy = Math.min(h - 1, Math.max(0, y + dy));
+        for (let dx = -2; dx <= 2; dx++) win[k++] = src[yy * w + Math.min(w - 1, Math.max(0, x + dx))];
+      }
+      win.sort();
+      out[y * w + x] = win[12];
+    }
+  }
+  return out;
+}
+
+// Replaces blobs that disagree strongly with their wider neighborhood (a
+// confidence-weighted smooth reference): depth edges between real objects
+// differ far less than these failures, which jump to the ends of the range.
+function removeOutliers(alpha, confidence, w, h, threshold = 0.45) {
+  const reference = fillSmooth(alpha, confidence.map((c) => c + 1e-3), w, h, 10);
+  const out = new Float32Array(alpha);
+  for (let i = 0; i < out.length; i++) {
+    if (Math.abs(out[i] - reference[i]) > threshold) out[i] = reference[i];
+  }
+  return out;
+}
+
 // views: [{ u, v, rgb, gain, detail }] as used by refocus().
 // Returns { alpha: Float32Array (per pixel), confidence: Float32Array }.
 export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, steps = 33, window = 3, onProgress } = {}) {
   const n = width * height;
   const alphas = Array.from({ length: steps }, (_, i) => min + ((max - min) * i) / (steps - 1));
-  const lums = views.map((v) => luminance(v.rgb, n).map((x) => x * v.gain));
+  const raw = views.map((v) => luminance(v.rgb, n).map((x) => x * v.gain));
+  const center = raw[Math.floor(raw.length / 2)];
+  const minLevel = brightnessFloor(center);
+  const level = detailOf(center, width, height).local;
+  const lums = raw.map((l) => detailOf(l, width, height).detail);
   // Higher score = better agreement.
   const scores = alphas.map((a, k) => {
     if (onProgress) onProgress(k / steps);
-    const cost = boxSum(angularVariance(lums, views, width, height, a), width, height, window);
+    const cost = boxSum(angularVariance(lums, views, width, height, a, minLevel, level), width, height, window);
     for (let i = 0; i < n; i++) cost[i] = -cost[i];
     return cost;
   });
@@ -145,7 +200,8 @@ export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, ste
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
   if (onProgress) onProgress(1);
-  return { alpha: fillSmooth(alpha, new Float32Array(n).fill(1), width, height, 1), confidence, range: [min, max] };
+  const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height);
+  return { alpha: fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1), confidence, range: [min, max] };
 }
 
 // Focus value that makes the neighborhood of (x, y) sharpest, measured
@@ -153,7 +209,11 @@ export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, ste
 // spot than the smoothed depth map). Returns { alpha, confidence }.
 export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2, step = 0.025, radius = 5 } = {}) {
   const n = width * height;
-  const lums = views.map((v) => luminance(v.rgb, n).map((l) => l * v.gain));
+  const raw = views.map((v) => luminance(v.rgb, n).map((l) => l * v.gain));
+  const center = raw[Math.floor(raw.length / 2)];
+  const floor = brightnessFloor(center);
+  const level = detailOf(center, width, height).local;
+  const lums = raw.map((l) => detailOf(l, width, height).detail);
   const cx = Math.round(x);
   const cy = Math.round(y);
   const costs = [];
@@ -184,7 +244,8 @@ export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2
         }
         if (m < 2) continue;
         const mean = sum / m;
-        cost += Math.max(0, sq / m - mean * mean) / (mean * mean + 1e-4);
+        const lv = level[Math.max(0, Math.min(height - 1, yy)) * width + Math.max(0, Math.min(width - 1, xx))];
+        cost += Math.max(0, sq / m - mean * mean) / (lv * lv + floor);
         count++;
       }
     }

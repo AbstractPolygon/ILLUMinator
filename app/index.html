@@ -56,19 +56,70 @@
     </section>
 
     <aside class="controls">
-      <section data-panel="camera">
-        <h2>Camera</h2>
-        <p class="hint">Drag the picture to change the viewpoint. Click to focus on a point. Double-click to recenter.</p>
+      <details class="panel" open>
+        <summary><h2>Histogram</h2></summary>
+        <canvas id="histogram" width="256" height="80" role="img" aria-label="Histogram of the picture"></canvas>
+      </details>
+
+      <details class="panel" data-panel="camera" open>
+        <summary><h2>Camera</h2></summary>
         <label>Focus <input id="focus" type="range" min="-1.6" max="1.6" step="0.02" value="0"></label>
         <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
-          <input id="fstop" type="range" min="0" max="11" step="1" value="0" aria-describedby="fstop-hint">
+          <input id="fstop" type="range" min="0" max="11" step="1" value="0">
         </label>
-        <p id="fstop-hint" class="hint">Small apertures (f/22) keep everything sharp. Wider apertures narrow the depth of field. Past the camera's own aperture, the blur is simulated from the depth map.</p>
-        <div class="row">
-          <button id="depth-btn" aria-pressed="false" title="Show the depth map (D)">Show depth</button>
-        </div>
+        <label>Bokeh
+          <select id="bokeh">
+            <option value="natural">Natural</option>
+            <option value="circle">Circle</option>
+            <option value="hexagon">Hexagon</option>
+          </select>
+        </label>
+        <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+        <label class="check"><input id="depth-btn" type="checkbox"> Show depth</label>
         <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
-        <h2>Animation</h2>
+      </details>
+
+      <details class="panel" id="fullres-panel" open hidden>
+        <summary><h2>Full resolution</h2></summary>
+        <label>Scale
+          <select id="still-scale">
+            <option value="2">2× lens grid</option>
+            <option value="3" selected>3× lens grid</option>
+            <option value="4">4× lens grid</option>
+          </select>
+        </label>
+        <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
+      </details>
+
+      <details class="panel" open>
+        <summary><h2>Color</h2></summary>
+        <label>Exposure <input id="ev" type="range" min="-3" max="3" step="0.1" value="0"></label>
+        <label>Saturation <input id="saturation" type="range" min="0" max="2" step="0.05" value="1"></label>
+        <label class="check"><input id="ccm" type="checkbox" checked> Camera color matrix</label>
+        <label class="check"><input id="awb" type="checkbox"> Auto white balance</label>
+        <label>Detail
+          <select id="detail">
+            <option value="1" selected>1× (fast)</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+      </details>
+
+      <details class="panel">
+        <summary><h2>Defringe</h2></summary>
+        <label>Purple amount <input id="fringe-purple" type="range" min="0" max="1" step="0.05" value="0"></label>
+        <label>Purple hue <output id="fringe-purple-hue-label" for="fringe-purple-hue">300°</output>
+          <input id="fringe-purple-hue" type="range" min="240" max="340" step="5" value="300">
+        </label>
+        <label>Green amount <input id="fringe-green" type="range" min="0" max="1" step="0.05" value="0"></label>
+        <label>Green hue <output id="fringe-green-hue-label" for="fringe-green-hue">100°</output>
+          <input id="fringe-green-hue" type="range" min="50" max="160" step="5" value="100">
+        </label>
+      </details>
+
+      <details class="panel" data-panel="camera" open>
+        <summary><h2>Animation</h2></summary>
         <label>Animate
           <select id="anim">
             <option value="viewpoint">Viewpoint</option>
@@ -93,22 +144,10 @@
           <label>Far <input id="far" type="range" min="0" max="1.6" step="0.05" value="0.6"></label>
           <label>Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
         </div>
-      </section>
+      </details>
 
-      <section id="fullres-panel" hidden>
-        <h2>Full resolution</h2>
-        <label>Scale
-          <select id="still-scale">
-            <option value="2">2× lens grid</option>
-            <option value="3" selected>3× lens grid</option>
-            <option value="4">4× lens grid</option>
-          </select>
-        </label>
-        <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0). Click the picture to focus on that point; the Focus slider applies.</p>
-      </section>
-
-      <section data-panel="lenslets" hidden>
-        <h2>Microlens grid</h2>
+      <details class="panel" data-panel="lenslets" open hidden>
+        <summary><h2>Microlens grid</h2></summary>
         <p id="grid-info" class="hint"></p>
         <label>X <input id="lens-x" type="range" min="0" max="1" step="0.001" value="0.5"></label>
         <label>Y <input id="lens-y" type="range" min="0" max="1" step="0.001" value="0.5"></label>
@@ -116,27 +155,12 @@
           <button id="grid-auto">Recalibrate</button>
           <button id="grid-meta">Use metadata</button>
         </div>
-      </section>
+      </details>
 
-      <section>
-        <h2>Color</h2>
-        <label>Exposure <input id="ev" type="range" min="-3" max="3" step="0.1" value="0"></label>
-        <label>Saturation <input id="saturation" type="range" min="0" max="2" step="0.05" value="1"></label>
-        <label class="check"><input id="ccm" type="checkbox" checked> Camera color matrix</label>
-        <label class="check"><input id="awb" type="checkbox"> Auto white balance</label>
-        <label>Detail
-          <select id="detail">
-            <option value="1" selected>1× (fast)</option>
-            <option value="1.5">1.5×</option>
-            <option value="2">2×</option>
-          </select>
-        </label>
-      </section>
-
-      <section>
-        <h2>Info</h2>
+      <details class="panel" open>
+        <summary><h2>Info</h2></summary>
         <dl id="info"></dl>
-      </section>
+      </details>
     </aside>
   </main>
 

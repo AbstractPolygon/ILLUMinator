@@ -10,13 +10,14 @@ import {
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
+import { defringe } from './core/defringe.js';
 import { renderSuperRes, estimateVignetting } from './core/superres.js';
 
 const state = {
   lf: null,
   sampler: null,
   dev: null,
-  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1 },
+  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null },
   baseExposure: 1,
   matrix: null,
   wbGains: [1, 1, 1],
@@ -84,13 +85,29 @@ function updateColor() {
   state.baseExposure = autoExposure(center, state.matrix);
 }
 
-function toPixels(rgb) {
+const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+// Linear camera RGB (w x h) -> displayable RGBA bytes.
+function toPixels(rgb, w, h) {
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
-  return toneMap(rgb, state.matrix, exposure);
+  const f = state.settings.defringe;
+  if (!f || (!(f.purple > 0) && !(f.green > 0))) return toneMap(rgb, state.matrix, exposure);
+  // Defringing judges hue in output colors, so apply the color matrix first.
+  const m = state.matrix;
+  const srgb = new Float32Array(rgb.length);
+  for (let i = 0; i < rgb.length; i += 3) {
+    const r = rgb[i];
+    const g = rgb[i + 1];
+    const b = rgb[i + 2];
+    srgb[i] = m[0] * r + m[1] * g + m[2] * b;
+    srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
+    srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
+  }
+  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure);
 }
 
 function frameMessage(id, index, rgb) {
-  const pixels = toPixels(rgb);
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH);
   post({ id, type: 'frame', index, width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
 }
 
@@ -153,7 +170,7 @@ async function open({ id, bytes, synthetic }) {
 
 // Viewpoint animation along `path`; with an open aperture each frame is
 // refocused at `alpha` through an aperture around the path point.
-async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0 }) {
+async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }) {
   requireRaw();
   state.jobs.frames = job;
   if (aperture > 0 && !(await ensureRefocusViews(id))) return { cancelled: true };
@@ -164,7 +181,7 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0 }) {
     const rgb = aperture > 0
       ? refocus(state.refocusViews, outW, outH, alpha, apertureOptions({ u, v, aperture }))
       : equalize(render(u, v));
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alpha, dof));
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alpha, dof, 1, bokeh));
     await tick();
   }
   return { done: true };
@@ -215,14 +232,17 @@ function apertureOptions({ u = 0, v = 0, aperture = 1 }) {
 
 // Narrows the depth of field synthetically (strength `dof`, 0 = off) around
 // focus value `alpha`; `scale` is the image's size relative to the views.
-async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1) {
+// `bokeh` is { shape: 'smooth' | 'circle' | 'hexagon', highlights: 0..1 }.
+async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}) {
   if (!(dof > 0)) return rgb;
   if (!(await ensureDepth(id))) return rgb;
   const { outW, outH } = state.sampler;
-  return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail);
+  return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail, {
+    shape: bokeh.shape, highlights: bokeh.highlights, clip: state.dev.clip,
+  });
 }
 
-async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0 }) {
+async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }) {
   requireRaw();
   state.jobs.refocus = job;
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
@@ -231,7 +251,7 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0 }) {
   for (let i = 0; i < alphas.length; i++) {
     if (state.jobs.refocus !== job) return { cancelled: true };
     const rgb = refocus(state.refocusViews, outW, outH, alphas[i], opts);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof));
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh));
     await tick();
   }
   return { done: true };
@@ -241,7 +261,7 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0 }) {
 // its refocused position. With the aperture closed every depth is kept sharp
 // (each lens uses the depth under it); otherwise the picture is refocused at
 // `alpha` with detail where it is in focus and smooth blur elsewhere.
-async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0 }) {
+async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh }) {
   requireRaw();
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
@@ -261,15 +281,15 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   });
   if (state.jobs.superres !== job) return { cancelled: true };
   if (dof > 0) progress('Applying depth of field', 1);
-  const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail);
-  const pixels = toPixels(rgb);
+  const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
+  const pixels = toPixels(rgb, sr.width, sr.height);
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
 
 // One picture for the interactive camera: a single view when the aperture
 // is closed, otherwise refocused at `alpha` through an aperture around (u, v).
-async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0 }) {
+async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
   requireRaw();
   let rgb;
   if (aperture > 0) {
@@ -278,8 +298,8 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0 }) {
   } else {
     rgb = equalize(render(u, v));
   }
-  rgb = await withDepthOfField(id, rgb, state.sampler.outW, state.sampler.outH, alpha, dof);
-  const pixels = toPixels(rgb);
+  rgb = await withDepthOfField(id, rgb, state.sampler.outW, state.sampler.outH, alpha, dof, 1, bokeh);
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH);
   post({ id, type: 'result', width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
@@ -415,11 +435,19 @@ async function focusAt({ id, x, y, u = 0, v = 0 }) {
   return { alpha: state.depth.alpha[yi * outW + xi], confidence: est.confidence };
 }
 
+// Builds the views used by refocusing and click-to-focus in the background
+// after a photo opens, so the first click or aperture change is quick. The
+// build yields between views, so other requests are served meanwhile.
+async function prepare({ id }) {
+  if (!state.lf || !state.lf.raw) return { done: false };
+  return { done: await ensureRefocusViews(id) };
+}
+
 async function readSection({ ref }) {
   return state.lf ? state.lf.readSection(ref) : null;
 }
 
-const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

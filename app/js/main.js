@@ -5,7 +5,7 @@ import { openFiles, pickCameraFolder, isLightFieldName, download, native } from 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
 const canvas = $('view');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
 const state = {
   info: null,
@@ -121,6 +121,7 @@ function resetView() {
 
 function closePhoto() {
   resetView();
+  $('histogram').getContext('2d').clearRect(0, 0, 256, 80);
   state.current = null;
   canvas.classList.add('hidden');
   $('placeholder').hidden = false;
@@ -144,6 +145,7 @@ async function openWith(args, transfer) {
       throw new Error('The file contains no light field image.');
     }
     setMode(state.mode);
+    if (info.hasRaw) engine.request('prepare').catch(() => {});
   } catch (err) {
     showError(err);
   }
@@ -169,6 +171,57 @@ function draw(img) {
   if (img instanceof ImageData) ctx.putImageData(img, 0, 0);
   else ctx.drawImage(img, 0, 0);
   canvas.classList.remove('hidden');
+  scheduleHistogram();
+}
+
+// ---------------------------------------------------------------- histogram
+
+let histogramQueued = false;
+
+// At most once per frame: the picture can change on every pointer move.
+function scheduleHistogram() {
+  if (histogramQueued) return;
+  histogramQueued = true;
+  requestAnimationFrame(() => {
+    histogramQueued = false;
+    drawHistogram();
+  });
+}
+
+// RGB histogram of what the picture currently shows.
+function drawHistogram() {
+  const hc = $('histogram');
+  const hctx = hc.getContext('2d');
+  hctx.clearRect(0, 0, hc.width, hc.height);
+  const w = canvas.width;
+  const h = canvas.height;
+  if (!state.info || !w || !h || canvas.classList.contains('hidden')) return;
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const bins = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  // Sample about 250k pixels at most.
+  const step = Math.max(1, Math.floor((w * h) / 250000)) * 4;
+  for (let i = 0; i < data.length; i += step) {
+    bins[0][data[i]]++;
+    bins[1][data[i + 1]]++;
+    bins[2][data[i + 2]]++;
+  }
+  // Scale to the tallest bin, ignoring the clipped ends, with a square root
+  // so shadows and highlights stay readable.
+  let max = 1;
+  for (const b of bins) for (let i = 1; i < 255; i++) max = Math.max(max, b[i]);
+  const H = hc.height;
+  const colors = ['rgba(255, 90, 90, 0.75)', 'rgba(90, 220, 110, 0.75)', 'rgba(100, 150, 255, 0.75)'];
+  hctx.globalCompositeOperation = 'lighter';
+  bins.forEach((b, c) => {
+    hctx.fillStyle = colors[c];
+    hctx.beginPath();
+    hctx.moveTo(0, H);
+    for (let i = 0; i < 256; i++) hctx.lineTo(i, H - Math.min(1, Math.sqrt(b[i] / max)) * (H - 2));
+    hctx.lineTo(255, H);
+    hctx.closePath();
+    hctx.fill();
+  });
+  hctx.globalCompositeOperation = 'source-over';
 }
 
 // Aperture stops offered by the f-stop slider, smallest aperture first.
@@ -185,10 +238,13 @@ function fNumber() {
 function apertureFor(n) {
   const native = (state.info && state.info.cam && state.info.cam.capture && state.info.cam.capture.fNumber) || 2;
   const ratio = native / n;
+  const radius = state.info ? state.info.radius : 4.5;
+  // A shaped bokeh is drawn from the depth map at every aperture, from the
+  // sharp single view.
+  if ($('bokeh').value !== 'natural') return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
   // About one view's worth of the aperture: render that single view (fast).
   if (ratio < 0.15) return { aperture: 0, dof: 0 };
   if (ratio <= 1) return { aperture: ratio, dof: 0 };
-  const radius = state.info ? state.info.radius : 4.5;
   return { aperture: 1, dof: (radius * (ratio - 1)) / 14 };
 }
 
@@ -204,6 +260,7 @@ function cameraParams() {
     v: state.camera.v,
     alpha: +$('focus').value,
     ...apertureFor(fNumber()),
+    bokeh: { shape: $('bokeh').value === 'natural' ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value },
   };
 }
 
@@ -268,7 +325,7 @@ function animationRequest() {
     const alphas = Array.from({ length: n }, (_, i) => near + ((far - near) * i) / (n - 1));
     // A small aperture would show little change: sweep at least wide open.
     const aperture = Math.max(p.aperture, 1);
-    return { type: 'refocusFrames', kind: 'refocus', loop: 'pingpong', values: alphas, args: { alphas, u: p.u, v: p.v, aperture, dof: p.dof } };
+    return { type: 'refocusFrames', kind: 'refocus', loop: 'pingpong', values: alphas, args: { alphas, u: p.u, v: p.v, aperture, dof: p.dof, bokeh: p.bokeh } };
   }
   const n = +$('frames').value;
   const r = state.info.radius * +$('amount').value;
@@ -276,7 +333,7 @@ function animationRequest() {
     const [x, y] = pathPoint($('path').value, i / n);
     return { u: x * r, v: y * r };
   });
-  return { type: 'frames', kind: 'frames', loop: 'loop', values: [], args: { path, alpha: p.alpha, aperture: p.aperture, dof: p.dof } };
+  return { type: 'frames', kind: 'frames', loop: 'loop', values: [], args: { path, alpha: p.alpha, aperture: p.aperture, dof: p.dof, bokeh: p.bokeh } };
 }
 
 function resetAnimation() {
@@ -468,11 +525,13 @@ async function renderDepth() {
 }
 
 function setDepthShown(on, { restore = true } = {}) {
-  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) return;
+  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) {
+    $('depth-btn').checked = false;
+    return;
+  }
   if (on === state.depthShown) return;
   state.depthShown = on;
-  $('depth-btn').setAttribute('aria-pressed', String(on));
-  $('depth-btn').textContent = on ? 'Hide depth' : 'Show depth';
+  $('depth-btn').checked = on;
   $('depth-legend').hidden = !on;
   if (on) {
     setPlaying(false);
@@ -511,6 +570,7 @@ async function renderLenslets() {
     ctx.stroke();
   }
   canvas.classList.remove('hidden');
+  scheduleHistogram();
   $('frame-label').textContent = `sensor ${msg.x0}–${msg.x0 + size}, ${msg.y0}–${msg.y0 + size}`;
 }
 
@@ -523,7 +583,7 @@ function setMode(mode) {
   const raw = !!(state.info && state.info.hasRaw);
   for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
   const camera = mode === 'camera';
-  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop']) $(id).disabled = !raw || !camera;
+  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'highlights']) $(id).disabled = !raw || !camera;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -829,7 +889,7 @@ function cameraChanged({ final }) {
   }
 }
 
-for (const id of ['focus', 'fstop']) {
+for (const id of ['focus', 'fstop', 'bokeh', 'highlights']) {
   $(id).oninput = () => {
     showFNumber();
     cameraChanged({ final: false });
@@ -961,7 +1021,7 @@ $('scrub').oninput = () => {
 $('png-btn').onclick = savePng;
 $('webm-btn').onclick = exportVideo;
 $('fullres-btn').onclick = () => setFullRes(!state.fullRes);
-$('depth-btn').onclick = () => setDepthShown(!state.depthShown);
+$('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
 $('still-scale').onchange = () => state.fullRes && renderStill();
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
@@ -997,7 +1057,15 @@ async function applySettings() {
     useCcm: $('ccm').checked,
     autoWb: $('awb').checked,
     detail: +$('detail').value,
+    defringe: {
+      purple: +$('fringe-purple').value,
+      purpleHue: +$('fringe-purple-hue').value,
+      green: +$('fringe-green').value,
+      greenHue: +$('fringe-green-hue').value,
+    },
   };
+  $('fringe-purple-hue-label').textContent = `${settings.defringe.purpleHue}°`;
+  $('fringe-green-hue-label').textContent = `${settings.defringe.greenHue}°`;
   if (!state.info || !state.info.hasRaw) return;
   const info = await engine.request('settings', { settings });
   if (info) state.info = { ...state.info, ...info };
@@ -1006,7 +1074,8 @@ async function applySettings() {
   if (state.showingFrames) backToCamera();
   refresh();
 }
-for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail']) $(id).onchange = applySettings;
+for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail', 'fringe-purple', 'fringe-purple-hue', 'fringe-green', 'fringe-green-hue']) $(id).onchange = applySettings;
+for (const id of ['fringe-purple-hue', 'fringe-green-hue']) $(id).oninput = () => { $(`${id}-label`).textContent = `${$(id).value}°`; };
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea')) return;

@@ -34,10 +34,16 @@ async function walkDirectory(handle, prefix, out) {
 // Ask the user to pick it (or its DCIM folder) and collect light field files.
 export async function pickCameraFolder() {
   if (window.showDirectoryPicker) {
-    const dir = await window.showDirectoryPicker({ id: 'lytro-camera', mode: 'read' });
-    const out = [];
-    await walkDirectory(dir, dir.name + '/', out);
-    return { source: dir.name, files: out };
+    try {
+      const dir = await window.showDirectoryPicker({ id: 'lytro-camera', mode: 'read' });
+      const out = [];
+      await walkDirectory(dir, dir.name + '/', out);
+      return { source: dir.name, files: out };
+    } catch (err) {
+      // Cancelled by the user: stop. Not allowed here (e.g. inside an
+      // embedded frame): fall back to the folder input below.
+      if (err && err.name === 'AbortError') throw err;
+    }
   }
   const files = await pickWithInput(document.getElementById('dir-input'));
   return {

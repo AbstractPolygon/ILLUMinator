@@ -65,7 +65,30 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: 
 /* Sections in the right sidebar are spaced by a gap, so the first visible
    heading lines up with "Photos" whichever sections are hidden. */
 .controls { display: flex; flex-direction: column; gap: 10px; }
-.controls section > h2:first-child, .library h2 { margin-top: 4px; }
+.library h2 { margin-top: 4px; }
+
+/* Collapsible sidebar sections. */
+.panel > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 4px;
+}
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary h2 { margin: 4px 0 8px; }
+.panel > summary::after {
+  content: "";
+  width: 6px; height: 6px;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg); margin: 0 4px 6px 0;
+  transition: transform 0.12s;
+}
+.panel:not([open]) > summary::after { transform: rotate(-45deg); margin-bottom: 2px; }
+.panel > summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.panel:not([open]) > summary h2 { margin-bottom: 4px; }
+#histogram { display: block; width: 100%; height: 80px; border-radius: 6px; background: #0b0c0e; border: 1px solid var(--line); }
 
 #library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 #library-list li {
