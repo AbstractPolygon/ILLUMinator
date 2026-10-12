@@ -140,6 +140,7 @@ function draw(img) {
   if (canvas.width !== img.width || canvas.height !== img.height) {
     canvas.width = img.width;
     canvas.height = img.height;
+    layoutCanvas();
   }
   if (img instanceof ImageData) ctx.putImageData(img, 0, 0);
   else ctx.drawImage(img, 0, 0);
@@ -307,6 +308,7 @@ async function renderLenslets() {
   img.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(msg.pixels), size, size), 0, 0);
   canvas.width = size * zoom;
   canvas.height = size * zoom;
+  layoutCanvas();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, 0, 0, size * zoom, size * zoom);
   ctx.imageSmoothingEnabled = true;
@@ -332,6 +334,7 @@ function setMode(mode) {
     b.disabled = !state.info || (!raw && !['perspective', 'refocus'].includes(b.dataset.mode));
   }
   if (!state.info) return;
+  layoutCanvas();
   stopFrames();
   const animated = mode === 'perspective' || mode === 'refocus';
   $('play-btn').disabled = !animated;
@@ -395,6 +398,112 @@ function renderGridInfo() {
     `centre (${fmt(g.ox, 2)}, ${fmt(g.oy, 2)}). Alignment score ${fmt(info.gridQuality, 3)}.`;
 }
 
+// ---------------------------------------------------------------- zoom
+
+// Zoom is a multiple of the fit-to-window scale, and the view centre is kept
+// in normalised image coordinates, so both survive switching between the
+// animation frames and a larger full resolution still.
+const view = { k: 1, cx: 0.5, cy: 0.5 };
+const viewer = $('drop-zone');
+const MAX_SCALE = 16;
+
+function fitScale() {
+  const vw = viewer.clientWidth;
+  const vh = viewer.clientHeight;
+  return Math.min(vw / canvas.width, vh / canvas.height) || 1;
+}
+
+function clampView(w, h) {
+  const vw = viewer.clientWidth;
+  const vh = viewer.clientHeight;
+  view.cx = w <= vw ? 0.5 : Math.min(1 - vw / (2 * w), Math.max(vw / (2 * w), view.cx));
+  view.cy = h <= vh ? 0.5 : Math.min(1 - vh / (2 * h), Math.max(vh / (2 * h), view.cy));
+}
+
+function layoutCanvas() {
+  const fit = fitScale();
+  view.k = Math.min(MAX_SCALE / fit, Math.max(1, view.k));
+  const scale = fit * view.k;
+  const w = canvas.width * scale;
+  const h = canvas.height * scale;
+  clampView(w, h);
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+  canvas.style.left = `${viewer.clientWidth / 2 - view.cx * w}px`;
+  canvas.style.top = `${viewer.clientHeight / 2 - view.cy * h}px`;
+  // Show real pixels when inspecting detail.
+  canvas.style.imageRendering = scale >= 2 ? 'pixelated' : 'auto';
+  canvas.classList.toggle('pannable', view.k > 1 && state.mode !== 'explore');
+  $('zoom-label').textContent = view.k === 1 ? 'Fit' : `${Math.round(scale * 100)}%`;
+  $('zoom-out').disabled = view.k <= 1;
+  $('zoom-in').disabled = scale >= MAX_SCALE - 1e-6;
+}
+
+// Zooms by `factor`, keeping the image point under (mx, my) (viewer
+// coordinates) in place; defaults to the middle of the viewer.
+function zoomBy(factor, mx = viewer.clientWidth / 2, my = viewer.clientHeight / 2) {
+  const fit = fitScale();
+  const before = fit * view.k;
+  const w = canvas.width * before;
+  const h = canvas.height * before;
+  const left = viewer.clientWidth / 2 - view.cx * w;
+  const top = viewer.clientHeight / 2 - view.cy * h;
+  const px = (mx - left) / w;
+  const py = (my - top) / h;
+  view.k = Math.min(MAX_SCALE / fit, Math.max(1, view.k * factor));
+  const after = fit * view.k;
+  view.cx = px - (mx - viewer.clientWidth / 2) / (canvas.width * after);
+  view.cy = py - (my - viewer.clientHeight / 2) / (canvas.height * after);
+  layoutCanvas();
+}
+
+function zoomFit() {
+  view.k = 1;
+  layoutCanvas();
+}
+
+function zoomActual() {
+  view.k = 1 / fitScale();
+  layoutCanvas();
+}
+
+viewer.addEventListener('wheel', (event) => {
+  if (!state.info) return;
+  event.preventDefault();
+  const rect = viewer.getBoundingClientRect();
+  zoomBy(Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015)), event.clientX - rect.left, event.clientY - rect.top);
+}, { passive: false });
+
+// Drag to pan when zoomed in (Shift+drag in Explore mode, where a plain drag
+// changes the viewpoint). A drag suppresses the click that follows it.
+let suppressClick = false;
+function startPan(event) {
+  const scale = fitScale() * view.k;
+  const start = { x: event.clientX, y: event.clientY, cx: view.cx, cy: view.cy };
+  let moved = false;
+  canvas.setPointerCapture(event.pointerId);
+  canvas.classList.add('panning');
+  canvas.onpointermove = (e) => {
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.hypot(dx, dy) > 3) moved = true;
+    view.cx = start.cx - dx / (canvas.width * scale);
+    view.cy = start.cy - dy / (canvas.height * scale);
+    layoutCanvas();
+  };
+  canvas.onpointerup = () => {
+    canvas.onpointermove = null;
+    canvas.classList.remove('panning');
+    suppressClick = moved;
+  };
+}
+
+new ResizeObserver(() => layoutCanvas()).observe(viewer);
+$('zoom-in').onclick = () => zoomBy(1.5);
+$('zoom-out').onclick = () => zoomBy(1 / 1.5);
+$('zoom-label').onclick = zoomFit;
+$('zoom-1').onclick = zoomActual;
+
 // ---------------------------------------------------------------- picking
 
 function canvasPoint(event) {
@@ -455,6 +564,10 @@ async function focusStillAt(x, y) {
 }
 
 canvas.addEventListener('click', (event) => {
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
   if (!state.info) return;
   const [x, y] = canvasPoint(event);
   if (state.mode === 'refocus' && state.frames.length) {
@@ -470,7 +583,12 @@ canvas.addEventListener('click', (event) => {
 });
 
 canvas.addEventListener('pointerdown', (event) => {
-  if (state.mode !== 'explore' || !state.info) return;
+  if (!state.info || event.button !== 0) return;
+  if (event.shiftKey || (view.k > 1 && state.mode !== 'explore')) {
+    startPan(event);
+    return;
+  }
+  if (state.mode !== 'explore') return;
   canvas.setPointerCapture(event.pointerId);
   const move = (e) => {
     const rect = canvas.getBoundingClientRect();
@@ -649,6 +767,14 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
     setPlaying(!state.playing);
+  } else if (e.key === '+' || e.key === '=') {
+    zoomBy(1.5);
+  } else if (e.key === '-' || e.key === '_') {
+    zoomBy(1 / 1.5);
+  } else if (e.key === '0') {
+    zoomFit();
+  } else if (e.key === '1') {
+    zoomActual();
   }
 });
 
