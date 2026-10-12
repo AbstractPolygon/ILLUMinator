@@ -15,7 +15,7 @@ const state = {
   loop: 'loop', // or 'pingpong'
   index: 0,
   direction: 1,
-  playing: true,
+  playing: false,
   fps: 24,
   lastTick: 0,
   still: null, // ImageData of the full resolution render
