@@ -41,8 +41,10 @@ function makeScene(width, height) {
     {
       disparity: 0.45,
       color(x, y) {
+        // Coarse bands (resolvable per lens) plus fine noise (finer than a lens).
+        const band = Math.floor(y / 40) & 1 ? 0.25 : 0;
         const n = hash(Math.floor(x / 6), Math.floor(y / 6));
-        return [0.15 + 0.2 * n, 0.55 + 0.3 * n, 0.3 + 0.2 * n];
+        return [0.15 + 0.2 * n + band * 0.4, 0.3 + 0.3 * n + band, 0.3 + 0.2 * n];
       },
       covers(x, y) {
         const bars = [cx - unit * 0.42, cx + unit * 0.3];

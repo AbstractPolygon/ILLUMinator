@@ -8,6 +8,7 @@ import {
   colorMatrix, autoExposure, toneMap, sensorToOutput,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
+import { renderSuperRes, estimateVignetting } from './core/superres.js';
 
 const state = {
   lf: null,
@@ -19,6 +20,7 @@ const state = {
   wbGains: [1, 1, 1],
   centerMeans: [1, 1, 1],
   refocusViews: null,
+  vignetting: null,
   jobs: {},
   scratch: null,
 };
@@ -32,7 +34,6 @@ function post(msg, transfer) {
 }
 
 function channelMeans(rgb) {
-  // Ignore the darkest border pixels to keep vignetting out of the estimate.
   const m = [0, 0, 0];
   const n = rgb.length / 3;
   for (let i = 0; i < rgb.length; i += 3) {
@@ -93,6 +94,7 @@ function rebuildSampler() {
   const { lf } = state;
   state.sampler = buildSampler(lf.grid, lf.cam, state.settings.detail);
   state.refocusViews = null;
+  state.vignetting = null;
   updateColor();
 }
 
@@ -155,13 +157,13 @@ async function frames({ id, job, path }) {
   return { done: true };
 }
 
-async function ensureRefocusViews(id, job) {
+async function ensureRefocusViews(id, job, kind = 'refocus') {
   if (state.refocusViews) return true;
   const radius = apertureRadius();
   const samples = apertureSamples(radius, 7);
   const views = [];
   for (let i = 0; i < samples.length; i++) {
-    if (state.jobs.refocus !== job) return false;
+    if (state.jobs[kind] !== job) return false;
     const { u, v } = samples[i];
     // Stored as 16 bit to keep ~37 full views affordable in memory.
     const rgb = equalize(render(u, v));
@@ -186,6 +188,28 @@ async function refocusFrames({ id, job, alphas }) {
     await tick();
   }
   return { done: true };
+}
+
+// Full resolution still: every raw pixel splatted at its refocused position.
+async function superRes({ id, job, alpha, scale }) {
+  requireRaw();
+  state.jobs.superres = job;
+  const { lf, dev, sampler } = state;
+  const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
+  if (!state.vignetting) {
+    progress('Measuring lens vignetting', 0);
+    state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
+  }
+  if (!(await ensureRefocusViews(id, job, 'superres'))) return { cancelled: true };
+  const base = refocus(state.refocusViews, sampler.outW, sampler.outH, alpha);
+  const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
+    alpha, scale, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH,
+    onProgress: (p) => progress('Rendering full resolution', p),
+  });
+  if (state.jobs.superres !== job) return { cancelled: true };
+  const pixels = toPixels(sr.rgb);
+  post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
+  return undefined;
 }
 
 async function view({ id, u, v }) {
@@ -270,7 +294,7 @@ async function readSection({ ref }) {
   return state.lf ? state.lf.readSection(ref) : null;
 }
 
-const handlers = { open, frames, refocusFrames, view, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { open, frames, refocusFrames, superRes, view, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

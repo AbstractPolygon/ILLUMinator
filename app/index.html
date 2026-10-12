@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lytro Illuminator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <h1>Lytro Illuminator</h1>
+    <button id="open-btn" class="primary">Open…</button>
+    <button id="camera-btn">Import from camera…</button>
+    <button id="sample-btn">Synthetic sample</button>
+    <span id="camera-status" class="hint"></span>
+    <input id="file-input" type="file" accept=".lfr,.lfp,.raw,.LFR,.LFP,.RAW" multiple hidden>
+    <input id="dir-input" type="file" webkitdirectory multiple hidden>
+  </header>
+
+  <main>
+    <aside class="library">
+      <h2>Photos</h2>
+      <ul id="library-list"></ul>
+      <p id="library-empty" class="hint">Open .LFR / .LFP files, drop them here, or import from a camera.</p>
+    </aside>
+
+    <section class="stage">
+      <div id="drop-zone" class="viewer">
+        <canvas id="view"></canvas>
+        <div id="placeholder" class="placeholder">
+          <p>Drop a Lytro ILLUM <code>.LFR</code> or first generation <code>.LFP</code> file here.</p>
+        </div>
+        <div id="progress" class="progress" hidden>
+          <div class="bar"><div id="progress-fill"></div></div>
+          <span id="progress-text"></span>
+        </div>
+      </div>
+      <nav class="modes" id="modes">
+        <button data-mode="perspective" class="active">Perspective</button>
+        <button data-mode="refocus">Refocus</button>
+        <button data-mode="explore">Explore</button>
+        <button data-mode="still">Full resolution</button>
+        <button data-mode="lenslets">Lenslets</button>
+      </nav>
+      <div class="transport">
+        <button id="play-btn" title="Play / pause (space)">Pause</button>
+        <input id="scrub" type="range" min="0" max="0" value="0">
+        <span id="frame-label" class="hint"></span>
+        <button id="png-btn">Save PNG</button>
+        <button id="webm-btn">Export video</button>
+      </div>
+    </section>
+
+    <aside class="controls">
+      <section data-panel="perspective">
+        <h2>Perspective animation</h2>
+        <label>Path
+          <select id="path">
+            <option value="circle">Circle</option>
+            <option value="horizontal">Left – right</option>
+            <option value="vertical">Up – down</option>
+            <option value="figure8">Figure eight</option>
+            <option value="diagonal">Diagonal</option>
+          </select>
+        </label>
+        <label>Amount <input id="amount" type="range" min="0.1" max="1" step="0.05" value="0.85"></label>
+        <label>Frames <input id="frames" type="range" min="12" max="96" step="4" value="48"></label>
+      </section>
+
+      <section data-panel="refocus" hidden>
+        <h2>Refocus animation</h2>
+        <label>Near <input id="near" type="range" min="-1.2" max="0" step="0.05" value="-0.6"></label>
+        <label>Far <input id="far" type="range" min="0" max="1.2" step="0.05" value="0.6"></label>
+        <label>Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
+        <p class="hint">Click the picture to focus on that point.</p>
+      </section>
+
+      <section data-panel="explore" hidden>
+        <h2>Explore</h2>
+        <p class="hint">Drag on the picture to look around. Double-click to recentre.</p>
+      </section>
+
+      <section data-panel="still" hidden>
+        <h2>Full resolution still</h2>
+        <label>Focus <input id="still-focus" type="range" min="-1.2" max="1.2" step="0.05" value="0.3"></label>
+        <label>Scale
+          <select id="still-scale">
+            <option value="2">2× lens grid</option>
+            <option value="3" selected>3× lens grid</option>
+            <option value="4">4× lens grid</option>
+          </select>
+        </label>
+        <button id="still-render" class="primary">Render</button>
+        <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0). Click the picture to pick the focus point first.</p>
+      </section>
+
+      <section data-panel="lenslets" hidden>
+        <h2>Microlens grid</h2>
+        <p id="grid-info" class="hint"></p>
+        <label>X <input id="lens-x" type="range" min="0" max="1" step="0.001" value="0.5"></label>
+        <label>Y <input id="lens-y" type="range" min="0" max="1" step="0.001" value="0.5"></label>
+        <div class="row">
+          <button id="grid-auto">Recalibrate</button>
+          <button id="grid-meta">Use metadata</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Colour</h2>
+        <label>Exposure <input id="ev" type="range" min="-3" max="3" step="0.1" value="0"></label>
+        <label>Saturation <input id="saturation" type="range" min="0" max="2" step="0.05" value="1"></label>
+        <label class="check"><input id="ccm" type="checkbox" checked> Camera colour matrix</label>
+        <label class="check"><input id="awb" type="checkbox"> Auto white balance</label>
+        <label>Detail
+          <select id="detail">
+            <option value="1" selected>1× (fast)</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+      </section>
+
+      <section>
+        <h2>Info</h2>
+        <dl id="info"></dl>
+      </section>
+    </aside>
+  </main>
+
+  <dialog id="camera-dialog">
+    <form method="dialog">
+      <h2>Import from camera</h2>
+      <p id="camera-dialog-source" class="hint"></p>
+      <div id="camera-grid" class="camera-grid"></div>
+      <menu>
+        <button type="button" id="camera-select-all">Select all</button>
+        <span class="spacer"></span>
+        <button value="cancel">Cancel</button>
+        <button id="camera-import" value="import" class="primary">Import selected</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
