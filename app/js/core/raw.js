@@ -71,7 +71,7 @@ export function unpackRaw(bytes, width, height, bits) {
   throw new Error(`Unsupported raw bit depth: ${bits}`);
 }
 
-// Headerless .RAW dumps (e.g. IMG_0001__frame.raw) are recognised by size.
+// Headerless .RAW dumps (e.g. IMG_0001__frame.raw) are recognized by size.
 export function guessRawLayout(byteLength) {
   for (const cam of [ILLUM, F01]) {
     if (byteLength === packedSize(cam.width, cam.height, cam.bits)) return cam;

@@ -80,7 +80,7 @@ export async function makeSyntheticLfr(options = {}) {
   let j = 0;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      // Nearest lens centre on the hex grid.
+      // Nearest lens center on the hex grid.
       const dx = x - ox;
       const dy = y - oy;
       const lx = cos * dx + sin * dy;
@@ -103,7 +103,7 @@ export async function makeSyntheticLfr(options = {}) {
       }
       const rr = Math.sqrt(best) / radius;
       const vignette = rr >= 1 ? 0 : 1 - rr * rr * 0.6;
-      // Lens centre in sensor coordinates is the point (x, y) minus (u, v).
+      // Lens center in sensor coordinates is the point (x, y) minus (u, v).
       const lcx = x - (cos * bu - sin * bv);
       const lcy = y - (sin * bu + cos * bv);
       let rgb = null;

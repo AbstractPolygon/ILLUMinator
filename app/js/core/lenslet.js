@@ -19,7 +19,7 @@ export function gridFromCamera(cam) {
   }, cam);
 }
 
-// Moves the origin to the lens nearest the sensor centre so that rotation and
+// Moves the origin to the lens nearest the sensor center so that rotation and
 // pitch adjustments pivot around the middle of the image.
 export function normalizeGrid(grid, cam) {
   const g = { ...grid };
@@ -50,7 +50,7 @@ export function toLocal(g, x, y) {
   return [cos * dx + sin * dy, -sin * dx + cos * dy];
 }
 
-// Range of lens rows/columns whose centres fall inside the sensor (with margin).
+// Range of lens rows/columns whose centers fall inside the sensor (with margin).
 export function lensRange(g, width, height, margin) {
   const corners = [[margin, margin], [width - margin, margin], [margin, height - margin], [width - margin, height - margin]]
     .map(([x, y]) => toLocal(g, x, y));
@@ -64,7 +64,7 @@ export function lensRange(g, width, height, margin) {
   };
 }
 
-// Returns lens centres for the whole sensor as flat arrays indexed by
+// Returns lens centers for the whole sensor as flat arrays indexed by
 // (r - r0) * cols + (c - c0).
 export function lensCenters(g, width, height) {
   const margin = g.pitch;
@@ -86,8 +86,8 @@ export function lensCenters(g, width, height) {
 
 // --- calibration -----------------------------------------------------------
 
-// Luminance proxy: the mean of a 2x2 block contains each Bayer colour once, so
-// it is independent of the mosaic position. Bilinear between block centres.
+// Luminance proxy: the mean of a 2x2 block contains each Bayer color once, so
+// it is independent of the mosaic position. Bilinear between block centers.
 function makeLuminance(raw, width, height) {
   return (x, y) => {
     const fx = x - 1;
@@ -128,8 +128,8 @@ function pickSamples(g, width, height, radiusFraction, count) {
   return Int32Array.from(out);
 }
 
-// Contrast between lens centres and the dark triple junctions between lenses
-// (at distance pitch / sqrt(3) straight above and below every centre).
+// Contrast between lens centers and the dark triple junctions between lenses
+// (at distance pitch / sqrt(3) straight above and below every center).
 function score(g, lum, samples) {
   const cos = Math.cos(g.rotation);
   const sin = Math.sin(g.rotation);
@@ -181,18 +181,18 @@ function searchParam(g, lum, samples, apply, range, steps) {
 }
 
 // Aligns the grid to the image: microlens images are brightest at their
-// centres because of vignetting, whatever the scene. Coarse-to-fine search
+// centers because of vignetting, whatever the scene. Coarse-to-fine search
 // over origin, then rotation and pitch with samples spread over the sensor.
 export function calibrateGrid(raw, cam, initial, onProgress = () => {}) {
   const { width, height } = cam;
   const lum = makeLuminance(raw, width, height);
   let g = normalizeGrid(initial, cam);
 
-  const centre = pickSamples(g, width, height, 0.12, 1500);
+  const center = pickSamples(g, width, height, 0.12, 1500);
   onProgress(0.05);
-  g = searchOffset(g, lum, centre, { x: g.pitch / 2, y: g.rowStep / 2 }, 0.5).grid;
+  g = searchOffset(g, lum, center, { x: g.pitch / 2, y: g.rowStep / 2 }, 0.5).grid;
   onProgress(0.25);
-  g = searchOffset(g, lum, centre, { x: 0.5, y: 0.5 }, 0.1).grid;
+  g = searchOffset(g, lum, center, { x: 0.5, y: 0.5 }, 0.1).grid;
   onProgress(0.35);
 
   const wide = pickSamples(g, width, height, 0.9, 4000);
@@ -205,7 +205,7 @@ export function calibrateGrid(raw, cam, initial, onProgress = () => {}) {
     g = searchParam(g, lum, wide, rotate, rotRange, 10);
     g = searchParam(g, lum, wide, scale, scaleRange, 10);
     g = searchParam(g, lum, wide, stretchY, scaleRange / 4, 5);
-    g = searchOffset(g, lum, centre, { x: 0.3, y: 0.3 }, 0.1).grid;
+    g = searchOffset(g, lum, center, { x: 0.3, y: 0.3 }, 0.1).grid;
     rotRange /= 3;
     scaleRange /= 3;
     onProgress(0.35 + 0.15 * (iter + 1));
@@ -214,14 +214,14 @@ export function calibrateGrid(raw, cam, initial, onProgress = () => {}) {
   return { grid: g, quality: gridQuality(g, lum, wide) };
 }
 
-// Normalised contrast in [0, 1]-ish; low values mean the grid is off.
+// Normalized contrast in [0, 1]-ish; low values mean the grid is off.
 export function gridQuality(g, lum, samples) {
-  let centre = 0;
+  let center = 0;
   for (let k = 0; k < samples.length; k += 2) {
     const [x, y] = lensCenter(g, samples[k], samples[k + 1]);
-    centre += lum(x, y);
+    center += lum(x, y);
   }
-  return centre > 0 ? score(g, lum, samples) / (2 * centre) : 0;
+  return center > 0 ? score(g, lum, samples) / (2 * center) : 0;
 }
 
 export function measureGrid(raw, cam, g) {

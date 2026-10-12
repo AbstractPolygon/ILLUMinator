@@ -62,14 +62,27 @@ main { flex: 1; display: flex; min-height: 0; }
 .controls { width: 270px; border-left: 1px solid var(--line); }
 
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 14px 0 8px; }
-.controls section:first-child h2, .library h2 { margin-top: 4px; }
+/* Sections in the right sidebar are spaced by a gap, so the first visible
+   heading lines up with "Photos" whichever sections are hidden. */
+.controls { display: flex; flex-direction: column; gap: 10px; }
+.controls section > h2:first-child, .library h2 { margin-top: 4px; }
 
 #library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 #library-list li {
   display: flex; align-items: center; gap: 8px;
   padding: 4px; border-radius: 6px; cursor: pointer; border: 1px solid transparent;
 }
+#library-list li { position: relative; }
 #library-list li:hover { background: #22262c; }
+#library-list .remove {
+  position: absolute; top: 4px; right: 4px;
+  padding: 0 7px; line-height: 20px; font-size: 15px;
+  background: rgba(18, 20, 23, 0.85); color: var(--muted);
+  opacity: 0; transition: opacity 0.12s;
+}
+#library-list .remove:hover { color: var(--text); border-color: #4a515c; }
+#library-list li:hover .remove, #library-list .remove:focus-visible { opacity: 1; }
+@media (hover: none) { #library-list .remove { opacity: 1; } }
 #library-list li.current { border-color: var(--accent); }
 #library-list img, #library-list .noimg { width: 64px; height: 44px; object-fit: cover; border-radius: 4px; background: #2a2e35; flex: none; }
 #library-list span { font-size: 12.5px; word-break: break-all; }

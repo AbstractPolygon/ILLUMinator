@@ -1,7 +1,7 @@
 // Light field rendering from the raw lenslet image.
 //
 // A sub-aperture view (u, v) takes, under every microlens, the pixel at offset
-// (u, v) from the lens centre. Neighbouring views look at the scene from
+// (u, v) from the lens center. Neighbouring views look at the scene from
 // slightly different points on the main lens aperture, which gives parallax
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
@@ -57,7 +57,7 @@ export function buildSampler(grid, cam, detail = 1, kernel = 1.0) {
           n++;
         }
       }
-      // Keep the strongest taps and normalise.
+      // Keep the strongest taps and normalize.
       let sum = 0;
       for (let k = 0; k < TAPS; k++) {
         let best = -1;
@@ -86,13 +86,13 @@ export function sensorToOutput(sampler, x, y) {
   return [(lx - sampler.xMin) / spacing, (ly - sampler.yMin) / spacing];
 }
 
-// Prepares per-channel normalisation so samplers do not need the metadata.
+// Prepares per-channel normalization so samplers do not need the metadata.
 export function makeDevelopParams(cam) {
   const scale = [0, 1, 2].map((c) => cam.wb[c] / Math.max(1, cam.white[c] - cam.black[c]));
   return { cfa: cam.cfa, black: cam.black, scale };
 }
 
-// Bilinear interpolation on the sub-lattice of one Bayer colour, which has a
+// Bilinear interpolation on the sub-lattice of one Bayer color, which has a
 // spacing of two pixels and starts at (px, py).
 function sampleLattice(raw, width, height, px, py, x, y) {
   const fx = (x - px) / 2;
@@ -191,12 +191,19 @@ export function apertureSamples(radius, steps) {
 // Shift-and-add refocus over a set of pre-rendered views.
 // `alpha` is the shift in output pixels (at detail 1) per sensor pixel of
 // aperture offset; each view carries { u, v, rgb, gain, detail }.
-export function refocus(views, outW, outH, alpha) {
+// A synthetic aperture centerd on (u0, v0) with Gaussian radius `sigma`
+// (sensor pixels) combines refocusing with a change of viewpoint; a smaller
+// sigma gives more depth of field.
+export function refocus(views, outW, outH, alpha, { u0 = 0, v0 = 0, sigma = Infinity } = {}) {
   const out = new Float32Array(outW * outH * 3);
   const weight = new Float32Array(outW * outH);
   for (const view of views) {
-    const sx = alpha * view.u * view.detail;
-    const sy = alpha * view.v * view.detail;
+    const du = view.u - u0;
+    const dv = view.v - v0;
+    const wv = Number.isFinite(sigma) ? Math.exp(-(du * du + dv * dv) / (2 * sigma * sigma)) : 1;
+    if (wv < 1e-3) continue;
+    const sx = alpha * du * view.detail;
+    const sy = alpha * dv * view.detail;
     const ix = Math.floor(sx);
     const iy = Math.floor(sy);
     const ax = sx - ix;
@@ -206,7 +213,7 @@ export function refocus(views, outW, outH, alpha) {
     const w01 = (1 - ax) * ay;
     const w11 = ax * ay;
     const data = view.rgb;
-    const gain = view.gain;
+    const gain = view.gain * wv;
     const x0 = Math.max(0, -ix);
     const x1 = Math.min(outW, outW - ix - 1);
     const y0 = Math.max(0, -iy);
@@ -223,7 +230,7 @@ export function refocus(views, outW, outH, alpha) {
         out[d] += (data[s] * w00 + data[t] * w10 + data[u] * w01 + data[w] * w11) * gain;
         out[d + 1] += (data[s + 1] * w00 + data[t + 1] * w10 + data[u + 1] * w01 + data[w + 1] * w11) * gain;
         out[d + 2] += (data[s + 2] * w00 + data[t + 2] * w10 + data[u + 2] * w01 + data[w + 2] * w11) * gain;
-        weight[dstRow + x] += 1;
+        weight[dstRow + x] += wv;
       }
     }
   }

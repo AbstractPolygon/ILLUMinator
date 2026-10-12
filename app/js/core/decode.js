@@ -14,7 +14,7 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     if (picture.rawRef) rawBytes = await picture.container.readSection(picture.rawRef);
   } else {
     layout = guessRawLayout(bytes.length);
-    if (!layout) throw new LfpError('Unrecognised file: not an LFP/LFR container or a known raw sensor dump');
+    if (!layout) throw new LfpError('Unrecognized file: not an LFP/LFR container or a known raw sensor dump');
     rawBytes = bytes;
   }
 

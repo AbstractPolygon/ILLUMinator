@@ -9,10 +9,15 @@ const ctx = canvas.getContext('2d');
 
 const state = {
   info: null,
-  mode: 'camera',
-  interactive: false, // camera mode: showing the dragged viewpoint, not an animation frame
+  mode: 'camera', // or 'lenslets'
+  camera: { u: 0, v: 0 }, // viewpoint, sensor pixels within the lens aperture
+  // Camera mode shows either the live camera view or, while playing or
+  // scrubbing, a frame of the animation.
+  showingFrames: false,
   frames: [], // ImageBitmap | undefined while rendering
-  frameValues: [], // alpha per refocus frame
+  frameValues: [], // focus value per frame of a focus sweep
+  animKey: null, // settings the current frames were rendered with
+  animDone: null, // promise resolved when every frame has arrived
   loop: 'loop', // or 'pingpong'
   index: 0,
   direction: 1,
@@ -20,11 +25,12 @@ const state = {
   fps: 24,
   lastTick: 0,
   still: null, // ImageData of the full resolution render
-  fullRes: false, // full resolution toggle
+  fullRes: false,
+  depthShown: false,
   library: [],
   current: null,
-  explore: { u: 0, v: 0, busy: false, pending: null },
-  stack: null, // pre-rendered stack from a processed LFP
+  stack: null, // pre-rendered focus stack from a processed LFP
+  view: { busy: false, pending: false },
 };
 
 // ---------------------------------------------------------------- progress
@@ -43,7 +49,7 @@ function showError(err) {
   hideProgress();
   console.error(err);
   $('placeholder').hidden = false;
-  $('placeholder').innerHTML = `<p>Could not open this file.</p><p class="hint"></p>`;
+  $('placeholder').innerHTML = '<p>Could not open this file.</p><p class="hint"></p>';
   $('placeholder').querySelector('.hint').textContent = err.message || String(err);
 }
 
@@ -55,12 +61,21 @@ function addToLibrary(entries) {
     const item = { name: e.name, size: e.size, file: e.file, thumb: null };
     state.library.push(item);
     readThumbnail(blobReader(e.file)).then((t) => {
-      if (t) {
+      if (t && state.library.includes(item)) {
         item.thumb = URL.createObjectURL(new Blob([t.bytes], { type: t.mime }));
         renderLibrary();
       }
     }).catch(() => {});
   }
+  renderLibrary();
+}
+
+// Removes a photo from the list (the file itself is untouched). Removing the
+// open photo clears the picture.
+function removeFromLibrary(item) {
+  state.library = state.library.filter((x) => x !== item);
+  if (item.thumb) URL.revokeObjectURL(item.thumb);
+  if (state.current === item) closePhoto();
   renderLibrary();
 }
 
@@ -72,7 +87,13 @@ function renderLibrary() {
     const img = item.thumb ? Object.assign(document.createElement('img'), { src: item.thumb, alt: '' }) : Object.assign(document.createElement('div'), { className: 'noimg' });
     const name = document.createElement('span');
     name.textContent = item.name;
-    li.append(img, name);
+    const remove = Object.assign(document.createElement('button'), { className: 'remove', type: 'button', textContent: '×', title: 'Remove from list' });
+    remove.setAttribute('aria-label', `Remove ${item.name} from list`);
+    remove.onclick = (e) => {
+      e.stopPropagation();
+      removeFromLibrary(item);
+    };
+    li.append(img, name, remove);
     li.onclick = () => openItem(item);
     return li;
   }));
@@ -88,11 +109,29 @@ async function openItem(item) {
   await openWith({ bytes }, [bytes]);
 }
 
-async function openWith(args, transfer) {
-  stopFrames();
+function resetView() {
+  resetAnimation();
   state.info = null;
   state.stack = null;
   state.still = null;
+  state.camera = { u: 0, v: 0 };
+  setFullRes(false, { restore: false });
+  setDepthShown(false, { restore: false });
+}
+
+function closePhoto() {
+  resetView();
+  state.current = null;
+  canvas.classList.add('hidden');
+  $('placeholder').hidden = false;
+  $('placeholder').innerHTML = '<p>Drop a Lytro ILLUM <code>.LFR</code> or first generation <code>.LFP</code> file here.</p>';
+  $('info').replaceChildren();
+  $('frame-label').textContent = '';
+  setMode(state.mode);
+}
+
+async function openWith(args, transfer) {
+  resetView();
   try {
     const info = await engine.request('open', args, { transfer, onProgress: showProgress });
     hideProgress();
@@ -118,24 +157,7 @@ async function loadStack(stacks) {
   state.stack = { kind: focus.kind, bitmaps, values: images.map((i) => i.lambda ?? 0) };
 }
 
-// ---------------------------------------------------------------- playback
-
-function stopFrames() {
-  engine.cancel('frames');
-  engine.cancel('refocus');
-  state.frames = [];
-  state.frameValues = [];
-  state.index = 0;
-  state.direction = 1;
-}
-
-function setFrames(count, loop) {
-  state.frames = new Array(count);
-  state.loop = loop;
-  state.index = 0;
-  state.direction = 1;
-  $('scrub').max = Math.max(0, count - 1);
-}
+// ---------------------------------------------------------------- drawing
 
 function draw(img) {
   if (!img) return;
@@ -149,15 +171,176 @@ function draw(img) {
   canvas.classList.remove('hidden');
 }
 
+// Camera settings shared by the live view, animations and full resolution.
+function cameraParams() {
+  return {
+    u: state.camera.u,
+    v: state.camera.v,
+    alpha: +$('focus').value,
+    aperture: +$('aperture').value,
+    dof: +$('dof').value,
+  };
+}
+
+function showsCamera() {
+  return state.mode === 'camera' && !state.fullRes && !state.depthShown && !state.showingFrames;
+}
+
+// Live camera view. Requests are coalesced: while one renders, only the
+// latest settings are kept for the next.
+async function renderCamera() {
+  if (!state.info || !state.info.hasRaw) return;
+  const v = state.view;
+  if (v.busy) {
+    v.pending = true;
+    return;
+  }
+  v.busy = true;
+  try {
+    const msg = await engine.request('view', cameraParams(), { onProgress: showProgress });
+    hideProgress();
+    if (msg && msg.pixels && showsCamera()) draw(toImageData(msg));
+  } catch (err) {
+    showError(err);
+  } finally {
+    v.busy = false;
+    if (v.pending) {
+      v.pending = false;
+      renderCamera();
+    }
+  }
+}
+
+// Shows whatever the current state calls for.
+function refresh() {
+  if (!state.info) return;
+  if (state.mode === 'lenslets') renderLenslets();
+  else if (state.fullRes) renderStill();
+  else if (state.depthShown) renderDepth();
+  else if (state.showingFrames) showFrame(state.index);
+  else renderCamera();
+}
+
+// ---------------------------------------------------------------- animation
+
+function pathPoint(kind, t) {
+  const a = 2 * Math.PI * t;
+  switch (kind) {
+    case 'horizontal': return [Math.sin(a), 0];
+    case 'vertical': return [0, Math.sin(a)];
+    case 'figure8': return [Math.sin(a), 0.7 * Math.sin(2 * a)];
+    case 'diagonal': return [Math.sin(a) * Math.SQRT1_2, Math.sin(a) * Math.SQRT1_2];
+    default: return [Math.cos(a), Math.sin(a)];
+  }
+}
+
+function animationRequest() {
+  const p = cameraParams();
+  if ($('anim').value === 'focus') {
+    const n = +$('steps').value;
+    const near = +$('near').value;
+    const far = +$('far').value;
+    const alphas = Array.from({ length: n }, (_, i) => near + ((far - near) * i) / (n - 1));
+    // A closed aperture without synthetic depth of field would show no change.
+    const aperture = p.aperture > 0 || p.dof > 0 ? p.aperture : 1;
+    return { type: 'refocusFrames', kind: 'refocus', loop: 'pingpong', values: alphas, args: { alphas, u: p.u, v: p.v, aperture, dof: p.dof } };
+  }
+  const n = +$('frames').value;
+  const r = state.info.radius * +$('amount').value;
+  const path = Array.from({ length: n }, (_, i) => {
+    const [x, y] = pathPoint($('path').value, i / n);
+    return { u: x * r, v: y * r };
+  });
+  return { type: 'frames', kind: 'frames', loop: 'loop', values: [], args: { path, alpha: p.alpha, aperture: p.aperture, dof: p.dof } };
+}
+
+function resetAnimation() {
+  engine.cancel('frames');
+  engine.cancel('refocus');
+  state.frames = [];
+  state.frameValues = [];
+  state.animKey = null;
+  state.animDone = null;
+  state.index = 0;
+  state.direction = 1;
+  state.showingFrames = false;
+  setPlaying(false);
+  $('scrub').max = 0;
+  $('scrub').value = 0;
+}
+
+// Renders the animation frames unless they match the current settings.
+function ensureAnimation() {
+  if (state.stack) {
+    if (!state.frames.length) {
+      state.frames = [...state.stack.bitmaps];
+      state.frameValues = state.stack.values;
+      state.loop = 'pingpong';
+      $('scrub').max = state.frames.length - 1;
+      state.animDone = Promise.resolve();
+    }
+    return state.animDone;
+  }
+  const req = animationRequest();
+  const key = JSON.stringify([req.type, req.args]);
+  if (key === state.animKey) return state.animDone;
+  engine.cancel(req.kind === 'frames' ? 'refocus' : 'frames');
+  state.animKey = key;
+  state.frames = new Array(req.type === 'frames' ? req.args.path.length : req.args.alphas.length);
+  state.frameValues = req.values;
+  state.loop = req.loop;
+  state.index = 0;
+  state.direction = 1;
+  $('scrub').max = Math.max(0, state.frames.length - 1);
+  const { promise } = engine.job(req.type, req.kind, req.args, {
+    onProgress: showProgress,
+    onFrame: async (msg) => {
+      hideProgress();
+      if (state.animKey !== key) return;
+      state.frames[msg.index] = await createImageBitmap(toImageData(msg));
+      if (state.showingFrames && (msg.index === state.index || !state.frames[state.index])) {
+        state.index = msg.index;
+        showFrame(msg.index);
+      } else {
+        updateFrameLabel();
+      }
+    },
+  });
+  state.animDone = promise.then(() => hideProgress(), (err) => showError(err));
+  return state.animDone;
+}
+
+// A camera or animation setting changed: the frames are stale.
+function invalidateAnimation() {
+  if (state.stack) return;
+  if (state.animKey) {
+    engine.cancel('frames');
+    engine.cancel('refocus');
+  }
+  state.animKey = null;
+  state.frames = [];
+  state.frameValues = [];
+  updateFrameLabel();
+}
+
+function updateFrameLabel() {
+  const n = state.frames.length;
+  if (!n || !state.showingFrames) {
+    if (!state.fullRes) $('frame-label').textContent = '';
+    return;
+  }
+  const ready = state.frames.filter(Boolean).length;
+  const val = state.frameValues[state.index];
+  $('frame-label').textContent = `${state.index + 1}/${n}` +
+    (ready < n ? ` (rendering ${ready})` : '') +
+    (val !== undefined ? ` · focus ${val.toFixed(2)}` : '');
+}
+
 function showFrame(i) {
   const f = state.frames[i];
-  if (f && !(state.mode === 'camera' && state.interactive)) draw(f);
+  if (f && !state.fullRes && !state.depthShown) draw(f);
   $('scrub').value = i;
-  const ready = state.frames.filter(Boolean).length;
-  const val = state.frameValues[i];
-  $('frame-label').textContent = `${i + 1}/${state.frames.length}` +
-    (ready < state.frames.length ? ` (rendering ${ready})` : '') +
-    (val !== undefined ? ` · focus ${val.toFixed(2)}` : '');
+  updateFrameLabel();
 }
 
 function advance() {
@@ -188,112 +371,36 @@ requestAnimationFrame(tick);
 
 function setPlaying(p) {
   state.playing = p;
-  if (p) state.interactive = false;
   $('play-btn').textContent = p ? 'Pause' : 'Play';
-}
-
-async function receiveFrames(type, kind, args) {
-  const { promise } = engine.job(type, kind, args, {
-    onProgress: showProgress,
-    onFrame: async (msg) => {
-      hideProgress();
-      const bmp = await createImageBitmap(toImageData(msg));
-      state.frames[msg.index] = bmp;
-      if (msg.index === state.index || !state.frames[state.index]) {
-        state.index = msg.index;
-        showFrame(msg.index);
-      }
-    },
-  });
-  try {
-    await promise;
-  } catch (err) {
-    showError(err);
-  }
-  hideProgress();
-}
-
-// ---------------------------------------------------------------- modes
-
-function pathPoint(kind, t) {
-  const a = 2 * Math.PI * t;
-  switch (kind) {
-    case 'horizontal': return [Math.sin(a), 0];
-    case 'vertical': return [0, Math.sin(a)];
-    case 'figure8': return [Math.sin(a), 0.7 * Math.sin(2 * a)];
-    case 'diagonal': return [Math.sin(a) * Math.SQRT1_2, Math.sin(a) * Math.SQRT1_2];
-    default: return [Math.cos(a), Math.sin(a)];
+  if (p) {
+    setFullRes(false, { restore: false });
+    setDepthShown(false, { restore: false });
+    state.showingFrames = true;
+    ensureAnimation();
+    showFrame(state.index);
   }
 }
 
-function startPerspective() {
-  if (state.stack) {
-    state.interactive = false;
-    return startStack();
-  }
-  const n = +$('frames').value;
-  const r = state.info.radius * +$('amount').value;
-  const path = [];
-  for (let i = 0; i < n; i++) {
-    const [x, y] = pathPoint($('path').value, i / n);
-    path.push({ u: x * r, v: y * r });
-  }
-  setFrames(n, 'loop');
-  receiveFrames('frames', 'frames', { path });
+// Shows the live camera view again after playing or scrubbing.
+function backToCamera() {
+  if (!state.showingFrames || state.stack) return;
+  setPlaying(false);
+  state.showingFrames = false;
+  updateFrameLabel();
 }
 
-function refocusAlphas() {
-  const n = +$('steps').value;
-  const near = +$('near').value;
-  const far = +$('far').value;
-  return Array.from({ length: n }, (_, i) => near + ((far - near) * i) / (n - 1));
-}
-
-function startRefocus() {
-  if (state.stack) return startStack();
-  const alphas = refocusAlphas();
-  setFrames(alphas.length, 'pingpong');
-  state.frameValues = alphas;
-  receiveFrames('refocusFrames', 'refocus', { alphas });
-}
-
-function startStack() {
-  setFrames(state.stack.bitmaps.length, 'pingpong');
-  state.frames = [...state.stack.bitmaps];
-  state.frameValues = state.stack.values;
-  showFrame(0);
-}
-
-async function renderExplore() {
-  const ex = state.explore;
-  if (ex.busy) {
-    ex.pending = true;
-    return;
-  }
-  ex.busy = true;
-  try {
-    const msg = await engine.request('view', { u: ex.u, v: ex.v });
-    draw(toImageData(msg));
-  } finally {
-    ex.busy = false;
-    if (ex.pending) {
-      ex.pending = false;
-      renderExplore();
-    }
-  }
-}
+// ---------------------------------------------------------------- full resolution, depth
 
 async function renderStill() {
-  const alpha = +$('still-focus').value;
   const scale = +$('still-scale').value;
   try {
-    const { promise } = engine.job('superRes', 'superres', { alpha, scale }, { onProgress: showProgress });
+    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale }, { onProgress: showProgress });
     const msg = await promise;
     // Ignore a result that arrives after full resolution was switched off.
     if (msg && msg.pixels && state.fullRes) {
       state.still = toImageData(msg);
       draw(state.still);
-      $('frame-label').textContent = `${msg.width}×${msg.height} · focus ${alpha.toFixed(2)}`;
+      $('frame-label').textContent = `${msg.width}×${msg.height}`;
     }
   } catch (err) {
     showError(err);
@@ -302,29 +409,57 @@ async function renderStill() {
   }
 }
 
-// Full resolution is a toggle over whatever is on screen: it pauses playback
-// and re-renders the current picture from every sensor pixel. In Refocus mode
-// it keeps the focus of the current frame.
+// Full resolution is a toggle over the camera view: it re-renders what the
+// camera shows (viewpoint, focus, aperture, depth of field) from every
+// sensor pixel.
 function setFullRes(on, { restore = true } = {}) {
-  if (on && !(state.info && state.info.hasRaw && state.mode !== 'lenslets')) return;
+  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) return;
+  if (on === state.fullRes) return;
   state.fullRes = on;
   $('fullres-btn').setAttribute('aria-pressed', String(on));
   $('fullres-panel').hidden = !on;
   if (on) {
     setPlaying(false);
-    const alpha = state.mode === 'refocus' ? state.frameValues[state.index] : undefined;
-    if (alpha !== undefined) $('still-focus').value = alpha.toFixed(2);
+    state.showingFrames = false;
+    setDepthShown(false, { restore: false });
     renderStill();
     return;
   }
   engine.cancel('superres');
   hideProgress();
   state.still = null;
-  if (!restore) return;
-  if (state.mode === 'camera' && state.interactive) renderExplore();
-  else if (state.mode === 'lenslets') renderLenslets();
-  else showFrame(state.index);
+  $('frame-label').textContent = '';
+  if (restore) refresh();
 }
+
+async function renderDepth() {
+  try {
+    const msg = await engine.request('depthMap', {}, { onProgress: showProgress });
+    hideProgress();
+    if (msg && msg.pixels && state.depthShown) draw(toImageData(msg));
+  } catch (err) {
+    showError(err);
+  }
+}
+
+function setDepthShown(on, { restore = true } = {}) {
+  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) return;
+  if (on === state.depthShown) return;
+  state.depthShown = on;
+  $('depth-btn').setAttribute('aria-pressed', String(on));
+  $('depth-btn').textContent = on ? 'Hide depth' : 'Show depth';
+  $('depth-legend').hidden = !on;
+  if (on) {
+    setPlaying(false);
+    state.showingFrames = false;
+    setFullRes(false, { restore: false });
+    renderDepth();
+  } else if (restore) {
+    refresh();
+  }
+}
+
+// ---------------------------------------------------------------- lenslets
 
 async function renderLenslets() {
   const info = state.info;
@@ -354,38 +489,31 @@ async function renderLenslets() {
   $('frame-label').textContent = `sensor ${msg.x0}–${msg.x0 + size}, ${msg.y0}–${msg.y0 + size}`;
 }
 
+// ---------------------------------------------------------------- modes
+
 function setMode(mode) {
   state.mode = mode;
   for (const b of document.querySelectorAll('#modes button')) b.classList.toggle('active', b.dataset.mode === mode);
   for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== mode;
-  const raw = state.info && state.info.hasRaw;
-  for (const b of document.querySelectorAll('#modes button')) {
-    b.disabled = !state.info || (!raw && !['camera', 'refocus'].includes(b.dataset.mode));
-  }
+  const raw = !!(state.info && state.info.hasRaw);
+  for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
+  const camera = mode === 'camera';
+  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'aperture', 'dof']) $(id).disabled = !raw || !camera;
+  for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
-  if (state.fullRes) setFullRes(false, { restore: false });
-  $('fullres-btn').disabled = !raw || mode === 'lenslets';
+  setFullRes(false, { restore: false });
+  setDepthShown(false, { restore: false });
   layoutCanvas();
-  stopFrames();
-  const animated = mode === 'camera' || mode === 'refocus';
-  $('play-btn').disabled = !animated;
-  $('webm-btn').disabled = !animated;
-  $('scrub').disabled = !animated;
-  $('frame-label').textContent = '';
-  if (mode === 'camera') {
-    // Show the centre view for dragging; the animation renders behind it.
-    startPerspective();
-    if (!state.stack) {
-      state.interactive = true;
-      state.explore.u = 0;
-      state.explore.v = 0;
-      renderExplore();
-    }
-  } else if (mode === 'refocus') startRefocus();
-  else if (mode === 'lenslets') {
-    renderLenslets();
+  if (camera) {
+    state.showingFrames = !!state.stack;
+    if (state.stack) ensureAnimation();
+  } else {
+    setPlaying(false);
+    state.showingFrames = false;
     renderGridInfo();
   }
+  $('frame-label').textContent = '';
+  refresh();
 }
 
 // ---------------------------------------------------------------- info
@@ -427,14 +555,14 @@ function renderGridInfo() {
   if (!info || !info.grid) return;
   const g = info.grid;
   $('grid-info').textContent = `Pitch ${fmt(g.pitch, 3)} px, row step ${fmt(g.rowStep, 3)} px, rotation ${fmt(g.rotation * 1000, 3)} mrad, ` +
-    `centre (${fmt(g.ox, 2)}, ${fmt(g.oy, 2)}). Alignment score ${fmt(info.gridQuality, 3)}.`;
+    `center (${fmt(g.ox, 2)}, ${fmt(g.oy, 2)}). Alignment score ${fmt(info.gridQuality, 3)}.`;
 }
 
 // ---------------------------------------------------------------- zoom
 
-// Zoom is a multiple of the fit-to-window scale, and the view centre is kept
-// in normalised image coordinates, so both survive switching between the
-// animation frames and a larger full resolution still.
+// Zoom is a multiple of the fit-to-window scale, and the view center is kept
+// in normalized image coordinates, so both survive switching between the
+// camera view and a larger full resolution still.
 const view = { k: 1, cx: 0.5, cy: 0.5 };
 const viewer = $('drop-zone');
 const MAX_SCALE = 16;
@@ -506,7 +634,7 @@ viewer.addEventListener('wheel', (event) => {
   zoomBy(Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015)), event.clientX - rect.left, event.clientY - rect.top);
 }, { passive: false });
 
-// Drag to pan when zoomed in (Shift+drag in Explore mode, where a plain drag
+// Drag to pan when zoomed in (Shift+drag in camera mode, where a plain drag
 // changes the viewpoint). A drag suppresses the click that follows it.
 let suppressClick = false;
 function startPan(event) {
@@ -536,14 +664,19 @@ $('zoom-out').onclick = () => zoomBy(1 / 1.5);
 $('zoom-label').onclick = zoomFit;
 $('zoom-1').onclick = zoomActual;
 
-// ---------------------------------------------------------------- picking
+// ---------------------------------------------------------------- pointer
 
-function canvasPoint(event) {
+// Pointer position in camera view pixels (the full resolution still is
+// larger than the camera view; both cover the same picture).
+function viewPoint(event) {
   const rect = canvas.getBoundingClientRect();
-  return [((event.clientX - rect.left) / rect.width) * canvas.width, ((event.clientY - rect.top) / rect.height) * canvas.height];
+  const fx = (event.clientX - rect.left) / rect.width;
+  const fy = (event.clientY - rect.top) / rect.height;
+  return state.info && state.info.width ? [fx * state.info.width, fy * state.info.height] : [fx * canvas.width, fy * canvas.height];
 }
 
 // Gradient energy around (x, y) in each frame; returns the sharpest index.
+// Used for pre-rendered focus stacks, which have no depth map.
 function sharpestFrame(frames, x, y, radius = 10) {
   const size = radius * 2;
   const probe = new OffscreenCanvas(size, size);
@@ -576,23 +709,27 @@ function sharpestFrame(frames, x, y, radius = 10) {
   return best;
 }
 
-async function focusStillAt(x, y) {
-  // Map from the still's resolution to view resolution, then probe a sweep.
-  const scale = state.still ? state.still.width / state.info.width : 1;
-  const alphas = Array.from({ length: 25 }, (_, i) => -1.2 + i * 0.1);
-  const frames = [];
-  const { promise } = engine.job('refocusFrames', 'refocus', { alphas }, {
-    onProgress: showProgress,
-    onFrame: async (msg) => { frames[msg.index] = await createImageBitmap(toImageData(msg)); },
-  });
-  await promise;
-  await new Promise((r) => setTimeout(r, 50));
-  hideProgress();
-  const best = sharpestFrame(frames, x / scale, y / scale, 8);
-  if (best >= 0 && state.fullRes) {
-    $('still-focus').value = alphas[best].toFixed(2);
-    renderStill();
+// Click to focus: the depth map gives the focus value that makes that point
+// sharp. With everything sharp (closed aperture, no synthetic depth of
+// field) a click also opens the aperture so the change is visible.
+async function focusAt(event) {
+  if (state.stack) {
+    const rect = canvas.getBoundingClientRect();
+    const best = sharpestFrame(state.frames, ((event.clientX - rect.left) / rect.width) * canvas.width, ((event.clientY - rect.top) / rect.height) * canvas.height);
+    if (best >= 0) {
+      setPlaying(false);
+      state.index = best;
+      showFrame(best);
+    }
+    return;
   }
+  const [x, y] = viewPoint(event);
+  const res = await engine.request('focusAt', { x, y }, { onProgress: showProgress });
+  hideProgress();
+  if (!res || typeof res.alpha !== 'number') return;
+  $('focus').value = res.alpha.toFixed(2);
+  if (+$('aperture').value === 0 && +$('dof').value === 0) $('aperture').value = 0.7;
+  cameraChanged({ final: true });
 }
 
 canvas.addEventListener('click', (event) => {
@@ -600,18 +737,8 @@ canvas.addEventListener('click', (event) => {
     suppressClick = false;
     return;
   }
-  if (!state.info) return;
-  const [x, y] = canvasPoint(event);
-  if (state.fullRes) {
-    focusStillAt(x, y);
-  } else if (state.mode === 'refocus' && state.frames.length) {
-    const best = sharpestFrame(state.frames, x, y);
-    if (best >= 0) {
-      setPlaying(false);
-      state.index = best;
-      showFrame(best);
-    }
-  }
+  if (!state.info || state.mode !== 'camera' || state.depthShown) return;
+  focusAt(event);
 });
 
 canvas.addEventListener('pointerdown', (event) => {
@@ -620,13 +747,13 @@ canvas.addEventListener('pointerdown', (event) => {
     startPan(event);
     return;
   }
-  if (state.mode !== 'camera' || state.stack) return;
+  if (state.mode !== 'camera' || state.stack || !state.info.hasRaw) return;
   // Drag to turn the viewpoint, like grabbing the scene: dragging across half
   // the picture moves through the whole aperture.
   canvas.setPointerCapture(event.pointerId);
   const rect = canvas.getBoundingClientRect();
   const r = state.info.radius;
-  const start = { x: event.clientX, y: event.clientY, u: state.explore.u, v: state.explore.v };
+  const start = { x: event.clientX, y: event.clientY, u: state.camera.u, v: state.camera.v };
   let moved = false;
   canvas.onpointermove = (e) => {
     const dx = e.clientX - start.x;
@@ -634,9 +761,9 @@ canvas.addEventListener('pointerdown', (event) => {
     if (!moved && Math.hypot(dx, dy) < 3) return;
     if (!moved) {
       moved = true;
-      if (state.fullRes) setFullRes(false, { restore: false });
-      setPlaying(false);
-      state.interactive = true;
+      setFullRes(false, { restore: false });
+      setDepthShown(false, { restore: false });
+      backToCamera();
     }
     let u = start.u - (dx / (rect.width / 2)) * r;
     let v = start.v - (dy / (rect.height / 2)) * r;
@@ -645,25 +772,40 @@ canvas.addEventListener('pointerdown', (event) => {
       u *= r / len;
       v *= r / len;
     }
-    state.explore.u = u;
-    state.explore.v = v;
-    renderExplore();
+    state.camera.u = u;
+    state.camera.v = v;
+    renderCamera();
   };
   canvas.onpointerup = () => {
     canvas.onpointermove = null;
     suppressClick = moved;
+    if (moved) invalidateAnimation();
   };
 });
 
 canvas.addEventListener('dblclick', () => {
-  if (state.mode !== 'camera' || state.stack) return;
-  if (state.fullRes) setFullRes(false, { restore: false });
-  setPlaying(false);
-  state.interactive = true;
-  state.explore.u = 0;
-  state.explore.v = 0;
-  renderExplore();
+  if (state.mode !== 'camera' || state.stack || !state.info) return;
+  state.camera.u = 0;
+  state.camera.v = 0;
+  cameraChanged({ final: true });
 });
+
+// A camera setting changed: update the picture and drop stale animation
+// frames. `final` is false while a slider is being dragged.
+function cameraChanged({ final }) {
+  invalidateAnimation();
+  if (state.fullRes) {
+    if (final) renderStill();
+  } else if (!state.depthShown) {
+    backToCamera();
+    renderCamera();
+  }
+}
+
+for (const id of ['focus', 'aperture', 'dof']) {
+  $(id).oninput = () => cameraChanged({ final: false });
+  $(id).onchange = () => cameraChanged({ final: true });
+}
 
 // ---------------------------------------------------------------- export
 
@@ -672,45 +814,49 @@ function baseName() {
 }
 
 function savePng() {
-  canvas.toBlob((blob) => download(blob, `${baseName()}-${state.mode}.png`), 'image/png');
+  canvas.toBlob((blob) => download(blob, `${baseName()}.png`), 'image/png');
 }
 
 async function exportVideo() {
-  const frames = state.frames.filter(Boolean);
-  if (frames.length < 2) return;
-  const order = state.loop === 'pingpong'
-    ? [...frames.keys(), ...[...frames.keys()].reverse().slice(1, -1)]
-    : [...frames.keys(), ...frames.keys()];
-  const w = frames[0].width;
-  const h = frames[0].height;
-  const up = Math.max(1, Math.round(1080 / Math.max(w, h)));
-  const c = document.createElement('canvas');
-  c.width = w * up;
-  c.height = h * up;
-  const cctx = c.getContext('2d');
-  cctx.imageSmoothingQuality = 'high';
-  const stream = c.captureStream(state.fps);
-  const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
-  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12e6 });
-  const chunks = [];
-  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-  const done = new Promise((r) => { recorder.onstop = r; });
-  recorder.start();
   $('webm-btn').disabled = true;
-  for (let i = 0; i < order.length; i++) {
-    cctx.drawImage(frames[order[i]], 0, 0, c.width, c.height);
-    showProgress('Recording video', i / order.length);
-    await new Promise((r) => setTimeout(r, 1000 / state.fps));
+  try {
+    await ensureAnimation();
+    const frames = state.frames.filter(Boolean);
+    if (frames.length < 2) return;
+    const order = state.loop === 'pingpong'
+      ? [...frames.keys(), ...[...frames.keys()].reverse().slice(1, -1)]
+      : [...frames.keys(), ...frames.keys()];
+    const w = frames[0].width;
+    const h = frames[0].height;
+    const up = Math.max(1, Math.round(1080 / Math.max(w, h)));
+    const c = document.createElement('canvas');
+    c.width = w * up;
+    c.height = h * up;
+    const cctx = c.getContext('2d');
+    cctx.imageSmoothingQuality = 'high';
+    const stream = c.captureStream(state.fps);
+    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12e6 });
+    const chunks = [];
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const done = new Promise((r) => { recorder.onstop = r; });
+    recorder.start();
+    for (let i = 0; i < order.length; i++) {
+      cctx.drawImage(frames[order[i]], 0, 0, c.width, c.height);
+      showProgress('Recording video', i / order.length);
+      await new Promise((r) => setTimeout(r, 1000 / state.fps));
+    }
+    recorder.stop();
+    await done;
+    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    download(new Blob(chunks, { type: mime }), `${baseName()}-${$('anim').value}.${ext}`);
+  } finally {
+    hideProgress();
+    $('webm-btn').disabled = false;
   }
-  recorder.stop();
-  await done;
-  hideProgress();
-  $('webm-btn').disabled = false;
-  const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-  download(new Blob(chunks, { type: mime }), `${baseName()}-${state.mode}.${ext}`);
 }
 
-// ---------------------------------------------------------------- camera
+// ---------------------------------------------------------------- camera import
 
 async function importFromCamera() {
   let result;
@@ -771,21 +917,22 @@ $('sample-btn').onclick = () => {
   renderLibrary();
   openWith({ synthetic: { width: 3864, height: 2684 } });
 };
-$('play-btn').onclick = () => {
-  if (state.fullRes) setFullRes(false);
-  setPlaying(!state.playing);
-};
+$('play-btn').onclick = () => setPlaying(!state.playing);
 $('scrub').oninput = () => {
-  if (state.fullRes) setFullRes(false, { restore: false });
-  setPlaying(false);
-  state.interactive = false;
-  state.index = +$('scrub').value;
+  if (!state.frames.length) ensureAnimation();
+  setFullRes(false, { restore: false });
+  setDepthShown(false, { restore: false });
+  state.playing = false;
+  $('play-btn').textContent = 'Play';
+  state.showingFrames = true;
+  state.index = Math.min(+$('scrub').value, Math.max(0, state.frames.length - 1));
   showFrame(state.index);
 };
 $('png-btn').onclick = savePng;
 $('webm-btn').onclick = exportVideo;
 $('fullres-btn').onclick = () => setFullRes(!state.fullRes);
-for (const id of ['still-focus', 'still-scale']) $(id).onchange = () => state.fullRes && renderStill();
+$('depth-btn').onclick = () => setDepthShown(!state.depthShown);
+$('still-scale').onchange = () => state.fullRes && renderStill();
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
 for (const id of ['lens-x', 'lens-y']) $(id).oninput = () => renderLenslets();
@@ -795,14 +942,23 @@ async function updateGrid(args) {
   hideProgress();
   state.info = { ...state.info, ...info };
   state.still = null;
+  invalidateAnimation();
   renderInfo();
-  if (state.fullRes) renderStill();
-  else renderLenslets();
+  renderLenslets();
 }
 
 for (const b of document.querySelectorAll('#modes button')) b.onclick = () => setMode(b.dataset.mode);
-for (const id of ['path', 'amount', 'frames']) $(id).onchange = () => state.info && setMode('camera');
-for (const id of ['near', 'far', 'steps']) $(id).onchange = () => state.info && setMode('refocus');
+
+function animationSettingsChanged() {
+  $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
+  $('anim-focus').hidden = $('anim').value !== 'focus';
+  invalidateAnimation();
+  if (state.showingFrames && !state.stack) {
+    backToCamera();
+    renderCamera();
+  }
+}
+for (const id of ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps']) $(id).onchange = animationSettingsChanged;
 
 async function applySettings() {
   const settings = {
@@ -815,10 +971,10 @@ async function applySettings() {
   if (!state.info || !state.info.hasRaw) return;
   const info = await engine.request('settings', { settings });
   if (info) state.info = { ...state.info, ...info };
-  const wasFull = state.fullRes;
   state.still = null;
-  setMode(state.mode);
-  if (wasFull) setFullRes(true);
+  invalidateAnimation();
+  if (state.showingFrames) backToCamera();
+  refresh();
 }
 for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail']) $(id).onchange = applySettings;
 
@@ -826,13 +982,15 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea')) return;
   if (e.code === 'Space') {
     e.preventDefault();
-    setPlaying(!state.playing);
+    if (state.mode === 'camera' && state.info) setPlaying(!state.playing);
   } else if (e.key === '+' || e.key === '=') {
     zoomBy(1.5);
   } else if (e.key === '-' || e.key === '_') {
     zoomBy(1 / 1.5);
   } else if (e.key === 'f' || e.key === 'F') {
     setFullRes(!state.fullRes);
+  } else if (e.key === 'd' || e.key === 'D') {
+    setDepthShown(!state.depthShown);
   } else if (e.key === '0') {
     zoomFit();
   } else if (e.key === '1') {

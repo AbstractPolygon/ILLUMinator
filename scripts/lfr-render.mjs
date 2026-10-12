@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Command line decoder: renders the centre view (and optionally a refocus
+// Command line decoder: renders the center view (and optionally a refocus
 // sweep) of an LFR/LFP file to PNG. Useful for checking the decoder without
 // the GUI.  Usage: node scripts/lfr-render.mjs <file> [outdir]
 import fs from 'node:fs';
