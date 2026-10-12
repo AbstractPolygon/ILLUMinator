@@ -9,7 +9,8 @@ const ctx = canvas.getContext('2d');
 
 const state = {
   info: null,
-  mode: 'perspective',
+  mode: 'camera',
+  interactive: false, // camera mode: showing the dragged viewpoint, not an animation frame
   frames: [], // ImageBitmap | undefined while rendering
   frameValues: [], // alpha per refocus frame
   loop: 'loop', // or 'pingpong'
@@ -19,6 +20,7 @@ const state = {
   fps: 24,
   lastTick: 0,
   still: null, // ImageData of the full resolution render
+  fullRes: false, // full resolution toggle
   library: [],
   current: null,
   explore: { u: 0, v: 0, busy: false, pending: null },
@@ -149,7 +151,7 @@ function draw(img) {
 
 function showFrame(i) {
   const f = state.frames[i];
-  if (f) draw(f);
+  if (f && !(state.mode === 'camera' && state.interactive)) draw(f);
   $('scrub').value = i;
   const ready = state.frames.filter(Boolean).length;
   const val = state.frameValues[i];
@@ -186,6 +188,7 @@ requestAnimationFrame(tick);
 
 function setPlaying(p) {
   state.playing = p;
+  if (p) state.interactive = false;
   $('play-btn').textContent = p ? 'Pause' : 'Play';
 }
 
@@ -224,7 +227,10 @@ function pathPoint(kind, t) {
 }
 
 function startPerspective() {
-  if (state.stack) return startStack();
+  if (state.stack) {
+    state.interactive = false;
+    return startStack();
+  }
   const n = +$('frames').value;
   const r = state.info.radius * +$('amount').value;
   const path = [];
@@ -280,11 +286,11 @@ async function renderExplore() {
 async function renderStill() {
   const alpha = +$('still-focus').value;
   const scale = +$('still-scale').value;
-  $('still-render').disabled = true;
   try {
     const { promise } = engine.job('superRes', 'superres', { alpha, scale }, { onProgress: showProgress });
     const msg = await promise;
-    if (msg && msg.pixels) {
+    // Ignore a result that arrives after full resolution was switched off.
+    if (msg && msg.pixels && state.fullRes) {
       state.still = toImageData(msg);
       draw(state.still);
       $('frame-label').textContent = `${msg.width}×${msg.height} · focus ${alpha.toFixed(2)}`;
@@ -293,8 +299,31 @@ async function renderStill() {
     showError(err);
   } finally {
     hideProgress();
-    $('still-render').disabled = false;
   }
+}
+
+// Full resolution is a toggle over whatever is on screen: it pauses playback
+// and re-renders the current picture from every sensor pixel. In Refocus mode
+// it keeps the focus of the current frame.
+function setFullRes(on, { restore = true } = {}) {
+  if (on && !(state.info && state.info.hasRaw && state.mode !== 'lenslets')) return;
+  state.fullRes = on;
+  $('fullres-btn').setAttribute('aria-pressed', String(on));
+  $('fullres-panel').hidden = !on;
+  if (on) {
+    setPlaying(false);
+    const alpha = state.mode === 'refocus' ? state.frameValues[state.index] : undefined;
+    if (alpha !== undefined) $('still-focus').value = alpha.toFixed(2);
+    renderStill();
+    return;
+  }
+  engine.cancel('superres');
+  hideProgress();
+  state.still = null;
+  if (!restore) return;
+  if (state.mode === 'camera' && state.interactive) renderExplore();
+  else if (state.mode === 'lenslets') renderLenslets();
+  else showFrame(state.index);
 }
 
 async function renderLenslets() {
@@ -331,26 +360,29 @@ function setMode(mode) {
   for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== mode;
   const raw = state.info && state.info.hasRaw;
   for (const b of document.querySelectorAll('#modes button')) {
-    b.disabled = !state.info || (!raw && !['perspective', 'refocus'].includes(b.dataset.mode));
+    b.disabled = !state.info || (!raw && !['camera', 'refocus'].includes(b.dataset.mode));
   }
   if (!state.info) return;
+  if (state.fullRes) setFullRes(false, { restore: false });
+  $('fullres-btn').disabled = !raw || mode === 'lenslets';
   layoutCanvas();
   stopFrames();
-  const animated = mode === 'perspective' || mode === 'refocus';
+  const animated = mode === 'camera' || mode === 'refocus';
   $('play-btn').disabled = !animated;
   $('webm-btn').disabled = !animated;
   $('scrub').disabled = !animated;
   $('frame-label').textContent = '';
-  if (mode === 'perspective') startPerspective();
-  else if (mode === 'refocus') startRefocus();
-  else if (mode === 'explore') {
-    state.explore.u = 0;
-    state.explore.v = 0;
-    renderExplore();
-  } else if (mode === 'still') {
-    if (state.still) draw(state.still);
-    else renderStill();
-  } else if (mode === 'lenslets') {
+  if (mode === 'camera') {
+    // Show the centre view for dragging; the animation renders behind it.
+    startPerspective();
+    if (!state.stack) {
+      state.interactive = true;
+      state.explore.u = 0;
+      state.explore.v = 0;
+      renderExplore();
+    }
+  } else if (mode === 'refocus') startRefocus();
+  else if (mode === 'lenslets') {
     renderLenslets();
     renderGridInfo();
   }
@@ -433,7 +465,7 @@ function layoutCanvas() {
   canvas.style.top = `${viewer.clientHeight / 2 - view.cy * h}px`;
   // Show real pixels when inspecting detail.
   canvas.style.imageRendering = scale >= 2 ? 'pixelated' : 'auto';
-  canvas.classList.toggle('pannable', view.k > 1 && state.mode !== 'explore');
+  canvas.classList.toggle('pannable', view.k > 1 && state.mode !== 'camera');
   $('zoom-label').textContent = view.k === 1 ? 'Fit' : `${Math.round(scale * 100)}%`;
   $('zoom-out').disabled = view.k <= 1;
   $('zoom-in').disabled = scale >= MAX_SCALE - 1e-6;
@@ -557,7 +589,7 @@ async function focusStillAt(x, y) {
   await new Promise((r) => setTimeout(r, 50));
   hideProgress();
   const best = sharpestFrame(frames, x / scale, y / scale, 8);
-  if (best >= 0) {
+  if (best >= 0 && state.fullRes) {
     $('still-focus').value = alphas[best].toFixed(2);
     renderStill();
   }
@@ -570,45 +602,64 @@ canvas.addEventListener('click', (event) => {
   }
   if (!state.info) return;
   const [x, y] = canvasPoint(event);
-  if (state.mode === 'refocus' && state.frames.length) {
+  if (state.fullRes) {
+    focusStillAt(x, y);
+  } else if (state.mode === 'refocus' && state.frames.length) {
     const best = sharpestFrame(state.frames, x, y);
     if (best >= 0) {
       setPlaying(false);
       state.index = best;
       showFrame(best);
     }
-  } else if (state.mode === 'still') {
-    focusStillAt(x, y);
   }
 });
 
 canvas.addEventListener('pointerdown', (event) => {
   if (!state.info || event.button !== 0) return;
-  if (event.shiftKey || (view.k > 1 && state.mode !== 'explore')) {
+  if (event.shiftKey || (view.k > 1 && state.mode !== 'camera')) {
     startPan(event);
     return;
   }
-  if (state.mode !== 'explore') return;
+  if (state.mode !== 'camera' || state.stack) return;
+  // Drag to turn the viewpoint, like grabbing the scene: dragging across half
+  // the picture moves through the whole aperture.
   canvas.setPointerCapture(event.pointerId);
-  const move = (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1;
-    const len = Math.hypot(nx, ny);
-    const k = len > 1 ? 1 / len : 1;
-    state.explore.u = nx * k * state.info.radius;
-    state.explore.v = ny * k * state.info.radius;
+  const rect = canvas.getBoundingClientRect();
+  const r = state.info.radius;
+  const start = { x: event.clientX, y: event.clientY, u: state.explore.u, v: state.explore.v };
+  let moved = false;
+  canvas.onpointermove = (e) => {
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (!moved && Math.hypot(dx, dy) < 3) return;
+    if (!moved) {
+      moved = true;
+      if (state.fullRes) setFullRes(false, { restore: false });
+      setPlaying(false);
+      state.interactive = true;
+    }
+    let u = start.u - (dx / (rect.width / 2)) * r;
+    let v = start.v - (dy / (rect.height / 2)) * r;
+    const len = Math.hypot(u, v);
+    if (len > r) {
+      u *= r / len;
+      v *= r / len;
+    }
+    state.explore.u = u;
+    state.explore.v = v;
     renderExplore();
   };
-  move(event);
-  canvas.onpointermove = move;
   canvas.onpointerup = () => {
     canvas.onpointermove = null;
+    suppressClick = moved;
   };
 });
 
 canvas.addEventListener('dblclick', () => {
-  if (state.mode !== 'explore') return;
+  if (state.mode !== 'camera' || state.stack) return;
+  if (state.fullRes) setFullRes(false, { restore: false });
+  setPlaying(false);
+  state.interactive = true;
   state.explore.u = 0;
   state.explore.v = 0;
   renderExplore();
@@ -720,15 +771,21 @@ $('sample-btn').onclick = () => {
   renderLibrary();
   openWith({ synthetic: { width: 3864, height: 2684 } });
 };
-$('play-btn').onclick = () => setPlaying(!state.playing);
+$('play-btn').onclick = () => {
+  if (state.fullRes) setFullRes(false);
+  setPlaying(!state.playing);
+};
 $('scrub').oninput = () => {
+  if (state.fullRes) setFullRes(false, { restore: false });
   setPlaying(false);
+  state.interactive = false;
   state.index = +$('scrub').value;
   showFrame(state.index);
 };
 $('png-btn').onclick = savePng;
 $('webm-btn').onclick = exportVideo;
-$('still-render').onclick = renderStill;
+$('fullres-btn').onclick = () => setFullRes(!state.fullRes);
+for (const id of ['still-focus', 'still-scale']) $(id).onchange = () => state.fullRes && renderStill();
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
 for (const id of ['lens-x', 'lens-y']) $(id).oninput = () => renderLenslets();
@@ -739,11 +796,12 @@ async function updateGrid(args) {
   state.info = { ...state.info, ...info };
   state.still = null;
   renderInfo();
-  renderLenslets();
+  if (state.fullRes) renderStill();
+  else renderLenslets();
 }
 
 for (const b of document.querySelectorAll('#modes button')) b.onclick = () => setMode(b.dataset.mode);
-for (const id of ['path', 'amount', 'frames']) $(id).onchange = () => state.info && setMode('perspective');
+for (const id of ['path', 'amount', 'frames']) $(id).onchange = () => state.info && setMode('camera');
 for (const id of ['near', 'far', 'steps']) $(id).onchange = () => state.info && setMode('refocus');
 
 async function applySettings() {
@@ -757,8 +815,10 @@ async function applySettings() {
   if (!state.info || !state.info.hasRaw) return;
   const info = await engine.request('settings', { settings });
   if (info) state.info = { ...state.info, ...info };
+  const wasFull = state.fullRes;
   state.still = null;
   setMode(state.mode);
+  if (wasFull) setFullRes(true);
 }
 for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail']) $(id).onchange = applySettings;
 
@@ -771,6 +831,8 @@ document.addEventListener('keydown', (e) => {
     zoomBy(1.5);
   } else if (e.key === '-' || e.key === '_') {
     zoomBy(1 / 1.5);
+  } else if (e.key === 'f' || e.key === 'F') {
+    setFullRes(!state.fullRes);
   } else if (e.key === '0') {
     zoomFit();
   } else if (e.key === '1') {
@@ -778,20 +840,37 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Files can be dropped anywhere in the window.
 const drop = $('drop-zone');
-drop.addEventListener('dragover', (e) => {
-  e.preventDefault();
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+  dragDepth++;
   drop.classList.add('dragover');
 });
-drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
-drop.addEventListener('drop', (e) => {
+document.addEventListener('dragover', (e) => {
   e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+});
+document.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) drop.classList.remove('dragover');
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
   drop.classList.remove('dragover');
-  openPicked([...e.dataTransfer.files]);
+  const files = [...(e.dataTransfer ? e.dataTransfer.files : [])];
+  if (!files.length) return;
+  if (!files.some((f) => isLightFieldName(f.name))) {
+    showError(new Error(`${files[0].name} is not a Lytro file. Drop an .LFR, .LFP or .RAW file.`));
+    return;
+  }
+  openPicked(files);
 });
 
 canvas.classList.add('hidden');
-setMode('perspective');
+setMode('camera');
 if (native) document.body.classList.add('native');
 
 // Test hook: ?sample opens the synthetic sample on load.

@@ -118,17 +118,16 @@ function isDefect(raw, width, i) {
 // `base` is the standard refocus result (linear RGB, baseW x baseH at the
 // sampler's detail) used to fill output pixels that receive too few samples.
 export function renderSuperRes(raw, cam, dev, sampler, options) {
-  const { alpha = 0, scale = 3, vignetting: vg, base, sigma = 0.6, onProgress } = options;
-  const { grid: g, lenses, outW, outH, detail } = sampler;
+  const { alpha = 0, scale = 3, vignetting: vg, base, sigma = 0.6, aperture = 0.38, onProgress } = options;
+  const { grid: g, outW, outH, detail } = sampler;
   const { width } = cam;
   const unit = g.rowStep;
-  const xMin = (lenses.c0 + 1) * g.pitch;
-  const yMin = lenses.r0 * g.rowStep;
+  const { xMin, yMin } = sampler;
   const W = Math.floor((outW / detail) * scale);
   const H = Math.floor((outH / detail) * scale);
   const acc = new Float32Array(W * H * 3);
   const wsum = new Float32Array(W * H * 3);
-  const rUse = g.pitch * 0.45;
+  const rUse = g.pitch * aperture;
   const inv2s2 = 1 / (2 * sigma * sigma);
   const wx = new Float32Array(3);
   const wy = new Float32Array(3);

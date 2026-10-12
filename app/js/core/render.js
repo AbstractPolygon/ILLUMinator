@@ -8,54 +8,82 @@
 
 import { lensCenters, toLocal } from './lenslet.js';
 
-// Precomputes, for every output pixel, the four surrounding lenses and their
-// interpolation weights. Output pixels are spaced `rowStep / detail` sensor
-// pixels apart along the (de-rotated) lens grid axes.
-export function buildSampler(grid, cam, detail = 1) {
+const TAPS = 8;
+
+// Precomputes, for every output pixel, the nearby lenses and their weights.
+// The lens rows are offset by half a lens, so any interpolation that takes
+// each output row from one lens row puts a sharp edge at slightly different
+// places in alternate rows (a comb pattern). A round kernel over all lenses
+// within `kernel` lens pitches treats every direction alike instead.
+// Output pixels are spaced `rowStep / detail` sensor pixels apart along the
+// (de-rotated) lens grid axes.
+export function buildSampler(grid, cam, detail = 1, kernel = 1.0) {
   const lenses = lensCenters(grid, cam.width, cam.height);
   const { r0, r1, c0, c1, cols } = lenses;
   const spacing = grid.rowStep / detail;
   // Grid-local extent covered by complete lens neighbourhoods.
-  const xMin = c0 * grid.pitch + grid.pitch;
-  const xMax = c1 * grid.pitch - grid.pitch;
-  const yMin = r0 * grid.rowStep;
-  const yMax = (r1 - 1) * grid.rowStep;
+  const xMin = c0 * grid.pitch + 2 * grid.pitch;
+  const xMax = c1 * grid.pitch - 2 * grid.pitch;
+  const yMin = (r0 + 1) * grid.rowStep;
+  const yMax = (r1 - 2) * grid.rowStep;
   const outW = Math.max(1, Math.floor((xMax - xMin) / spacing));
   const outH = Math.max(1, Math.floor((yMax - yMin) / spacing));
-  const idx = new Int32Array(outW * outH * 4);
-  const wts = new Float32Array(outW * outH * 4);
+  const idx = new Int32Array(outW * outH * TAPS);
+  const wts = new Float32Array(outW * outH * TAPS);
+  const radius = kernel * grid.pitch;
+  const r2 = radius * radius;
   const half = grid.pitch / 2;
+  const candI = new Int32Array(16);
+  const candW = new Float32Array(16);
   let o = 0;
   for (let Y = 0; Y < outH; Y++) {
     const ly = yMin + Y * spacing;
-    const rowF = ly / grid.rowStep;
-    const ra = Math.floor(rowF);
-    const t = rowF - ra;
-    for (let X = 0; X < outW; X++, o += 4) {
+    const ra = Math.floor(ly / grid.rowStep);
+    for (let X = 0; X < outW; X++, o += TAPS) {
       const lx = xMin + X * spacing;
-      for (let k = 0; k < 2; k++) {
-        const r = ra + k;
-        const colF = (lx - (r & 1) * half) / grid.pitch;
-        const ca = Math.floor(colF);
-        const s = colF - ca;
-        const base = (r - r0) * cols + (ca - c0);
-        const wr = k === 0 ? 1 - t : t;
-        idx[o + 2 * k] = base;
-        idx[o + 2 * k + 1] = base + 1;
-        wts[o + 2 * k] = wr * (1 - s);
-        wts[o + 2 * k + 1] = wr * s;
+      let n = 0;
+      for (let r = ra - 1; r <= ra + 2; r++) {
+        const dy = ly - r * grid.rowStep;
+        if (dy * dy >= r2) continue;
+        const off = (r & 1) * half;
+        const cc = Math.round((lx - off) / grid.pitch);
+        for (let c = cc - 1; c <= cc + 1; c++) {
+          const dx = lx - (c * grid.pitch + off);
+          const d2 = dx * dx + dy * dy;
+          if (d2 >= r2) continue;
+          const q = 1 - d2 / r2;
+          candI[n] = (r - r0) * cols + (c - c0);
+          candW[n] = q * q;
+          n++;
+        }
       }
+      // Keep the strongest taps and normalise.
+      let sum = 0;
+      for (let k = 0; k < TAPS; k++) {
+        let best = -1;
+        for (let m = 0; m < n; m++) if (candW[m] > 0 && (best < 0 || candW[m] > candW[best])) best = m;
+        if (best < 0) {
+          idx[o + k] = idx[o];
+          wts[o + k] = 0;
+          continue;
+        }
+        idx[o + k] = candI[best];
+        wts[o + k] = candW[best];
+        sum += candW[best];
+        candW[best] = 0;
+      }
+      for (let k = 0; k < TAPS; k++) wts[o + k] /= sum || 1;
     }
   }
-  return { grid, lenses, outW, outH, idx, wts, spacing, detail };
+  return { grid, lenses, outW, outH, idx, wts, taps: TAPS, spacing, detail, xMin, yMin };
 }
 
 // Maps a sensor position to output image coordinates (used by the UI to draw
 // the grid overlay and by tests).
 export function sensorToOutput(sampler, x, y) {
-  const { grid, lenses, spacing } = sampler;
+  const { grid, spacing } = sampler;
   const [lx, ly] = toLocal(grid, x, y);
-  return [(lx - (lenses.c0 + 1) * grid.pitch) / spacing, (ly - lenses.r0 * grid.rowStep) / spacing];
+  return [(lx - sampler.xMin) / spacing, (ly - sampler.yMin) / spacing];
 }
 
 // Prepares per-channel normalisation so samplers do not need the metadata.
@@ -115,16 +143,16 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
 
 // Renders one sub-aperture view as linear RGB (Float32Array, outW * outH * 3).
 export function renderView(raw, cam, dev, sampler, u, v, scratch) {
-  const { lenses, idx, wts, outW, outH } = sampler;
+  const { lenses, idx, wts, outW, outH, taps } = sampler;
   const per = scratch && scratch.length === lenses.cx.length * 3 ? scratch : new Float32Array(lenses.cx.length * 3);
   sampleLenses(raw, cam, dev, lenses, sampler.grid, u, v, per);
   const out = new Float32Array(outW * outH * 3);
   const n = outW * outH;
-  for (let p = 0, o = 0; p < n; p++, o += 4) {
+  for (let p = 0, o = 0; p < n; p++, o += taps) {
     let r = 0;
     let g = 0;
     let b = 0;
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < taps; k++) {
       const w = wts[o + k];
       const l = idx[o + k] * 3;
       r += per[l] * w;
