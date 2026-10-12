@@ -60,9 +60,10 @@
         <h2>Camera</h2>
         <p class="hint">Drag the picture to change the viewpoint. Click to focus on a point. Double-click to recenter.</p>
         <label>Focus <input id="focus" type="range" min="-1.6" max="1.6" step="0.02" value="0"></label>
-        <label>Aperture <input id="aperture" type="range" min="0" max="1" step="0.05" value="0"></label>
-        <label>Depth of field <input id="dof" type="range" min="0" max="1" step="0.05" value="0"></label>
-        <p class="hint">Aperture uses the camera's own aperture: 0 keeps everything sharp. Depth of field narrows the in-focus range further, beyond what the camera recorded.</p>
+        <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
+          <input id="fstop" type="range" min="0" max="11" step="1" value="0" aria-describedby="fstop-hint">
+        </label>
+        <p id="fstop-hint" class="hint">Small apertures (f/22) keep everything sharp. Wider apertures narrow the depth of field. Past the camera's own aperture, the blur is simulated from the depth map.</p>
         <div class="row">
           <button id="depth-btn" aria-pressed="false" title="Show the depth map (D)">Show depth</button>
         </div>

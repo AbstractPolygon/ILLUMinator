@@ -171,14 +171,39 @@ function draw(img) {
   canvas.classList.remove('hidden');
 }
 
+// Aperture stops offered by the f-stop slider, smallest aperture first.
+const F_STOPS = [22, 16, 11, 8, 5.6, 4, 2.8, 2, 1.4, 1, 0.7, 0.5];
+
+function fNumber() {
+  return F_STOPS[+$('fstop').value];
+}
+
+// The camera recorded the light field through its own aperture (f/2 on the
+// ILLUM). Stopping down uses a smaller part of it (synthetic aperture as a
+// fraction of the recorded one); opening up past it adds blur from the depth
+// map, scaled so the blur grows like a real lens's would.
+function apertureFor(n) {
+  const native = (state.info && state.info.cam && state.info.cam.capture && state.info.cam.capture.fNumber) || 2;
+  const ratio = native / n;
+  // About one view's worth of the aperture: render that single view (fast).
+  if (ratio < 0.15) return { aperture: 0, dof: 0 };
+  if (ratio <= 1) return { aperture: ratio, dof: 0 };
+  const radius = state.info ? state.info.radius : 4.5;
+  return { aperture: 1, dof: (radius * (ratio - 1)) / 14 };
+}
+
+function showFNumber() {
+  const n = fNumber();
+  $('fstop-label').textContent = `f/${n}`;
+}
+
 // Camera settings shared by the live view, animations and full resolution.
 function cameraParams() {
   return {
     u: state.camera.u,
     v: state.camera.v,
     alpha: +$('focus').value,
-    aperture: +$('aperture').value,
-    dof: +$('dof').value,
+    ...apertureFor(fNumber()),
   };
 }
 
@@ -241,8 +266,8 @@ function animationRequest() {
     const near = +$('near').value;
     const far = +$('far').value;
     const alphas = Array.from({ length: n }, (_, i) => near + ((far - near) * i) / (n - 1));
-    // A closed aperture without synthetic depth of field would show no change.
-    const aperture = p.aperture > 0 || p.dof > 0 ? p.aperture : 1;
+    // A small aperture would show little change: sweep at least wide open.
+    const aperture = Math.max(p.aperture, 1);
     return { type: 'refocusFrames', kind: 'refocus', loop: 'pingpong', values: alphas, args: { alphas, u: p.u, v: p.v, aperture, dof: p.dof } };
   }
   const n = +$('frames').value;
@@ -498,7 +523,7 @@ function setMode(mode) {
   const raw = !!(state.info && state.info.hasRaw);
   for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
   const camera = mode === 'camera';
-  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'aperture', 'dof']) $(id).disabled = !raw || !camera;
+  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop']) $(id).disabled = !raw || !camera;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -709,9 +734,8 @@ function sharpestFrame(frames, x, y, radius = 10) {
   return best;
 }
 
-// Click to focus: the depth map gives the focus value that makes that point
-// sharp. With everything sharp (closed aperture, no synthetic depth of
-// field) a click also opens the aperture so the change is visible.
+// Click to focus on the clicked spot. With a small aperture everything is
+// already sharp, so a click also opens up to f/2.8 to make the change visible.
 async function focusAt(event) {
   if (state.stack) {
     const rect = canvas.getBoundingClientRect();
@@ -728,7 +752,10 @@ async function focusAt(event) {
   hideProgress();
   if (!res || typeof res.alpha !== 'number') return;
   $('focus').value = res.alpha.toFixed(2);
-  if (+$('aperture').value === 0 && +$('dof').value === 0) $('aperture').value = 0.7;
+  if (fNumber() > 4) {
+    $('fstop').value = F_STOPS.indexOf(2.8);
+    showFNumber();
+  }
   cameraChanged({ final: true });
 }
 
@@ -802,8 +829,11 @@ function cameraChanged({ final }) {
   }
 }
 
-for (const id of ['focus', 'aperture', 'dof']) {
-  $(id).oninput = () => cameraChanged({ final: false });
+for (const id of ['focus', 'fstop']) {
+  $(id).oninput = () => {
+    showFNumber();
+    cameraChanged({ final: false });
+  };
   $(id).onchange = () => cameraChanged({ final: true });
 }
 

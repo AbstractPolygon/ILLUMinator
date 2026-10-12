@@ -87,9 +87,19 @@ export function sensorToOutput(sampler, x, y) {
 }
 
 // Prepares per-channel normalization so samplers do not need the metadata.
+// Raw values this close to the white level count as saturated.
+const SATURATION = 0.97;
+
 export function makeDevelopParams(cam) {
   const scale = [0, 1, 2].map((c) => cam.wb[c] / Math.max(1, cam.white[c] - cam.black[c]));
-  return { cfa: cam.cfa, black: cam.black, scale };
+  // Raw level at which each channel saturates, and the developed level at
+  // which the first channel does. Above it the true color is unknown: when
+  // every channel clips, white balance scales red and blue more than green
+  // and white highlights turn pink or red. Clamping all channels to the
+  // first channel's clip level renders them white instead.
+  const saturated = [0, 1, 2].map((c) => cam.black[c] + SATURATION * (cam.white[c] - cam.black[c]));
+  const clip = Math.min(...[0, 1, 2].map((c) => (saturated[c] - cam.black[c]) * scale[c]));
+  return { cfa: cam.cfa, black: cam.black, scale, saturated, clip };
 }
 
 // Bilinear interpolation on the sub-lattice of one Bayer color, which has a
@@ -126,6 +136,7 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
   const [rO, gO, bO] = origins;
   const [bR, bG, bB] = dev.black;
   const [sR, sG, sB] = dev.scale;
+  const clip = dev.clip ?? Infinity;
   const n = lenses.cx.length;
   for (let i = 0; i < n; i++) {
     const x = lenses.cx[i] + du;
@@ -135,9 +146,9 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
     for (const [gx, gy] of gO) g += sampleLattice(raw, width, height, gx, gy, x, y);
     g /= gO.length;
     const b = sampleLattice(raw, width, height, bO[0][0], bO[0][1], x, y);
-    out[3 * i] = Math.max(0, (r - bR) * sR);
-    out[3 * i + 1] = Math.max(0, (g - bG) * sG);
-    out[3 * i + 2] = Math.max(0, (b - bB) * sB);
+    out[3 * i] = Math.min(clip, Math.max(0, (r - bR) * sR));
+    out[3 * i + 1] = Math.min(clip, Math.max(0, (g - bG) * sG));
+    out[3 * i + 2] = Math.min(clip, Math.max(0, (b - bB) * sB));
   }
 }
 

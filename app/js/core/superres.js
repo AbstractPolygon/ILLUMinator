@@ -224,7 +224,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
     let gain = 0;
     for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
-    if (!(gain > 0) || isDefect(raw, width, i)) return;
+    // Saturated pixels carry no reliable brightness; the standard render
+    // (with clipped highlights rendered white) fills in there.
+    if (!(gain > 0) || raw[i] >= dev.saturated[ch] || isDefect(raw, width, i)) return;
     const du = u - u0;
     const dv = v - v0;
     const conf = (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
@@ -267,6 +269,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     sumUp += upY[p];
     sumSharp += sharpY[p];
   }
+  const pattern = removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale });
   const match = sumSharp > 0 ? sumUp / sumSharp : 1;
   const out = new Float32Array(W * H * 3);
   for (let p = 0; p < W * H; p++) {
@@ -276,5 +279,67 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     out[3 * p + 1] = up[3 * p + 1] * k;
     out[3 * p + 2] = up[3 * p + 2] * k;
   }
-  return { width: W, height: H, rgb: out };
+  return { width: W, height: H, rgb: out, pattern };
+}
+
+const PHASE_BINS = 16;
+
+// The splatted samples' density and brightness vary slightly with position
+// inside each lens cell, so the result carries a faint pattern that repeats
+// with the lens grid (hexagons or squares, most visible on smooth surfaces).
+// Measure it: average the ratio of splatted to standard brightness at each
+// position within the cell (its lattice phase) over the whole picture, where
+// the scene evens out, and divide it out. Returns the pattern's strength
+// (relative standard deviation) before correction.
+function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale }) {
+  const n = PHASE_BINS;
+  const sum = new Float64Array(n * n);
+  const cnt = new Float64Array(n * n);
+  const phase = (k, j) => {
+    const ly = yMin + (j / scale) * unit;
+    const lx = xMin + (k / scale) * unit;
+    const fj = ly / g.rowStep;
+    const fi = (lx - fj * g.pitch * 0.5) / g.pitch;
+    return [fi - Math.floor(fi), fj - Math.floor(fj)];
+  };
+  for (let j = 0; j < H; j++) {
+    for (let k = 0; k < W; k++) {
+      const p = j * W + k;
+      if (focus[p] < 0.5 || !(wsum[p] > 0) || !(upY[p] > 1e-4)) continue;
+      const [a, b] = phase(k, j);
+      const bin = Math.min(n - 1, Math.floor(b * n)) * n + Math.min(n - 1, Math.floor(a * n));
+      sum[bin] += sharpY[p] / upY[p];
+      cnt[bin] += 1;
+    }
+  }
+  let total = 0;
+  let count = 0;
+  for (let i = 0; i < n * n; i++) {
+    total += sum[i];
+    count += cnt[i];
+  }
+  if (count < n * n * 20) return 0;
+  const mean = total / count;
+  const gain = new Float32Array(n * n);
+  let var2 = 0;
+  for (let i = 0; i < n * n; i++) {
+    gain[i] = cnt[i] > 0 ? sum[i] / cnt[i] / mean : 1;
+    var2 += (gain[i] - 1) ** 2;
+  }
+  // Bilinear in phase (wrapping around the cell) to avoid bin edges.
+  for (let j = 0; j < H; j++) {
+    for (let k = 0; k < W; k++) {
+      const [a, b] = phase(k, j);
+      const fa = a * n - 0.5;
+      const fb = b * n - 0.5;
+      const a0 = Math.floor(fa);
+      const b0 = Math.floor(fb);
+      const ta = fa - a0;
+      const tb = fb - b0;
+      const at = (bb, aa) => gain[(((bb % n) + n) % n) * n + (((aa % n) + n) % n)];
+      const gv = (at(b0, a0) * (1 - ta) + at(b0, a0 + 1) * ta) * (1 - tb) + (at(b0 + 1, a0) * (1 - ta) + at(b0 + 1, a0 + 1) * ta) * tb;
+      if (gv > 0) sharpY[j * W + k] /= gv;
+    }
+  }
+  return Math.sqrt(var2 / (n * n));
 }
