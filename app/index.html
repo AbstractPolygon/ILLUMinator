@@ -54,6 +54,24 @@
     </aside>
 
     <section class="stage">
+      <div id="grid-view" class="grid-view" hidden>
+        <div class="grid-bar">
+          <h2 id="grid-title"></h2>
+          <span id="grid-count" class="hint"></span>
+          <span class="spacer"></span>
+          <div class="thumb-size" role="group" aria-label="Thumbnail size">
+            <button id="thumb-smaller" type="button" class="icon-only" title="Smaller thumbnails (−)" aria-label="Smaller thumbnails">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+            </button>
+            <input id="thumb-size" type="range" min="100" max="420" step="10" value="180" aria-label="Thumbnail size">
+            <button id="thumb-bigger" type="button" class="icon-only" title="Bigger thumbnails (+)" aria-label="Bigger thumbnails">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="photo-grid" class="photo-grid"></div>
+        <p id="grid-empty" class="hint" hidden></p>
+      </div>
       <div id="drop-zone" class="viewer">
         <canvas id="view"></canvas>
         <canvas id="spread-overlay" hidden></canvas>

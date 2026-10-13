@@ -155,6 +155,7 @@ function renderLibrary() {
     li.onclick = () => openItem(photo);
     return li;
   }));
+  renderGrid(photos, album);
   const empty = $('library-empty');
   empty.hidden = photos.length > 0;
   if (album) empty.textContent = 'No photos in this album yet. Drag photos onto the album, or use ••• on a photo.';
@@ -178,7 +179,7 @@ function renderAlbums() {
     b.append(name, count);
     b.onclick = () => {
       state.album = row.id;
-      renderLibrary();
+      showGrid(true);
     };
     li.append(b);
     if (row.id) {
@@ -207,6 +208,94 @@ function renderAlbums() {
     }
     return li;
   }));
+}
+
+// ------------------------------------------------ grid
+
+// Choosing an album shows its photos as thumbnails in place of the picture;
+// opening a photo goes back to the picture.
+const THUMB_SIZE_KEY = 'illuminator.thumbSize';
+
+function showGrid(on) {
+  state.grid = on;
+  document.querySelector('.stage').classList.toggle('grid', on);
+  $('grid-view').hidden = !on;
+  if (on) {
+    if (state.playing) setPlaying(false);
+    renderLibrary();
+  } else {
+    layoutCanvas();
+  }
+}
+
+function setThumbSize(px) {
+  const input = $('thumb-size');
+  const v = Math.min(+input.max, Math.max(+input.min, Math.round(px / 10) * 10));
+  input.value = v;
+  $('photo-grid').style.setProperty('--thumb', `${v}px`);
+  $('thumb-smaller').disabled = v <= +input.min;
+  $('thumb-bigger').disabled = v >= +input.max;
+  try {
+    localStorage.setItem(THUMB_SIZE_KEY, String(v));
+  } catch {
+    // Storage unavailable: the size is not remembered.
+  }
+}
+
+$('thumb-size').oninput = () => setThumbSize(+$('thumb-size').value);
+$('thumb-smaller').onclick = () => setThumbSize(+$('thumb-size').value / 1.25);
+$('thumb-bigger').onclick = () => setThumbSize(+$('thumb-size').value * 1.25);
+{
+  let saved = 180;
+  try {
+    saved = +(localStorage.getItem(THUMB_SIZE_KEY) || 180);
+  } catch {
+    // Storage unavailable: default size.
+  }
+  setThumbSize(saved);
+}
+
+function renderGrid(photos, album) {
+  if (!state.grid) return;
+  $('grid-title').textContent = album ? album.name : 'All photos';
+  $('grid-count').textContent = `${photos.length} photo${photos.length === 1 ? '' : 's'}`;
+  const current = state.current && state.current.photo;
+  $('photo-grid').replaceChildren(...photos.map((photo) => {
+    const tile = document.createElement('div');
+    tile.className = photo === current ? 'tile current' : 'tile';
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('aria-label', `Open ${photo.name}`);
+    tile.draggable = true;
+    tile.ondragstart = (e) => {
+      e.dataTransfer.setData(PHOTO_DRAG, photo.id);
+      e.dataTransfer.effectAllowed = 'copy';
+    };
+    const frame = Object.assign(document.createElement('div'), { className: 'frame' });
+    const url = thumbFor(photo);
+    if (url) frame.append(Object.assign(document.createElement('img'), { src: url, alt: '' }));
+    const name = Object.assign(document.createElement('div'), { className: 'name', textContent: photo.name, title: photo.name });
+    const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Albums, delete' });
+    more.setAttribute('aria-label', `Actions for ${photo.name}`);
+    more.setAttribute('aria-haspopup', 'menu');
+    more.onclick = (e) => {
+      e.stopPropagation();
+      photoMenu(photo, more);
+    };
+    tile.append(frame, name, more);
+    tile.onclick = () => openItem(photo);
+    tile.onkeydown = (e) => {
+      if (e.target === tile && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        openItem(photo);
+      }
+    };
+    return tile;
+  }));
+  $('grid-empty').hidden = photos.length > 0;
+  $('grid-empty').textContent = album
+    ? 'No photos in this album yet. Drag photos onto the album in the sidebar, or use ••• on a photo.'
+    : EMPTY_LIBRARY;
 }
 
 // An inline text field in place of `li`'s contents (new album, rename).
@@ -433,6 +522,7 @@ async function openItem(photo) {
   const sidecar = await lib.sidecar(photo).catch(() => null);
   state.current = { photo, name: photo.name, file, sidecar };
   state.wantThumb = !photo.thumb;
+  if (state.grid) showGrid(false);
   renderLibrary();
   const bytes = await file.arrayBuffer();
   await openWith({ bytes }, [bytes]);
@@ -1367,7 +1457,7 @@ async function importFolder() {
   const album = lib.albums.find((a) => a.name === albumName) || (await lib.createAlbum(albumName));
   const added = await importPhotos(entries, { album: album.id });
   state.album = album.id;
-  renderLibrary();
+  showGrid(true);
   const withEdits = entries.filter((e) => e.sidecar).length;
   showNotice(`Added ${added.length} photo${added.length === 1 ? '' : 's'} from ${picked.name} to the album “${album.name}”.`,
     withEdits ? `${withEdits === 1 ? 'One carries' : `${withEdits} carry`} Lytro Desktop edits, applied when ${withEdits === 1 ? 'it is' : 'each is'} first opened.` : '');
@@ -1922,6 +2012,10 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
     if (state.mode === 'camera' && state.info) setPlaying(!state.playing);
+  } else if (state.grid && (e.key === '+' || e.key === '=')) {
+    setThumbSize(+$('thumb-size').value * 1.25);
+  } else if (state.grid && (e.key === '-' || e.key === '_')) {
+    setThumbSize(+$('thumb-size').value / 1.25);
   } else if (e.key === '+' || e.key === '=') {
     zoomBy(1.5);
   } else if (e.key === '-' || e.key === '_') {
