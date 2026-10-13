@@ -577,7 +577,7 @@
       <details class="panel">
         <summary><h2>Rendering</h2></summary>
         <details class="subpanel">
-          <summary><h3>Resolution</h3></summary>
+          <summary><h3>Quality</h3></summary>
           <label>Resolution
             <select id="detail">
               <option value="1" selected>1× (fast)</option>
@@ -606,10 +606,6 @@
             </div>
           </div>
         </details>
-        <div class="row export">
-          <button id="png-btn" disabled>Save PNG</button>
-          <button id="webm-btn">Export video</button>
-        </div>
         <details class="subpanel">
           <summary><h3>3D</h3></summary>
           <label class="check" title="Shows the picture in 3D for red / cyan glasses while you edit"><input id="stereo-on" type="checkbox"> Show 3D</label>
@@ -624,6 +620,10 @@
             <input id="stereo-baseline" type="range" min="10" max="100" step="5" value="60" data-default="60">
           </label>
           <button id="stereo-btn" class="wide" disabled>Save 3D image</button>
+          <div class="row export">
+            <button id="png-btn" disabled>Save PNG</button>
+            <button id="webm-btn">Export video</button>
+          </div>
         </details>
       </details>
 

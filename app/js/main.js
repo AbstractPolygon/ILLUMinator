@@ -2477,11 +2477,18 @@ function eyeOffset() {
   return (state.info.radius || 4.5) * (+$('stereo-baseline').value / 100);
 }
 
+// One eye's render settings. At a wide aperture every view would use the
+// whole lens and both eyes would match, so each eye looks through its own
+// smaller part of the aperture.
+function eyeParams(p, u) {
+  return { ...p, u, aperture: Math.min(p.aperture || 1, 0.5) };
+}
+
 async function stereoAnaglyph(p) {
   const b = eyeOffset();
   const imgs = [];
   for (const u of [p.u - b, p.u + b]) {
-    const msg = await engine.request('view', { ...p, u }, { onProgress: showProgress });
+    const msg = await engine.request('view', eyeParams(p, u), { onProgress: showProgress });
     if (!msg || !(msg.pixels || msg.bitmap)) return null;
     imgs.push(toImageData(msg));
   }
@@ -2502,9 +2509,9 @@ $('stereo-on').onchange = () => {
   setFullRes(false, { restore: false });
   refresh();
 };
-$('stereo-baseline').onchange = () => {
+$('stereo-baseline').addEventListener('input', () => {
   if (stereoShown()) refresh();
-};
+});
 
 // A stereo pair from two viewpoints across the lens aperture: anaglyph
 // (red / cyan glasses), side by side (parallel viewing) or cross-eyed.
@@ -2519,10 +2526,10 @@ async function saveStereo() {
     const shots = [];
     for (const u of eyes) {
       showProgress('Rendering 3D', shots.length / 2);
-      const msg = await engine.request('view', { ...p, u }, { onProgress: () => {} });
+      const msg = await engine.request('view', eyeParams(p, u), { onProgress: () => {} });
       shots.push(toImageData(msg));
     }
-    const pivots = withPivotZoom(eyes.map((u) => pivotFor(u, p.v, p.alpha, p.aperture)));
+    const pivots = withPivotZoom(eyes.map((u) => pivotFor(u, p.v, p.alpha, eyeParams(p, u).aperture)));
     const base = { orientation: +$('orientation').value || 1, angle: +$('straighten').value, crop: cropValues() };
     const views = shots.map((img, i) => {
       const g = geometry(img.width, img.height, { ...base, ...(pivots[i] || {}) });
