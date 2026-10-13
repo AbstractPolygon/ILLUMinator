@@ -35,7 +35,8 @@ const state = {
   refocusViews: null,
   vignetting: null,
   depth: null,
-  gpu: null, // GpuRenderer when WebGL2 is available
+  // GpuRenderer when WebGL2 is available (false: not used, e.g. ?cpu).
+  gpu: typeof location !== 'undefined' && new URLSearchParams(location.search).has('cpu') ? false : null,
   refocusBuild: null,
   jobs: {},
   scratch: null,

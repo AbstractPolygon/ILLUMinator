@@ -2,7 +2,9 @@
 
 export class Engine {
   constructor() {
-    this.worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    // Test hook: ?cpu on the page renders without the GPU.
+    const cpu = typeof location !== 'undefined' && new URLSearchParams(location.search).has('cpu');
+    this.worker = new Worker(new URL(`./worker.js${cpu ? '?cpu' : ''}`, import.meta.url), { type: 'module' });
     this.nextId = 1;
     this.nextJob = 1;
     this.pending = new Map();

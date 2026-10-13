@@ -16,6 +16,8 @@
 
 import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT } from '../core/detail.js';
 
+// Texture unit used only for making and uploading textures.
+const SPARE_UNIT = 15;
 const VERTEX = `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
@@ -731,8 +733,11 @@ export class GpuRenderer {
     this.views = null;
   }
 
+  // Made on a texture unit no shader reads, so making a texture never
+  // replaces one bound for drawing (units 0-4).
   texture(w, h, internal = this.gl.RGBA32F, filter = this.gl.NEAREST) {
     const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + SPARE_UNIT);
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texStorage2D(gl.TEXTURE_2D, 1, internal, w, h);
@@ -1146,6 +1151,16 @@ export class GpuRenderer {
     gl.bindTexture(gl.TEXTURE_2D, vig);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, vg.bins, vg.bins, gl.RGBA, gl.FLOAT, vigData);
 
+    // Back-projection pass: the current result, sampled at each raw pixel's
+    // position (half floats filter linearly everywhere). Made before the
+    // texture units are bound below: creating a texture binds it to the
+    // active unit, which would replace the depth map.
+    let estimate = null;
+    if (p.estimate) {
+      estimate = this.texture(W, H, gl.R16F, gl.LINEAR);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
+    }
+
     this.target(acc, W, H);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1184,14 +1199,6 @@ export class GpuRenderer {
     gl.uniform2i(U.uOutSize, W, H);
     gl.uniform1i(U.uReach, p.reach);
     gl.uniform1f(U.uInv2s2, 1 / (2 * p.sigma * p.sigma));
-    // Back-projection pass: the current result, sampled at each raw pixel's
-    // position (half floats filter linearly everywhere).
-    let estimate = null;
-    if (p.estimate) {
-      estimate = this.texture(W, H, gl.R16F, gl.LINEAR);
-      gl.bindTexture(gl.TEXTURE_2D, estimate);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
-    }
     gl.useProgram(P.p);
     gl.uniform1i(U.uResidual, estimate ? 1 : 0);
     gl.uniform1i(U.uEstimate, 4);
