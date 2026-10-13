@@ -32,7 +32,20 @@ Kept in each photo's folder. Every control in the editing panels, grouped by pan
 }
 ```
 
-Values missing from a file keep their defaults, so older edits files keep working as controls are added.
+Values missing from a file keep their defaults, so older edits files keep working as controls are added. A LUT (Process › LUT) is stored in the file too, so the edits do not depend on the `.cube` file it came from.
+
+## Album archives: `<album>.illuminator-album.zip`
+
+Made by *Export album…*. A standard zip (stored, not compressed; Zip64 past 4 GB) of:
+
+```
+album.json                    { "format": "illuminator-album", "version": 1, "name": "…",
+                                "photos": [{ "folder", "name", "file", "sidecar", "thumb", "edits" }] }
+Photos/<folder>/<photo file>
+Photos/<folder>/stack.view.lfp           (Lytro Desktop edits, if any)
+Photos/<folder>/thumb.jpg
+Photos/<folder>/edits.illuminator.json
+```
 
 ## Lytro files
 

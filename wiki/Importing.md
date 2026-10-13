@@ -22,6 +22,10 @@ What carries over from Lytro Desktop: focus, aperture, focus spread, tilt, viewp
 
 Lytro Desktop keeps its albums in a database ILLUMinator does not read, so they are not imported; the album named after the folder holds everything instead.
 
+## From another ILLUMinator library
+
+An album exported with *Export album…* (see [[Library and Albums]]) is a `.zip`. Open it with **Open…** or drop it on the window: its photos join the library with their edits, and the album is made again (or joined, if one has its name). A photo already in the library is not copied twice, and its edits there are kept. This is how to move photos from the browser version to the desktop app.
+
 ## From files
 
 **Open…** or drag files onto the window. To bring Lytro Desktop's edits for a single picture, open its `raw.lfp` together with its `stack.view.lfp`; an exported `IMG_0001.LFP` opened with `IMG_0001.LFR` works the same way.

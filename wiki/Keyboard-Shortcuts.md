@@ -11,3 +11,13 @@
 | Enter | Crop: apply the frame |
 | Esc | Crop: cancel; white balance picker: cancel; menus: close |
 | Double-click a slider | Reset it |
+
+In the keyframe editor:
+
+| Key | Does |
+| --- | --- |
+| Delete / Backspace | Delete the selected keyframes |
+| Ctrl / ⌘ + A | Select every keyframe |
+| Shift-click a keyframe | Add it to the selection, or take it out |
+| Ctrl / ⌘ + mouse wheel | Zoom the timeline |
+| Shift + mouse wheel | Scroll along the timeline |
