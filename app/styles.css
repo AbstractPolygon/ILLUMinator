@@ -72,7 +72,7 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
 /* Sections in the right sidebar are spaced by a gap, so the first visible
    heading lines up with "Photos" whichever sections are hidden. */
 .controls { display: flex; flex-direction: column; gap: 0; }
-.library h2 { margin-top: 4px; }
+.library h2 { margin-top: 0; }
 
 /* Collapsible sidebar sections. */
 .panel > summary {
@@ -309,7 +309,10 @@ button.wide { display: block; width: 100%; }
 /* Divider lines between the right sidebar's sections. */
 .controls > .panel { padding: 8px 0; }
 /* The first title lines up with "Photos" in the left sidebar. */
-.controls > .panel:first-child { padding-top: 4px; }
+.controls > .panel:first-child { padding-top: 0; }
+/* Both sidebars start their first title 8px below the top bar, the same
+   space a title has between dividers. */
+.controls, .library { padding-top: 8px; }
 .controls > .panel + .panel { border-top: 1px solid var(--line); }
 /* A dropdown under its label, with room before the next control. */
 label select { display: block; margin-top: 4px; }
