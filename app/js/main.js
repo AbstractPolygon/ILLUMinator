@@ -9,6 +9,7 @@ import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
+import { parseCube, encodeLut, decodeLut } from './core/lut.js';
 import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
@@ -4151,7 +4152,9 @@ $('anim-on').onchange = () => {
 };
 
 async function applySettings() {
+  await sendLut();
   const settings = {
+    lutAmount: $('lut-amount').value / 100,
     ev: +$('ev').value,
     saturation: 1 + $('saturation').value / 100,
     autoWb: $('awb').checked,
@@ -4397,7 +4400,7 @@ function showSliderValue(input) {
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
-  else if (input.id === 'mx-strength') out.textContent = `${v}%`;
+  else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;
   else if (input.closest('.mask-shape')) out.textContent = `${v}`;
@@ -4526,3 +4529,70 @@ if (native) {
 
 // Test hook: ?sample opens the synthetic sample on load.
 if (new URLSearchParams(location.search).has('sample')) $('sample-btn').click();
+
+// ---------------------------------------------------------------- LUT
+
+// Process > LUT: a .cube color lookup table, kept with the photo's edits
+// (core/lut.js) and applied as the last step of the look.
+let lutSent = null;
+
+function showLut() {
+  let saved = null;
+  try {
+    saved = $('lut-data').value ? JSON.parse($('lut-data').value) : null;
+  } catch {
+    saved = null;
+  }
+  $('lut-name').textContent = saved ? saved.name : 'None';
+  $('lut-name').title = saved ? `${saved.name} (${saved.size}×${saved.size}×${saved.size})` : '';
+  $('lut-remove').hidden = !saved;
+  $('lut-amount').disabled = !saved;
+  return saved;
+}
+
+// The worker gets the LUT only when it changes: it is large.
+async function sendLut() {
+  const text = $('lut-data').value;
+  if (text === lutSent) return;
+  lutSent = text;
+  const saved = showLut();
+  await engine.request('setLut', { lut: saved ? decodeLut(saved) : null });
+}
+
+$('lut-remove').innerHTML = TRASH_ICON;
+$('lut-import').onclick = () => {
+  if (!canRender()) {
+    showNotice('Open a photo first: a LUT is kept with the photo.');
+    startNoticeTimer();
+    return;
+  }
+  $('lut-file').click();
+};
+$('lut-file').onchange = async () => {
+  const file = $('lut-file').files[0];
+  $('lut-file').value = '';
+  if (!file) return;
+  try {
+    const lut = parseCube(await file.text());
+    $('lut-data').value = JSON.stringify(encodeLut(lut, file.name.replace(/\.cube$/i, '')));
+  } catch (err) {
+    showNotice(`Could not use ${file.name}: ${err.message}`);
+    startNoticeTimer();
+    return;
+  }
+  showLut();
+  scheduleSave();
+  applySettingsSoon();
+};
+$('lut-remove').onclick = () => {
+  $('lut-data').value = '';
+  showLut();
+  scheduleSave();
+  applySettingsSoon();
+};
+$('lut-amount').addEventListener('input', () => {
+  showSliderValue($('lut-amount'));
+  applySettingsSoon();
+});
+$('lut-amount').addEventListener('change', () => scheduleSave());
+showLut();

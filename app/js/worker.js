@@ -23,6 +23,7 @@ import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpat
 import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
+  lut: null, // the photo's LUT (core/lut.js), or null
   lf: null,
   sampler: null,
   dev: null,
@@ -148,7 +149,8 @@ function toPixels(rgb, w, h, ctx) {
   const local = localFor(w, h, ctx);
   // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
   if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
-  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look, local);
+  const grade = state.lut ? { lut: state.lut, amount: state.settings.lutAmount ?? 1 } : null;
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look, local, grade);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
   const srgb = new Float32Array(rgb.length);
@@ -160,7 +162,7 @@ function toPixels(rgb, w, h, ctx) {
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, state.look, local);
+  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, state.look, local, grade);
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -193,6 +195,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     look: state.look,
     veilAmount: state.veil ? state.veilAmount : 0,
     lens: state.lens,
+    lutAmount: state.lut ? state.settings.lutAmount ?? 1 : 0,
     local: packed,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
@@ -309,7 +312,10 @@ async function open({ id, bytes, synthetic }) {
   }
   if (state.lf.raw) {
     state.dev = makeDevelopParams(state.lf.cam);
-    if (state.gpu === null && state.settings.gpu !== false) state.gpu = GpuRenderer.create(state.lf.cam) || false;
+    if (state.gpu === null && state.settings.gpu !== false) {
+      state.gpu = GpuRenderer.create(state.lf.cam) || false;
+      if (state.gpu && state.lut) state.gpu.setLut(state.lut);
+    }
     if (state.gpu) state.gpu.setRaw(state.lf.raw, state.lf.cam, state.dev);
     rebuildSampler();
   }
@@ -890,7 +896,14 @@ async function processedFrames({ id, job, list, kind }) {
   return { done: true };
 }
 
-const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+// The photo's LUT, sent once when it changes (it is large).
+async function setLut({ lut }) {
+  state.lut = lut && lut.data ? lut : null;
+  if (state.gpu) state.gpu.setLut(state.lut);
+  return null;
+}
+
+const handlers = { setLut, open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

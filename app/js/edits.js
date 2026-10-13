@@ -20,7 +20,7 @@ const FRINGES = ['purple', 'green', 'red', 'blue'];
 // Controls saved with a photo, by panel. View toggles (show depth map, show
 // spread, full resolution) are not edits and are left out.
 export const EDIT_GROUPS = {
-  process: ['awb', 'wb-temperature', 'wb-tint', 'ev', 'tone-contrast', 'tone-highlights', 'tone-shadows', 'tone-whites',
+  process: ['lut-data', 'lut-amount', 'awb', 'wb-temperature', 'wb-tint', 'ev', 'tone-contrast', 'tone-highlights', 'tone-shadows', 'tone-whites',
     'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`),
     'ccm-mode', ...Array.from({ length: 9 }, (_, i) => `ccm-${i}`),
     'curve-points', 'curve-highlights', 'curve-lights', 'curve-darks', 'curve-shadows'],

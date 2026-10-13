@@ -9,6 +9,7 @@
 import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
+import { sampleLut } from './lut.js';
 
 const TAPS = 8;
 
@@ -417,14 +418,18 @@ export function autoExposure(rgb, matrix) {
 // Linear camera RGB -> sRGB RGBA bytes. `look`: the per-pixel color
 // adjustments from makeLook (core/color.js), applied after exposure.
 // `local`: local adjustments (core/local.js) { masks, w, h, depth, dw, dh,
-// show } for a w x h picture, or null.
-export function toneMap(rgb, matrix, exposure, out, look = null, local = null) {
+// show } for a w x h picture, or null. `grade`: { lut, amount }, a LUT
+// (core/lut.js) applied to the sRGB result, or null.
+export function toneMap(rgb, matrix, exposure, out, look = null, local = null, grade = null) {
   const n = rgb.length / 3;
   const px = out || new Uint8ClampedArray(n * 4);
   const scale = look || local ? 1 : 4096;
   const m = matrix.map((v) => v * exposure * scale);
   const p = [0, 0, 0];
   const aspect = local ? local.w / local.h : 1;
+  const graded = !!(grade && grade.lut && grade.amount > 0);
+  const k = graded ? Math.min(1, grade.amount) : 0;
+  const q = [0, 0, 0];
   for (let i = 0, o = 0; i < rgb.length; i += 3, o += 4) {
     const r = rgb[i];
     const g = rgb[i + 1];
@@ -458,6 +463,15 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null) {
     px[o + 1] = SRGB[G | 0];
     px[o + 2] = SRGB[B | 0];
     px[o + 3] = 255;
+    if (graded) {
+      const r0 = px[o] / 255;
+      const g0 = px[o + 1] / 255;
+      const b0 = px[o + 2] / 255;
+      sampleLut(grade.lut, r0, g0, b0, q);
+      px[o] = 255 * (r0 + (q[0] - r0) * k);
+      px[o + 1] = 255 * (g0 + (q[1] - g0) * k);
+      px[o + 2] = 255 * (b0 + (q[2] - b0) * k);
+    }
   }
   return px;
 }

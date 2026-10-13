@@ -216,6 +216,19 @@
       <details class="panel color-panel">
         <summary><h2>Process</h2></summary>
         <details class="subpanel">
+          <summary><h3>LUT</h3></summary>
+          <div class="row lut-row">
+            <button id="lut-import" type="button" title="A 3D LUT in .cube format, as made by DaVinci Resolve, Premiere and most LUT packs">Import LUT…</button>
+            <span id="lut-name" class="lut-name">None</span>
+            <button id="lut-remove" type="button" class="icon-only" title="Remove the LUT" aria-label="Remove the LUT" hidden></button>
+          </div>
+          <label>Amount <output data-for="lut-amount" for="lut-amount">100%</output>
+            <input id="lut-amount" type="range" min="0" max="100" step="1" value="100" data-default="100">
+          </label>
+          <input id="lut-file" type="file" accept=".cube" hidden>
+          <input id="lut-data" type="hidden" value="" data-text>
+        </details>
+        <details class="subpanel">
           <summary><h3>White Balance</h3></summary>
           <div class="row wb-row">
             <label class="check"><input id="awb" type="checkbox"> Auto</label>

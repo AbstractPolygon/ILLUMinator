@@ -552,6 +552,10 @@ uniform int uFringeOn;
 uniform int uFringeRadius;
 uniform float uFringeThreshold;
 uniform int uLookOn;
+uniform highp sampler3D uLut; // core/lut.js, on sRGB colors
+uniform float uLutAmount;    // 0: no LUT
+uniform vec3 uLutMin;
+uniform vec3 uLutMax;
 uniform vec4 uTone;        // contrast, highlights, shadows, whites
 uniform vec2 uTone2;       // blacks, vibrance
 uniform float uHues[6];    // red, yellow, green, cyan, blue, magenta
@@ -708,7 +712,14 @@ void main() {
   c *= uExposure;
   if (uLookOn == 1) c = applyLook(c);
   if (uMaskCount > 0) c = applyLocal(c, (vec2(p) + 0.5) / vec2(size), float(size.x) / float(size.y));
-  outColor = vec4(srgb(c.r), srgb(c.g), srgb(c.b), 1.0);
+  vec3 s = vec3(srgb(c.r), srgb(c.g), srgb(c.b));
+  if (uLutAmount > 0.0) {
+    float n = float(textureSize(uLut, 0).x);
+    vec3 q = clamp((s - uLutMin) / max(uLutMax - uLutMin, vec3(1e-6)), 0.0, 1.0);
+    vec3 g = texture(uLut, q * (n - 1.0) / n + 0.5 / n).rgb;
+    s = mix(s, clamp(g, 0.0, 1.0), uLutAmount);
+  }
+  outColor = vec4(s, 1.0);
 }`;
 
 // Full resolution: one point per raw pixel, drawn at the pixel's refocused
@@ -1225,6 +1236,25 @@ export class GpuRenderer {
   }
 
   // Per-pixel focus values (view size) for depth of field.
+  // The LUT for present (core/lut.js), or null: a 3D texture, red along x.
+  setLut(lut) {
+    const gl = this.gl;
+    if (this.lutTex) gl.deleteTexture(this.lutTex);
+    this.lutTex = null;
+    this.lut = lut;
+    if (!lut) return;
+    const n = lut.size;
+    const rgba = new Float32Array(n * n * n * 4);
+    for (let i = 0; i < n * n * n; i++) rgba.set([lut.data[3 * i], lut.data[3 * i + 1], lut.data[3 * i + 2], 1], 4 * i);
+    gl.activeTexture(gl.TEXTURE0 + SPARE_UNIT);
+    this.lutTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, this.lutTex);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, n, n, n, 0, gl.RGBA, gl.FLOAT, rgba);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    for (const w of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R]) gl.texParameteri(gl.TEXTURE_3D, w, gl.CLAMP_TO_EDGE);
+  }
+
   setDepth(alpha, w, h) {
     const gl = this.gl;
     if (this.depthTex) gl.deleteTexture(this.depthTex);
@@ -1455,7 +1485,7 @@ export class GpuRenderer {
     return out;
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0 }) {
     const gl = this.gl;
     const P = this.programs.present;
     this.canvas.width = w;
@@ -1490,6 +1520,14 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uFringeRadius, Math.max(1, Math.min(6, Math.round((fringe && fringe.radius) || 2))));
     gl.uniform1f(P.u.uFringeThreshold, (fringe && fringe.threshold) ?? 0.25);
     gl.uniform2fv(P.u.uFringe, Float32Array.from([0, 1, 2, 3].flatMap((i) => (f[i] ? [f[i][0], f[i][1]] : [0, 0]))));
+    // The LUT sampler always points at its own unit: an unused 3D sampler
+    // left on unit 0 would clash with the 2D texture there.
+    const lutOn = !!this.lutTex && lutAmount > 0;
+    gl.uniform1i(P.u.uLut, 4);
+    if (lutOn) this.bindTex(4, this.lutTex, gl.TEXTURE_3D);
+    gl.uniform1f(P.u.uLutAmount, lutOn ? Math.min(1, lutAmount) : 0);
+    gl.uniform3fv(P.u.uLutMin, this.lut ? this.lut.min : [0, 0, 0]);
+    gl.uniform3fv(P.u.uLutMax, this.lut ? this.lut.max : [1, 1, 1]);
     gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
     if (look) {
       gl.uniform4f(P.u.uTone, look.contrast, look.highlights, look.shadows, look.whites);

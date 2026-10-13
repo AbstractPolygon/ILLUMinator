@@ -1,5 +1,9 @@
 # Process
 
+## LUT
+
+A color lookup table applied as the last step of the look, after every other adjustment. *Import LUT…* reads a 3D LUT in `.cube` format, as made by DaVinci Resolve, Premiere and most LUT packs (up to 65 × 65 × 65). The LUT is saved with the photo's edits, so it travels with the photo. *Amount* blends between the picture without the LUT (0%) and with it (100%); the trash button removes it.
+
 ## White Balance
 
 *Auto*, or *Temperature* (kelvin) and *Tint*. The eyedropper picks the white balance from something in the photo that should be neutral (click it; Esc cancels).
