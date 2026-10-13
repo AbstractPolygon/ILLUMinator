@@ -14,6 +14,8 @@
 // Results are read back as linear RGB (Float32Array, w * h * 3) so the rest
 // of the pipeline (depth of field, defringing, tone mapping) is unchanged.
 
+import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT } from '../core/detail.js';
+
 const VERTEX = `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
@@ -288,6 +290,88 @@ void main() {
     wsum += w;
   }
   outColor = vec4(sum / max(wsum, 1e-9), 1.0);
+}`;
+
+// Details, pass 1 (core/detail.js): luminance noise reduction (bilateral
+// on sqrt brightness) and color noise reduction (color of the blurred
+// neighborhood). Writes color (RGB relative to brightness) to rgb and sqrt
+// brightness to alpha.
+const DETAIL_NR = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform float uRangeSigma;   // 0 = off
+uniform float uChromaSigma;  // 0 = off
+out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 at(ivec2 q, ivec2 size) { return texelFetch(uSrc, clamp(q, ivec2(0), size - 1), 0).rgb; }
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 c = at(p, size);
+  float y = max(dot(c, LUMA), 0.0);
+  float s = sqrt(y);
+  if (uRangeSigma > 0.0) {
+    float k = -0.5 / (uRangeSigma * uRangeSigma);
+    float sum = 0.0;
+    float wsum = 0.0;
+    for (int dy = -2; dy <= 2; dy++) {
+      for (int dx = -2; dx <= 2; dx++) {
+        float v = sqrt(max(dot(at(p + ivec2(dx, dy), size), LUMA), 0.0));
+        float d = v - s;
+        float w = exp(-0.5 / 2.25 * float(dx * dx + dy * dy) + k * d * d);
+        sum += v * w;
+        wsum += w;
+      }
+    }
+    s = sum / wsum;
+  }
+  vec3 col = c;
+  if (uChromaSigma > 0.0) {
+    col = vec3(0.0);
+    for (int dy = -6; dy <= 6; dy++) {
+      for (int dx = -6; dx <= 6; dx++) {
+        col += at(p + ivec2(dx, dy), size) * exp(-0.5 * float(dx * dx + dy * dy) / (uChromaSigma * uChromaSigma));
+      }
+    }
+  }
+  float cy = dot(col, LUMA);
+  outColor = vec4(cy > 1e-9 ? col / cy : vec3(1.0), s);
+}`;
+
+// Details, pass 2: unsharp mask on sqrt brightness, then recombine.
+const DETAIL_SHARPEN = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform float uAmount;
+uniform float uRadius;
+uniform int uWindow;
+uniform float uDetail;
+uniform float uHalo;
+out vec4 outColor;
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 c = texelFetch(uSrc, p, 0);
+  float s = c.a;
+  if (uAmount > 0.0) {
+    float sum = 0.0;
+    float wsum = 0.0;
+    for (int dy = -6; dy <= 6; dy++) {
+      if (dy < -uWindow || dy > uWindow) continue;
+      for (int dx = -6; dx <= 6; dx++) {
+        if (dx < -uWindow || dx > uWindow) continue;
+        float w = exp(-0.5 * float(dx * dx + dy * dy) / (uRadius * uRadius));
+        sum += texelFetch(uSrc, clamp(p + ivec2(dx, dy), ivec2(0), size - 1), 0).a * w;
+        wsum += w;
+      }
+    }
+    float diff = s - sum / wsum;
+    float limited = clamp(diff, -uHalo, uHalo);
+    s = max(0.0, s + 1.5 * uAmount * (diff * uDetail + limited * (1.0 - uDetail)));
+  }
+  outColor = vec4(max(c.rgb * (s * s), vec3(0.0)), 1.0);
 }`;
 
 // Final step: color matrix, defringing, exposure and sRGB encoding, drawn
@@ -578,6 +662,8 @@ export class GpuRenderer {
       refocus: program(gl, REFOCUS_PASS),
       dofPrep: program(gl, DOF_PREP),
       dofGather: program(gl, DOF_GATHER),
+      detailNr: program(gl, DETAIL_NR),
+      detailSharpen: program(gl, DETAIL_SHARPEN),
       present: program(gl, PRESENT),
       splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
     };
@@ -920,6 +1006,33 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uMaxR, Math.max(1, maxR));
     gl.uniform1f(P.u.uLod, Math.max(0, Math.log2(Math.max(1, maxR) * Math.sqrt(Math.PI / taps)) + 0.5));
     gl.uniform1i(P.u.uShape, shape === 'hexagon' ? 2 : shape === 'circle' ? 1 : 0);
+    this.draw();
+    return out;
+  }
+
+  // Details panel (see core/detail.js): returns a new texture.
+  details(src, w, h, p) {
+    const gl = this.gl;
+    const mid = this.scratch(w, h, 'detailMid');
+    const out = this.scratch(w, h, 'detailOut');
+    let P = this.programs.detailNr;
+    this.target(mid, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, src);
+    gl.uniform1f(P.u.uRangeSigma, p.luminance > 0 ? rangeSigma(p) : 0);
+    gl.uniform1f(P.u.uChromaSigma, p.color > 0 ? chromaSigma(p) : 0);
+    this.draw();
+    P = this.programs.detailSharpen;
+    this.target(out, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, mid);
+    gl.uniform1f(P.u.uAmount, p.amount);
+    gl.uniform1f(P.u.uRadius, p.radius);
+    gl.uniform1i(P.u.uWindow, sharpenWindow(p));
+    gl.uniform1f(P.u.uDetail, p.detail);
+    gl.uniform1f(P.u.uHalo, HALO_LIMIT);
     this.draw();
     return out;
   }

@@ -12,6 +12,7 @@ import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN } from './core/color.js';
+import { makeDetail, applyDetail } from './core/detail.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -21,6 +22,7 @@ const state = {
   dev: null,
   settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {} },
   look: null,
+  detail: null, // Details panel filters (core/detail.js)
   baseExposure: 1,
   matrix: null,
   wbGains: [1, 1, 1],
@@ -94,6 +96,7 @@ function updateColor() {
   const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = auto.map((g, i) => g * manual[i]);
   state.look = makeLook(s);
+  state.detail = makeDetail(s);
   const ccm = colorMatrix(lf.cam, s);
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
@@ -104,6 +107,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
 function toPixels(rgb, w, h) {
+  rgb = applyDetail(rgb, w, h, state.detail);
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look);
@@ -139,6 +143,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       clip: state.dev.clip,
     });
   }
+  if (state.detail) tex = gpu.details(tex, w, h, state.detail);
   const bitmap = gpu.present(tex, w, h, {
     matrix: state.matrix,
     exposure: state.baseExposure * Math.pow(2, state.settings.ev),

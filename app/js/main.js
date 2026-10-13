@@ -1212,6 +1212,13 @@ async function applySettings() {
     autoWb: $('awb').checked,
     wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
     tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
+    details: {
+      amount: +$('sharp-amount').value,
+      radius: +$('sharp-radius').value,
+      detail: +$('sharp-detail').value,
+      luminance: +$('nr-luminance').value,
+      color: +$('nr-color').value,
+    },
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
     defringe: {
@@ -1283,6 +1290,8 @@ function showSliderValue(input) {
   else if (input.id === 'focus') out.textContent = `${sign}${Math.abs(v).toFixed(2)}`;
   else if (input.id === 'tilt-rotation') out.textContent = `${v}°`;
   else if (input.id === 'wb-temperature') out.textContent = `${v} K`;
+  else if (input.id === 'sharp-radius') out.textContent = v.toFixed(1);
+  else if (input.parentElement.closest('.details-panel')) out.textContent = `${v}`;
   else out.textContent = `${sign}${Math.abs(v)}`;
 }
 // Camera sliders with a default reset the same way.
@@ -1295,7 +1304,7 @@ for (const input of document.querySelectorAll('[data-panel=camera] input[type=ra
   });
 }
 
-for (const input of document.querySelectorAll('.color-panel input[type=range]')) {
+for (const input of document.querySelectorAll('.color-panel input[type=range], .details-panel input[type=range]')) {
   showSliderValue(input);
   input.addEventListener('input', () => {
     showSliderValue(input);
