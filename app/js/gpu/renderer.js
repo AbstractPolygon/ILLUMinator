@@ -15,6 +15,7 @@
 // of the pipeline (depth of field, defringing, tone mapping) is unchanged.
 
 import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT } from '../core/detail.js';
+import { MAX_MASKS } from '../core/local.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -466,10 +467,10 @@ precision highp float;
 precision highp int;
 uniform sampler2D uSrc;
 uniform int uMaskCount;
-uniform int uMaskKind[4];
-uniform vec4 uMaskShape[4];
-uniform vec4 uMaskExtra[4];
-uniform vec4 uMaskFx2[4];  // tint, blur, pixelate, sketch
+uniform int uMaskKind[${MAX_MASKS}];
+uniform vec4 uMaskShape[${MAX_MASKS}];
+uniform vec4 uMaskExtra[${MAX_MASKS}];
+uniform vec4 uMaskFx2[${MAX_MASKS}];  // tint, blur, pixelate, sketch
 uniform highp sampler2D uDepth;
 uniform int uDepthOn;
 out vec4 outColor;
@@ -491,7 +492,7 @@ void main() {
   float aspect = float(size.x) / float(size.y);
   float big = float(max(size.x, size.y));
   vec2 fp = vec2(p) + 0.5;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < ${MAX_MASKS}; i++) {
     if (i >= uMaskCount) break;
     vec4 e = uMaskFx2[i];
     if (e.y <= 0.0 && e.z <= 0.0 && e.w <= 0.0) continue;
@@ -539,11 +540,11 @@ uniform float uVeilAmount;
 uniform vec4 uLens;        // core/lens.js: k, zoom, vignetting, start (0 0 0 0: off)
 // Local adjustments (core/local.js).
 uniform int uMaskCount;
-uniform int uMaskKind[4];  // 0 radial, 1 linear, 2 depth
-uniform vec4 uMaskShape[4];
-uniform vec4 uMaskExtra[4]; // feather (radial), -, -, invert
-uniform vec4 uMaskFx[4];   // exposure, contrast, saturation, temperature
-uniform vec4 uMaskFx2[4];  // tint
+uniform int uMaskKind[${MAX_MASKS}];  // 0 radial, 1 linear, 2 depth
+uniform vec4 uMaskShape[${MAX_MASKS}];
+uniform vec4 uMaskExtra[${MAX_MASKS}]; // feather (radial), -, -, invert
+uniform vec4 uMaskFx[${MAX_MASKS}];   // exposure, contrast, saturation, temperature
+uniform vec4 uMaskFx2[${MAX_MASKS}];  // tint
 uniform int uMaskShow;
 uniform highp sampler2D uDepth;
 uniform int uDepthOn;
@@ -648,7 +649,7 @@ vec3 applyLook(vec3 c) {
 ${MASK_WEIGHT}
 // Same as applyEffects / applyLocal in core/local.js.
 vec3 applyLocal(vec3 c, vec2 n, float aspect) {
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < ${MAX_MASKS}; i++) {
     if (i >= uMaskCount) break;
     float w = maskWeight(i, n, aspect);
     if (w > 0.0) {
