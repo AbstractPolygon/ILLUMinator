@@ -425,6 +425,7 @@
           <label>Smoothing <output for="depth-smooth" data-for="depth-smooth">30</output>
             <input id="depth-smooth" type="range" min="0" max="100" step="5" value="30" data-default="30">
           </label>
+          <label class="check" title="Sharper depth edges, matched to the photo; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox" checked data-default="true"> High quality depth map</label>
           <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
           <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
         </details>

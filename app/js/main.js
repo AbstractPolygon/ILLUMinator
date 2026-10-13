@@ -1194,7 +1194,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'spread-show', 'depth-smooth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq']) $(id).disabled = !depthTools;
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
@@ -1510,6 +1510,8 @@ $('depth-smooth').oninput = () => {
   applySettingsSoon();
 };
 $('depth-smooth').onchange = () => {};
+// Normal or high quality depth: the depth map is measured again.
+$('depth-hq').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {
   $('pivot').disabled = !$('pivot-on').checked;
@@ -3903,6 +3905,7 @@ async function applySettings() {
     ccm: $('ccm-mode').value === 'custom' ? Array.from({ length: 9 }, (_, i) => +$(`ccm-${i}`).value || 0) : null,
     mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
     depthSmoothing: $('depth-smooth').value / 100,
+    depthQuality: $('depth-hq').checked ? 'high' : 'normal',
     details: {
       amount: +$('sharp-amount').value,
       radius: +$('sharp-radius').value,

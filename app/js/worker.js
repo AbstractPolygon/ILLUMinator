@@ -505,8 +505,14 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
 async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
+  const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'high');
   Object.assign(state.settings, s);
-  if (smoothingChanged && !detailChanged) applyDepthSmoothing();
+  if (qualityChanged && state.depthRaw && !detailChanged) {
+    // Measure the depth again, the new way.
+    state.depth = null;
+    state.depthRaw = null;
+    await ensureDepth(id);
+  } else if (smoothingChanged && !detailChanged) applyDepthSmoothing();
   // A depth mask needs the depth map.
   if (state.lf && state.lf.raw && !state.depth && parseMasks(s.local && s.local.masks).some((m) => m.kind === 'depth')) await ensureDepth(id);
   if (state.pp) {
@@ -586,7 +592,11 @@ async function ensureDepth(id) {
   if (!(await ensureRefocusViews(id))) return false;
   if (!state.depth) {
     const { outW, outH } = state.sampler;
+    // Normal quality: the plain cost volume, about twice as fast; high adds
+    // occlusion-aware matching and edge-aware filtering (core/depth.js).
+    const fast = state.settings.depthQuality === 'normal';
     state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
+      ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
       onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
     });
     applyDepthSmoothing();
