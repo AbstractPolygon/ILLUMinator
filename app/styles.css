@@ -500,9 +500,9 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 /* Resized by the user: the tracks scroll and the curves fill the height. */
 .timeline.sized .tl-main { height: var(--tl-h); align-items: stretch; }
 .timeline.sized .tl-grid-wrap { min-height: 0; }
-.timeline.sized .tl-grid { overflow-y: auto; align-content: start; }
+.timeline.sized .tl-grid { overflow-y: auto; overflow-x: hidden; align-content: start; }
 .timeline.sized .tl-curves { flex: 1; min-height: 0; height: auto; }
-.timeline.sized .tl-channels { overflow-y: auto; }
+.timeline.sized .tl-channels { overflow-y: auto; overflow-x: hidden; }
 .timeline.sized .tl-plot { height: 100%; min-height: 0; }
 .tl-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tl-bar button { padding: 4px 10px; font-size: 12.5px; }
@@ -520,17 +520,17 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-views button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 .tl-views button.active { position: relative; z-index: 1; background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .tl-curves { display: grid; grid-template-columns: 112px 1fr; grid-template-rows: minmax(0, 1fr); min-width: 0; height: var(--tl-natural, 150px); }
-.tl-channels { display: flex; flex-direction: column; gap: 2px; padding-top: 16px; font-size: 11.5px; line-height: 14px; color: var(--muted); overflow-y: auto; }
+.tl-channels { display: flex; flex-direction: column; gap: 2px; padding-top: 16px; font-size: 11.5px; line-height: 14px; color: var(--muted); overflow-y: auto; overflow-x: hidden; }
 .tl-channel { display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; white-space: nowrap; }
 .tl-channel input { margin: 0; width: 12px; height: 12px; }
 .tl-swatch { width: 10px; height: 3px; border-radius: 2px; flex: none; }
 .tl-channel.empty { opacity: 0.45; }
 .tl-plot { display: block; width: 100%; height: 100%; min-height: 0; min-width: 0; background: #15181c; border-radius: 3px; cursor: crosshair; touch-action: none; }
 .tl-grid-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.timeline input.tl-scroll { display: block; margin: 0 0 0 112px; width: calc(100% - 112px); }
+.timeline input.tl-scroll { display: block; margin: 0 0 0 112px; width: calc(100% - 118px); }
 .tl-zoom button { padding: 2px 8px; font-size: 12px; min-width: 0; }
 .tl-zoom #tl-zoom-label { min-width: 46px; font-variant-numeric: tabular-nums; }
-.tl-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: 112px 1fr; row-gap: 2px; user-select: none; }
+.tl-grid { flex: 1; min-width: 0; padding-right: 6px; display: grid; grid-template-columns: 112px 1fr; row-gap: 2px; user-select: none; }
 .tl-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); height: 20px; }
 .tl-label button { padding: 0 4px; line-height: 16px; font-size: 11px; background: none; border: 1px solid transparent; color: var(--muted); }
 .tl-label button:hover { color: var(--text); border-color: var(--line); }
