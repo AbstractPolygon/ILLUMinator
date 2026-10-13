@@ -57,8 +57,8 @@ export function readEdits(doc, extra = {}) {
 // `base` (usually the defaults) says. Returns the document's view and focus
 // point, for the caller to apply.
 export function writeEdits(doc, edits, base) {
-  if (edits && edits.format && edits.format !== EDITS_FORMAT) throw new Error('Not an Illuminator edits file');
-  if (edits && edits.version > EDITS_VERSION) console.warn('Edits were saved by a newer Illuminator; some may not apply');
+  if (edits && edits.format && edits.format !== EDITS_FORMAT) throw new Error('Not an ILLUMinator edits file');
+  if (edits && edits.version > EDITS_VERSION) console.warn('Edits were saved by a newer ILLUMinator; some may not apply');
   for (const [group, ids] of Object.entries(EDIT_GROUPS)) {
     for (const id of ids) {
       const el = doc.getElementById(id);

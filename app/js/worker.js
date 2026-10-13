@@ -731,7 +731,7 @@ async function buildProcessed(lf) {
   const stacks = [...lf.stacks].sort((a, b) => rank(b) - rank(a));
   const stack = stacks[0];
   if (!stack || rank(stack) < 0) {
-    throw new Error('This .lfp file stores its pictures as H.264 video, which Illuminator cannot show yet.');
+    throw new Error('This .lfp file stores its pictures as H.264 video, which ILLUMinator cannot show yet.');
   }
   const first = await decodeImage(stack.images[0].bytes, stack.images[0].mime);
   const images = [];

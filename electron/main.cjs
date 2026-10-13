@@ -33,7 +33,7 @@ function checkAllowed(file) {
   if (allowed.has(p)) return p;
   if (importDir && p.startsWith(path.resolve(importDir) + path.sep)) return p;
   if (p.startsWith(path.resolve(libraryDir()) + path.sep)) return p;
-  throw new Error('This file was not opened in Illuminator.');
+  throw new Error('This file was not opened in ILLUMinator.');
 }
 
 // App settings, kept in the user data folder.
@@ -56,7 +56,7 @@ async function saveSettings() {
 
 // Where the library lives (the user can choose it in Settings).
 function libraryDir() {
-  return settings.libraryDir || path.join(app.getPath('pictures'), 'Illuminator');
+  return settings.libraryDir || path.join(app.getPath('pictures'), 'ILLUMinator');
 }
 
 // Photos imported from the camera go into the library.
@@ -78,7 +78,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     backgroundColor: '#121417',
-    title: 'Illuminator',
+    title: 'ILLUMinator',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

@@ -328,3 +328,7 @@ label:has(select) { margin-bottom: 10px; }
 .check-row { gap: 20px; margin: 4px 0; }
 .check-row label.check { margin: 0; }
 .check-row label.check:has(input:disabled) { opacity: 0.45; }
+
+/* Name and version share a baseline (the logo is centered beside them). */
+.app-name { display: inline-block; line-height: 1; }
+.app-name .version { vertical-align: baseline; }
