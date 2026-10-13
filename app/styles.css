@@ -596,3 +596,6 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 .lut-row { display: flex; align-items: center; gap: 8px; }
 label.lut-amount { margin-top: 14px; }
 .lut-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+
+/* About: third-party credits sit apart from the developer's links. */
+.credit-extra { margin-top: 18px; }
