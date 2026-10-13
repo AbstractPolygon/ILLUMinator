@@ -1,4 +1,4 @@
-Required Notice: Copyright 2026 NickR-Git (https://github.com/NickR-Git/ILLUMinator)
+Required Notice: Copyright 2026 AbstractPolygon, LLC (https://github.com/NickR-Git/ILLUMinator)
 Licensor Line of Business: ILLUMinator light field photo software (https://github.com/NickR-Git/ILLUMinator)
 
 # PolyForm Shield License 1.0.0
