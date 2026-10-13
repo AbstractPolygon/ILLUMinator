@@ -48,3 +48,19 @@ test('animated settings, strength and follow focus resolve per picture', async (
   assert.equal(m.fx.exposure, 1); // the mask itself is left alone
   assert.ok(parseMasks(JSON.stringify([{ kind: 'radial' }, { kind: 'depth' }])).map((x) => x.id).join() === 'm0,m1');
 });
+
+test('blur and pixelate change only what the mask covers', async () => {
+  const { applySpatial } = await import('../app/js/core/local.js');
+  const w = 40;
+  const h = 20;
+  const rgb = new Float32Array(w * h * 3);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) rgb.fill((x + y) % 2 ? 1 : 0, 3 * (y * w + x), 3 * (y * w + x) + 3);
+  // Left half only (a gradient mask at angle 0: full effect to the left).
+  const m = { ...defaultMask('linear'), angle: 0, width: 0.01, fx: { ...defaultMask('linear').fx, blur: 1 } };
+  const out = applySpatial(rgb, w, h, { masks: [m] });
+  const i = 3 * (10 * w + 5);
+  assert.ok(Math.abs(out[i] - 0.5) < 0.15, `blurred ${out[i]}`);
+  assert.equal(out[3 * (10 * w + 35)], rgb[3 * (10 * w + 35)]);
+  const px = applySpatial(rgb, w, h, { masks: [{ ...m, fx: { ...m.fx, blur: 0, pixelate: 1 } }] });
+  assert.equal(px[0], px[3]);
+});

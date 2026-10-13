@@ -12,7 +12,8 @@
 //           effect between near and far, fading over `feather`
 // Each mask: { id, kind, on, invert, strength (0..1, scales the effects),
 // ...shape, fx: { exposure (EV), contrast, saturation, temperature, tint
-// (each -1..1) } }. A depth mask with `follow` set moves with the focus:
+// (each -1..1); blur, pixelate, sketch (each 0..1: spatial effects, see
+// applySpatial) } }. A depth mask with `follow` set moves with the focus:
 // near and far shift by how far the focus is from `anchor`, the focus the
 // mask was made at. A radial mask with `followView` set moves a little
 // with the viewpoint, like the edge of a lens seen from off center.
@@ -23,7 +24,7 @@ export const MASK_KINDS = ['radial', 'linear', 'depth'];
 const newId = () => Math.random().toString(36).slice(2, 10);
 
 export function defaultMask(kind) {
-  const base = { id: newId(), kind, on: true, invert: false, strength: 1, follow: false, anchor: 0, fx: { exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0 } };
+  const base = { id: newId(), kind, on: true, invert: false, strength: 1, follow: false, anchor: 0, fx: { exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, blur: 0, pixelate: 0, sketch: 0 } };
   if (kind === 'radial') return { ...base, x: 0.5, y: 0.5, w: 0.25, h: 0.25, feather: 0.5 };
   if (kind === 'linear') return { ...base, x: 0.5, y: 0.5, angle: 90, width: 0.3 };
   return { ...base, near: -0.3, far: 0.3, feather: 0.2 };
@@ -169,7 +170,131 @@ export function packMasks(masks) {
     else shape.set([m.near, m.far, m.feather, 0], 4 * i);
     extra.set([m.kind === 'radial' ? m.feather : 0, 0, 0, m.invert ? 1 : 0], 4 * i);
     fx.set([m.fx.exposure, m.fx.contrast, m.fx.saturation, m.fx.temperature], 4 * i);
-    fx2.set([m.fx.tint, 0, 0, 0], 4 * i);
+    fx2.set([m.fx.tint, m.fx.blur || 0, m.fx.pixelate || 0, m.fx.sketch || 0], 4 * i);
   });
   return { count: Math.min(MAX_MASKS, masks.length), kinds, shape, extra, fx, fx2 };
+}
+
+// ---------------------------------------------------------------- spatial
+
+// Masks with an effect that looks at neighbouring pixels.
+export function hasSpatial(masks) {
+  return (masks || []).some((m) => m.fx.blur > 0 || m.fx.pixelate > 0 || m.fx.sketch > 0);
+}
+
+// Box blur of radius r, twice (close to a Gaussian), of 3-channel rgb.
+function boxBlur(src, w, h, r) {
+  let a = src;
+  for (let pass = 0; pass < 2; pass++) {
+    const tmp = new Float32Array(a.length);
+    for (let y = 0; y < h; y++) {
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let x = -r; x <= r; x++) sum += a[3 * (y * w + Math.min(w - 1, Math.max(0, x))) + c];
+        for (let x = 0; x < w; x++) {
+          tmp[3 * (y * w + x) + c] = sum / (2 * r + 1);
+          sum += a[3 * (y * w + Math.min(w - 1, x + r + 1)) + c] - a[3 * (y * w + Math.max(0, x - r)) + c];
+        }
+      }
+    }
+    const out = new Float32Array(a.length);
+    for (let x = 0; x < w; x++) {
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let y = -r; y <= r; y++) sum += tmp[3 * (Math.min(h - 1, Math.max(0, y)) * w + x) + c];
+        for (let y = 0; y < h; y++) {
+          out[3 * (y * w + x) + c] = sum / (2 * r + 1);
+          sum += tmp[3 * (Math.min(h - 1, y + r + 1) * w + x) + c] - tmp[3 * (Math.max(0, y - r) * w + x) + c];
+        }
+      }
+    }
+    a = out;
+  }
+  return a;
+}
+
+const lum = (p, i) => 0.2126 * p[i] + 0.7152 * p[i + 1] + 0.0722 * p[i + 2];
+
+// The spatial effects of masks on linear RGB (w x h), before tone mapping
+// (gpu/renderer.js mirrors this): blur (radius up to 2% of the picture),
+// pixelate (tiles up to 4%) and sketch (pencil outlines over light colors),
+// each blended in by the mask's weight. `local` as for toneMap.
+export function applySpatial(rgb, w, h, local) {
+  const big = Math.max(w, h);
+  const aspect = w / h;
+  let out = rgb;
+  for (const m of local.masks) {
+    const { blur = 0, pixelate = 0, sketch = 0 } = m.fx;
+    if (!(blur > 0 || pixelate > 0 || sketch > 0)) continue;
+    const weight = new Float32Array(w * h);
+    let any = false;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const nx = (x + 0.5) / w;
+        const ny = (y + 0.5) / h;
+        let d = null;
+        if (local.depth) d = local.depth[Math.min(local.dh - 1, Math.floor(ny * local.dh)) * local.dw + Math.min(local.dw - 1, Math.floor(nx * local.dw))];
+        const v = maskWeight(m, nx, ny, aspect, d);
+        weight[y * w + x] = v;
+        any = any || v > 0;
+      }
+    }
+    if (!any) continue;
+    const src = out;
+    const next = new Float32Array(src);
+    const blend = (i, r, g, b, k) => {
+      next[3 * i] += (r - next[3 * i]) * k;
+      next[3 * i + 1] += (g - next[3 * i + 1]) * k;
+      next[3 * i + 2] += (b - next[3 * i + 2]) * k;
+    };
+    if (blur > 0) {
+      const b = boxBlur(src, w, h, Math.max(1, Math.round(blur * 0.02 * big * 0.5)));
+      for (let i = 0; i < w * h; i++) if (weight[i] > 0) blend(i, b[3 * i], b[3 * i + 1], b[3 * i + 2], weight[i]);
+    }
+    if (pixelate > 0) {
+      const s = Math.max(2, Math.floor(pixelate * 0.04 * big));
+      for (let by = 0; by < h; by += s) {
+        for (let bx = 0; bx < w; bx += s) {
+          let r = 0;
+          let g = 0;
+          let bl = 0;
+          let n = 0;
+          for (let y = by; y < Math.min(h, by + s); y++) {
+            for (let x = bx; x < Math.min(w, bx + s); x++) {
+              const i = 3 * (y * w + x);
+              r += src[i];
+              g += src[i + 1];
+              bl += src[i + 2];
+              n++;
+            }
+          }
+          for (let y = by; y < Math.min(h, by + s); y++) for (let x = bx; x < Math.min(w, bx + s); x++) {
+            const i = y * w + x;
+            if (weight[i] > 0) blend(i, r / n, g / n, bl / n, weight[i]);
+          }
+        }
+      }
+    }
+    if (sketch > 0) {
+      const L = new Float32Array(w * h);
+      for (let i = 0; i < w * h; i++) L[i] = Math.log2(lum(src, 3 * i) + 1e-4);
+      const at = (x, y) => L[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          if (!(weight[i] > 0)) continue;
+          const gx = at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x - 1, y) - at(x - 1, y + 1);
+          const gy = at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x, y - 1) - at(x + 1, y - 1);
+          const g = Math.hypot(gx, gy) / 4;
+          const e = Math.min(1, Math.max(0, (g - 0.15) / 0.6));
+          const l = lum(src, 3 * i);
+          // Light, washed colors with dark strokes along the edges.
+          const k = 1.25 * (1 - 0.85 * e);
+          blend(i, (0.65 * src[3 * i] + 0.35 * l) * k, (0.65 * src[3 * i + 1] + 0.35 * l) * k, (0.65 * src[3 * i + 2] + 0.35 * l) * k, weight[i] * sketch);
+        }
+      }
+    }
+    out = next;
+  }
+  return out;
 }

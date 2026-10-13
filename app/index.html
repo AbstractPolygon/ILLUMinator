@@ -344,6 +344,9 @@
             <option value="carnival">Carnival</option>
             <option value="pinhole">Pinhole</option>
             <option value="golden">Golden hour</option>
+            <option value="blurplus">Blur+</option>
+            <option value="mosaic">Mosaic</option>
+            <option value="crayon">Crayon</option>
           </select>
         </div>
         <ul id="mask-list" class="mask-list"></ul>
@@ -414,6 +417,15 @@
             </label>
             <label>Tint <output data-for="mx-tint" for="mx-tint">0</output>
               <input id="mx-tint" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+            </label>
+            <label title="Softens what the mask covers">Blur <output data-for="mx-blur" for="mx-blur">0</output>
+              <input id="mx-blur" type="range" min="0" max="100" step="1" value="0" data-default="0">
+            </label>
+            <label title="Breaks what the mask covers into square tiles">Pixelate <output data-for="mx-pixelate" for="mx-pixelate">0</output>
+              <input id="mx-pixelate" type="range" min="0" max="100" step="1" value="0" data-default="0">
+            </label>
+            <label title="Turns what the mask covers into a pencil drawing">Sketch <output data-for="mx-sketch" for="mx-sketch">0</output>
+              <input id="mx-sketch" type="range" min="0" max="100" step="1" value="0" data-default="0">
             </label>
           <button id="mask-delete" type="button" class="wide mask-delete">Delete mask</button>
         </div>

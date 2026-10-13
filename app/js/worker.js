@@ -19,7 +19,7 @@ import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
-import { parseMasks, activeMasks, packMasks, resolveMasks } from './core/local.js';
+import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
@@ -146,6 +146,8 @@ function toPixels(rgb, w, h, ctx) {
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
   const local = localFor(w, h, ctx);
+  // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
+  if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look, local);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
@@ -181,6 +183,9 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     });
   }
   if (state.detail) tex = gpu.details(tex, w, h, state.detail);
+  const resolved = state.masks && state.masks.length ? resolveMasks(state.masks, masks) : null;
+  const packed = resolved ? { ...packMasks(resolved), show: state.maskShow } : null;
+  if (resolved && hasSpatial(resolved)) tex = gpu.localSpatial(tex, w, h, packed);
   const bitmap = gpu.present(tex, w, h, {
     matrix: state.matrix,
     exposure: state.baseExposure * Math.pow(2, state.settings.ev),
@@ -188,7 +193,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     look: state.look,
     veilAmount: state.veil ? state.veilAmount : 0,
     lens: state.lens,
-    local: state.masks && state.masks.length ? { ...packMasks(resolveMasks(state.masks, masks)), show: state.maskShow } : null,
+    local: packed,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }

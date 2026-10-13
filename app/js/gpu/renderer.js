@@ -435,6 +435,98 @@ void main() {
 
 // Final step: color matrix, defringing, exposure and sRGB encoding, drawn
 // straight to the canvas (flipped: canvas rows run top to bottom).
+// A local adjustment mask's weight at n (0..1 across the picture); needs
+// the mask uniforms, uDepth and uDepthOn.
+const MASK_WEIGHT = `float maskWeight(int i, vec2 n, float aspect) {
+  int kind = uMaskKind[i];
+  vec4 s = uMaskShape[i];
+  float w = 0.0;
+  if (kind == 0) {
+    float d = length((n - s.xy) / max(s.zw, vec2(1e-4)));
+    w = 1.0 - smoothstep(1.0 - min(0.999, uMaskExtra[i].x), 1.0, d);
+  } else if (kind == 1) {
+    float a = radians(s.z);
+    float t = ((n.x - s.x) * aspect * cos(a) + (n.y - s.y) * sin(a)) / max(1e-4, s.w) + 0.5;
+    w = 1.0 - smoothstep(0.0, 1.0, t);
+  } else if (kind == 2) {
+    if (uDepthOn == 0) return 0.0;
+    ivec2 dsz = textureSize(uDepth, 0);
+    float d = texelFetch(uDepth, clamp(ivec2(n * vec2(dsz)), ivec2(0), dsz - 1), 0).r;
+    float f = max(1e-4, s.z);
+    w = smoothstep(s.x - f, s.x, d) * (1.0 - smoothstep(s.y, s.y + f, d));
+  }
+  return uMaskExtra[i].w > 0.5 ? 1.0 - w : w;
+}
+`;
+
+// Spatial effects of local adjustments (core/local.js applySpatial): blur,
+// pixelate and sketch, before the picture is finished.
+const LOCAL_SPATIAL = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform int uMaskCount;
+uniform int uMaskKind[4];
+uniform vec4 uMaskShape[4];
+uniform vec4 uMaskExtra[4];
+uniform vec4 uMaskFx2[4];  // tint, blur, pixelate, sketch
+uniform highp sampler2D uDepth;
+uniform int uDepthOn;
+out vec4 outColor;
+${MASK_WEIGHT}
+vec3 at(vec2 q, ivec2 size) {
+  return texelFetch(uSrc, clamp(ivec2(floor(q)), ivec2(0), size - 1), 0).rgb;
+}
+float lum(vec3 c) {
+  return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+float logLum(ivec2 q, ivec2 size) {
+  return log2(lum(texelFetch(uSrc, clamp(q, ivec2(0), size - 1), 0).rgb) + 1e-4);
+}
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 c = texelFetch(uSrc, p, 0).rgb;
+  vec2 n = (vec2(p) + 0.5) / vec2(size);
+  float aspect = float(size.x) / float(size.y);
+  float big = float(max(size.x, size.y));
+  vec2 fp = vec2(p) + 0.5;
+  for (int i = 0; i < 4; i++) {
+    if (i >= uMaskCount) break;
+    vec4 e = uMaskFx2[i];
+    if (e.y <= 0.0 && e.z <= 0.0 && e.w <= 0.0) continue;
+    float w = maskWeight(i, n, aspect);
+    if (w <= 0.0) continue;
+    vec3 base = texelFetch(uSrc, p, 0).rgb;
+    if (e.y > 0.0) {
+      float r = e.y * 0.02 * big;
+      vec3 acc = vec3(0.0);
+      for (int k = 0; k < 32; k++) {
+        float a = float(k) * 2.39996;
+        acc += at(fp + vec2(cos(a), sin(a)) * r * sqrt((float(k) + 0.5) / 32.0), size);
+      }
+      c = mix(c, acc / 32.0, w);
+    }
+    if (e.z > 0.0) {
+      float b = max(2.0, floor(e.z * 0.04 * big));
+      vec2 cell = floor(vec2(p) / b) * b;
+      vec3 acc = vec3(0.0);
+      for (int y = 0; y < 4; y++) for (int x = 0; x < 4; x++) acc += at(cell + (vec2(x, y) + 0.5) * b / 4.0, size);
+      c = mix(c, acc / 16.0, w);
+    }
+    if (e.w > 0.0) {
+      float gx = logLum(p + ivec2(1, -1), size) + 2.0 * logLum(p + ivec2(1, 0), size) + logLum(p + ivec2(1, 1), size)
+        - logLum(p + ivec2(-1, -1), size) - 2.0 * logLum(p + ivec2(-1, 0), size) - logLum(p + ivec2(-1, 1), size);
+      float gy = logLum(p + ivec2(-1, 1), size) + 2.0 * logLum(p + ivec2(0, 1), size) + logLum(p + ivec2(1, 1), size)
+        - logLum(p + ivec2(-1, -1), size) - 2.0 * logLum(p + ivec2(0, -1), size) - logLum(p + ivec2(1, -1), size);
+      float edge = clamp((length(vec2(gx, gy)) / 4.0 - 0.15) / 0.6, 0.0, 1.0);
+      vec3 fill = (0.65 * base + 0.35 * lum(base)) * 1.25 * (1.0 - 0.85 * edge);
+      c = mix(c, fill, w * e.w);
+    }
+  }
+  outColor = vec4(c, 1.0);
+}`;
+
 const PRESENT = `#version 300 es
 precision highp float;
 precision highp int;
@@ -553,27 +645,7 @@ vec3 applyLook(vec3 c) {
   return c;
 }
 
-float maskWeight(int i, vec2 n, float aspect) {
-  int kind = uMaskKind[i];
-  vec4 s = uMaskShape[i];
-  float w = 0.0;
-  if (kind == 0) {
-    float d = length((n - s.xy) / max(s.zw, vec2(1e-4)));
-    w = 1.0 - smoothstep(1.0 - min(0.999, uMaskExtra[i].x), 1.0, d);
-  } else if (kind == 1) {
-    float a = radians(s.z);
-    float t = ((n.x - s.x) * aspect * cos(a) + (n.y - s.y) * sin(a)) / max(1e-4, s.w) + 0.5;
-    w = 1.0 - smoothstep(0.0, 1.0, t);
-  } else if (kind == 2) {
-    if (uDepthOn == 0) return 0.0;
-    ivec2 dsz = textureSize(uDepth, 0);
-    float d = texelFetch(uDepth, clamp(ivec2(n * vec2(dsz)), ivec2(0), dsz - 1), 0).r;
-    float f = max(1e-4, s.z);
-    w = smoothstep(s.x - f, s.x, d) * (1.0 - smoothstep(s.y, s.y + f, d));
-  }
-  return uMaskExtra[i].w > 0.5 ? 1.0 - w : w;
-}
-
+${MASK_WEIGHT}
 // Same as applyEffects / applyLocal in core/local.js.
 vec3 applyLocal(vec3 c, vec2 n, float aspect) {
   for (int i = 0; i < 4; i++) {
@@ -830,6 +902,7 @@ export class GpuRenderer {
       detailNr: program(gl, DETAIL_NR),
       detailSharpen: program(gl, DETAIL_SHARPEN),
       present: program(gl, PRESENT),
+      localSpatial: program(gl, LOCAL_SPATIAL),
       splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
     };
     // Additive blending into 32-bit floats needs EXT_float_blend; otherwise
@@ -1357,6 +1430,28 @@ export class GpuRenderer {
     const rgba = new Float32Array(w * h * 4);
     for (let i = 0; i < w * h; i++) rgba.set([data[3 * i], data[3 * i + 1], data[3 * i + 2], 1], 4 * i);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, rgba);
+  }
+
+  // Blur, pixelate and sketch of local adjustments (`local` from
+  // packMasks): returns a new texture.
+  localSpatial(src, w, h, local) {
+    const gl = this.gl;
+    const out = this.scratch(w, h, 'localSpatial');
+    const P = this.programs.localSpatial;
+    this.target(out, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, src);
+    gl.uniform1i(P.u.uMaskCount, local.count);
+    gl.uniform1iv(P.u.uMaskKind, local.kinds);
+    gl.uniform4fv(P.u.uMaskShape, local.shape);
+    gl.uniform4fv(P.u.uMaskExtra, local.extra);
+    gl.uniform4fv(P.u.uMaskFx2, local.fx2);
+    gl.uniform1i(P.u.uDepthOn, this.depthTex ? 1 : 0);
+    gl.uniform1i(P.u.uDepth, 3);
+    this.bindTex(3, this.depthTex || src);
+    this.draw();
+    return out;
   }
 
   present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null }) {

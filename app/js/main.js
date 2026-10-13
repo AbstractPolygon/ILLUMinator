@@ -1998,7 +1998,7 @@ const SHAPE_SLIDERS = {
   linear: { x: ['ml-x', 100], y: ['ml-y', 100], angle: ['ml-angle', 1], width: ['ml-width', 100] },
   depth: { near: ['md-near', 100], far: ['md-far', 100], feather: ['md-feather', 100] },
 };
-const FX_SLIDERS = { exposure: 'mx-exposure', contrast: 'mx-contrast', saturation: 'mx-saturation', temperature: 'mx-temperature', tint: 'mx-tint' };
+const FX_SLIDERS = { exposure: 'mx-exposure', contrast: 'mx-contrast', saturation: 'mx-saturation', temperature: 'mx-temperature', tint: 'mx-tint', blur: 'mx-blur', pixelate: 'mx-pixelate', sketch: 'mx-sketch' };
 let maskSel = -1;
 
 function getMasks() {
@@ -2156,13 +2156,13 @@ const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Foc
 
 // Every setting of a local adjustment (living filters included) has a
 // track too: 'mask:<id>:<attr>'.
-const MASK_FX = ['exposure', 'contrast', 'saturation', 'temperature', 'tint'];
+const MASK_FX = ['exposure', 'contrast', 'saturation', 'temperature', 'tint', 'blur', 'pixelate', 'sketch'];
 const MASK_SHAPE = { radial: ['x', 'y', 'w', 'h', 'feather'], linear: ['x', 'y', 'angle', 'width'], depth: ['near', 'far', 'feather'] };
 const MASK_ATTR_NAMES = {
-  strength: 'Strength', exposure: 'Exposure', contrast: 'Contrast', saturation: 'Saturation', temperature: 'Temperature', tint: 'Tint',
+  strength: 'Strength', exposure: 'Exposure', contrast: 'Contrast', saturation: 'Saturation', temperature: 'Temperature', tint: 'Tint', blur: 'Blur', pixelate: 'Pixelate', sketch: 'Sketch',
   x: 'Center X', y: 'Center Y', w: 'Width', h: 'Height', feather: 'Feather', angle: 'Angle', width: 'Width', near: 'Near', far: 'Far',
 };
-const MASK_LIMITS = { strength: [0, 1], exposure: [-2, 2], x: [0, 1], y: [0, 1], w: [0.01, 1], h: [0.01, 1], feather: [0, 1], angle: [-180, 180], width: [0.01, 1], near: [-1.6, 1.6], far: [-1.6, 1.6] };
+const MASK_LIMITS = { strength: [0, 1], blur: [0, 1], pixelate: [0, 1], sketch: [0, 1], exposure: [-2, 2], x: [0, 1], y: [0, 1], w: [0.01, 1], h: [0.01, 1], feather: [0, 1], angle: [-180, 180], width: [0.01, 1], near: [-1.6, 1.6], far: [-1.6, 1.6] };
 const maskAttrs = (m) => ['strength', ...MASK_SHAPE[m.kind], ...MASK_FX];
 
 function parseMaskTrack(k) {
@@ -3690,7 +3690,7 @@ $('stereo-baseline').oninput = () => showSliderValue($('stereo-baseline'));
 // ordinary masks to adjust.
 function livingFilter(name) {
   const f = +$('focus').value;
-  const fx = (o) => ({ exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, ...o });
+  const fx = (o) => ({ exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, blur: 0, pixelate: 0, sketch: 0, ...o });
   // Depth filters follow the focus: animate it and they move with it.
   const depth = (near, far, feather, invert, effect) => ({ ...defaultMask('depth'), near, far, feather, invert, follow: true, anchor: f, fx: fx(effect) });
   switch (name) {
@@ -3713,6 +3713,12 @@ function livingFilter(name) {
       return [depth(f - 0.2, f + 0.2, 0.2, true, { saturation: 0.85, temperature: 0.25, tint: 0.2, contrast: 0.2 })];
     case 'pinhole': // a deep vignette that shifts with the viewpoint
       return [{ ...defaultMask('radial'), x: 0.5, y: 0.5, w: 0.48, h: 0.48, feather: 0.85, invert: true, followView: true, fx: fx({ exposure: -1.8, saturation: -0.25 }) }];
+    case 'blurplus': // what is out of focus goes softer still
+      return [depth(f - 0.15, f + 0.15, 0.25, true, { blur: 0.6 })];
+    case 'mosaic': // what is out of focus breaks into tiles
+      return [depth(f - 0.15, f + 0.15, 0.15, true, { pixelate: 0.5 })];
+    case 'crayon': // what is out of focus turns into a colored-pencil drawing
+      return [depth(f - 0.15, f + 0.15, 0.2, true, { sketch: 0.9 })];
     case 'golden': // warm, glowing light on the far background
       return [depth(f + 0.15, 1.8, 0.5, false, { temperature: 0.6, exposure: 0.2, saturation: 0.2, contrast: -0.15 })];
     default:
