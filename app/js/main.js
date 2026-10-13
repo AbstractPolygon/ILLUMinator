@@ -1527,6 +1527,9 @@ $('depth-hq').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {
   $('pivot').disabled = !$('pivot-on').checked;
+  // Its keyframes show only while it is on.
+  clearSelection();
+  renderTimeline();
   invalidateAnimation();
   geometryChanged();
 };
@@ -1656,11 +1659,11 @@ function setCropValues(c) {
 // against the viewpoint (and zooming in a little so no edge shows).
 // Positions move by (depth - still depth) x viewpoint offset, in lens
 // spacings: one view pixel at 1x resolution.
-// `depth`: an animation's Pivot depth for this frame (a custom pivot even
-// with Custom pivot off), or null for the slider's.
+// `depth`: an animation's Pivot depth for this frame, or null for the
+// slider's. Either is used only with Custom pivot on.
 function pivotFor(u, v, alpha, aperture, depth = null) {
   const keyed = Number.isFinite(depth);
-  if ((!keyed && !$('pivot-on').checked) || !state.info || !state.info.hasRaw || state.depthShown) return null;
+  if (!$('pivot-on').checked || !state.info || !state.info.hasRaw || state.depthShown) return null;
   const pivot = 1.6 * (keyed ? depth : +$('pivot').value) / 100;
   const still = aperture > 0 ? alpha : 0;
   const k = +$('detail').value;
@@ -2219,7 +2222,9 @@ function setMaskAttr(m, a, v) {
 // The tracks in groups: Camera, then one for each local adjustment, named
 // after the living filter that made it (or the mask).
 function trackGroups() {
-  const groups = [{ id: 'camera', name: 'Camera', tracks: [...TRACKS] }];
+  // Pivot depth shows (and counts) only with Custom pivot on.
+  const camera = TRACKS.filter((k) => k !== 'pivot' || $('pivot-on').checked);
+  const groups = [{ id: 'camera', name: 'Camera', tracks: camera }];
   // `off`: a disabled adjustment, whose keyframes the editor hides.
   getMasks().forEach((m, i) => groups.push({ id: m.id, name: m.name || maskLabel(m, i), off: !m.on, tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) }));
   for (const g of groups) for (const k of g.tracks) if (!anim.tracks[k]) anim.tracks[k] = [];
@@ -2364,9 +2369,6 @@ function applyValue(k, v) {
   } else if (k === 'view') {
     state.camera = { u: v[0], v: v[1] };
   } else if (k === 'pivot') {
-    // A keyframed pivot is a custom pivot.
-    $('pivot-on').checked = true;
-    $('pivot').disabled = $('pivot-on').disabled;
     $('pivot').value = Math.round(v);
     showSliderValue($('pivot'));
   } else if (k === 'zoom') {
@@ -3107,7 +3109,7 @@ function channelList() {
   const out = [];
   for (const grp of trackGroups()) {
     if (grp.off) continue;
-    if (grp.id === 'camera') out.push(...CHANNELS.map((ch) => ({ ...ch, group: grp })));
+    if (grp.id === 'camera') out.push(...CHANNELS.filter((ch) => grp.tracks.includes(ch.k)).map((ch) => ({ ...ch, group: grp })));
     else grp.tracks.forEach((k, n) => out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[n % MASK_COLORS.length], group: grp }));
   }
   return out;
