@@ -18,17 +18,33 @@ const TAPS = 8;
 // within `kernel` lens pitches treats every direction alike instead.
 // Output pixels are spaced `rowStep / detail` sensor pixels apart along the
 // (de-rotated) lens grid axes.
-export function buildSampler(grid, cam, detail = 1, kernel = 1.0) {
-  const lenses = lensCenters(grid, cam.width, cam.height);
-  const { r0, r1, c0, c1, cols } = lenses;
+// Grid-local extent covered by complete lens neighbourhoods, and the output
+// size at `detail`.
+function samplerExtent(lenses, grid, detail) {
+  const { r0, r1, c0, c1 } = lenses;
   const spacing = grid.rowStep / detail;
-  // Grid-local extent covered by complete lens neighbourhoods.
   const xMin = c0 * grid.pitch + 2 * grid.pitch;
   const xMax = c1 * grid.pitch - 2 * grid.pitch;
   const yMin = (r0 + 1) * grid.rowStep;
   const yMax = (r1 - 2) * grid.rowStep;
   const outW = Math.max(1, Math.floor((xMax - xMin) / spacing));
   const outH = Math.max(1, Math.floor((yMax - yMin) / spacing));
+  return { spacing, xMin, xMax, yMin, yMax, outW, outH };
+}
+
+// View size (pixels) at each `detail`, without building a sampler.
+export function viewSizes(grid, cam, details) {
+  const lenses = lensCenters(grid, cam.width, cam.height);
+  return Object.fromEntries(details.map((d) => {
+    const { outW, outH } = samplerExtent(lenses, grid, d);
+    return [d, [outW, outH]];
+  }));
+}
+
+export function buildSampler(grid, cam, detail = 1, kernel = 1.0) {
+  const lenses = lensCenters(grid, cam.width, cam.height);
+  const { cols, r0, c0 } = lenses;
+  const { spacing, xMin, xMax, yMin, yMax, outW, outH } = samplerExtent(lenses, grid, detail);
   const idx = new Int32Array(outW * outH * TAPS);
   const wts = new Float32Array(outW * outH * TAPS);
   const radius = kernel * grid.pitch;

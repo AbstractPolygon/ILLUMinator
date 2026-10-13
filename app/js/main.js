@@ -653,6 +653,7 @@ function setMode(mode) {
   for (const id of ['depth-btn', 'spread-show']) $(id).disabled = !depthTools;
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
+  $('detail').disabled = !raw;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -675,11 +676,22 @@ function fmt(v, digits = 2) {
   return typeof v === 'number' ? v.toFixed(digits) : v;
 }
 
+// Resolution options show the view size they give for this photo.
+const RESOLUTION_NAMES = { 1: '1× (fast)', 1.5: '1.5×', 2: '2×' };
+function showResolutionSizes() {
+  const sizes = state.info && state.info.sizes;
+  for (const o of $('detail').options) {
+    const size = sizes && sizes[o.value];
+    o.textContent = `${RESOLUTION_NAMES[o.value]}${size ? ` — ${size[0]}×${size[1]} px` : ''}`;
+  }
+}
+
 function renderInfo() {
+  showResolutionSizes();
   const info = state.info;
   const rows = [];
   if (state.current) rows.push(['File', state.current.name]);
-  if (info.cam) {
+  if (info.hasRaw) {
     const c = info.cam.capture || {};
     rows.push(['Camera', `${info.cam.make || ''} ${info.cam.model}`.trim()]);
     if (c.time) rows.push(['Taken', new Date(c.time).toLocaleString()]);

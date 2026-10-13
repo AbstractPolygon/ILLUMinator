@@ -265,20 +265,22 @@
             <option value="2">2×</option>
           </select>
         </label>
-        <button id="fullres-btn" class="wide" aria-pressed="false" title="Full resolution on/off (F)">Full resolution</button>
-        <div id="fullres-panel" hidden>
-          <label>Scale
-            <select id="still-scale">
-              <option value="2">2× lens grid</option>
-              <option value="3" selected>3× lens grid</option>
-              <option value="4">4× lens grid</option>
-            </select>
-          </label>
-          <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
-        </div>
-        <div class="row export">
-          <button id="png-btn">Save PNG</button>
-          <button id="webm-btn">Export video</button>
+        <div class="stack">
+          <button id="fullres-btn" class="wide" aria-pressed="false" title="Full resolution on/off (F)">Full resolution</button>
+          <div id="fullres-panel" hidden>
+            <label>Scale
+              <select id="still-scale">
+                <option value="2">2× lens grid</option>
+                <option value="3" selected>3× lens grid</option>
+                <option value="4">4× lens grid</option>
+              </select>
+            </label>
+            <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
+          </div>
+          <div class="row export">
+            <button id="png-btn">Save PNG</button>
+            <button id="webm-btn">Export video</button>
+          </div>
         </div>
       </details>
 

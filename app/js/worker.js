@@ -5,7 +5,7 @@ import { decodeLightField } from './core/decode.js';
 import { normalizeGrid, measureGrid, calibrateGrid, lensCenters } from './core/lenslet.js';
 import {
   buildSampler, renderView, makeDevelopParams, apertureSamples, refocus,
-  colorMatrix, autoExposure, toneMap, sensorToOutput,
+  colorMatrix, autoExposure, toneMap, sensorToOutput, viewSizes,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
@@ -208,6 +208,7 @@ function summary() {
       processed: { kind: pp.kind, source: pp.source, count: pp.images.length, hasDepth: pp.hasDepth, canDrag: pp.canDrag },
       width: pp.width,
       height: pp.height,
+      sizes: { 1: [pp.width, pp.height], 1.5: [pp.width, pp.height], 2: [pp.width, pp.height] },
       radius: pp.radius,
       settings: state.settings,
       renderer: 'CPU',
@@ -223,6 +224,8 @@ function summary() {
     gridQuality: lf.gridQuality,
     width: sampler.outW,
     height: sampler.outH,
+    // View size at each Resolution setting.
+    sizes: viewSizes(lf.grid, cam, [1, 1.5, 2]),
     radius: apertureRadius(),
     settings: state.settings,
     renderer: state.gpu ? `GPU (${state.gpu.name})` : 'CPU',
