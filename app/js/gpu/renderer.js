@@ -551,6 +551,8 @@ uniform float uDetail;
 uniform float uOutScale;
 uniform ivec2 uOutSize;
 uniform int uReach;
+uniform sampler2D uEstimate;  // back-projection: current result (linear)
+uniform int uResidual;        // 1: splat the difference from uEstimate
 flat out vec2 vCenter;
 flat out float vY;
 flat out float vConf;
@@ -627,6 +629,7 @@ void main() {
   float upY = dot(up, vec3(0.2126, 0.7152, 0.0722));
   float value = max(0.0, raw - uBlack[ch]) * uScale[ch] * gain;
   vY = value * min(8.0, upY / c);
+  if (uResidual == 1) vY -= texture(uEstimate, (o + 0.5) / vec2(uOutSize)).r;
   vConf = conf;
   vCenter = o;
   gl_Position = vec4((vec2(pp) + 0.5) / vec2(uOutSize) * 2.0 - 1.0, 0.0, 1.0);
@@ -1181,6 +1184,18 @@ export class GpuRenderer {
     gl.uniform2i(U.uOutSize, W, H);
     gl.uniform1i(U.uReach, p.reach);
     gl.uniform1f(U.uInv2s2, 1 / (2 * p.sigma * p.sigma));
+    // Back-projection pass: the current result, sampled at each raw pixel's
+    // position (half floats filter linearly everywhere).
+    let estimate = null;
+    if (p.estimate) {
+      estimate = this.texture(W, H, gl.R16F, gl.LINEAR);
+      gl.bindTexture(gl.TEXTURE_2D, estimate);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
+    }
+    gl.useProgram(P.p);
+    gl.uniform1i(U.uResidual, estimate ? 1 : 0);
+    gl.uniform1i(U.uEstimate, 4);
+    this.bindTex(4, estimate || base);
     gl.bindVertexArray(this.emptyVao);
     // In chunks, so no single draw runs long enough to trip a GPU watchdog.
     const total = cam.width * cam.height;
@@ -1199,7 +1214,7 @@ export class GpuRenderer {
       accY[i] = buf[4 * i];
       wsum[i] = buf[4 * i + 1];
     }
-    for (const t of [acc, base, vig]) gl.deleteTexture(t);
+    for (const t of [acc, base, vig, estimate]) if (t) gl.deleteTexture(t);
     return { accY, wsum };
   }
 

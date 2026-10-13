@@ -126,7 +126,10 @@ function sampleBilinear(img, w, h, x, y) {
 }
 
 // options: { alpha, allInFocus, u0, v0, apertureSigma, scale, vignetting,
-//            base, baseW, baseH, depth, sigma, aperture, onProgress }
+//            base, baseW, baseH, depth, sigma, aperture, passes, onProgress }
+// `passes` (0 = off) adds iterative back-projection: each pass predicts every
+// raw sample's brightness from the current result, and splats the
+// differences back, recovering detail a single splat smooths away.
 // (u0, v0) moves the viewpoint like the camera view does; `apertureSigma`
 // (sensor pixels) narrows the synthetic aperture around it for more depth of
 // field when refocusing.
@@ -144,7 +147,7 @@ function sampleBilinear(img, w, h, x, y) {
 export function renderSuperRes(raw, cam, dev, sampler, options) {
   const {
     alpha = 0, allInFocus = false, u0 = 0, v0 = 0, apertureSigma = Infinity, scale = 3, vignetting: vg, base, depth,
-    depthTolerance = 0.12, onProgress,
+    depthTolerance = 0.12, onProgress, passes = 0,
   } = options;
   const inv2a2 = Number.isFinite(apertureSigma) ? 1 / (2 * apertureSigma * apertureSigma) : 0;
   // At higher output scales there are fewer samples per output pixel; use a
@@ -200,19 +203,25 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 
   const rUse = g.pitch * aperture;
   const reach = Math.ceil(1.5 * sigma);
-  let accY;
-  let wsum;
-  if (options.gpuSplat) {
-    // The same accumulation on the GPU: one point per raw pixel.
-    ({ accY, wsum } = options.gpuSplat({
-      W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
-      xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth,
-    }));
-  } else {
-    ({ accY, wsum } = splatOnCpu());
-  }
+  // One splat of every raw pixel; with `estimate`, each sample contributes
+  // its difference from the estimate at its position instead (a residual).
+  const totalSteps = 1 + passes;
+  const splat = (estimate, step) => {
+    const progress = onProgress ? (p) => onProgress((step + p) / totalSteps) : undefined;
+    if (options.gpuSplat) {
+      // The same accumulation on the GPU: one point per raw pixel.
+      const r = options.gpuSplat({
+        W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
+        xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate,
+      });
+      if (progress) progress(1);
+      return r;
+    }
+    return splatOnCpu(estimate, progress);
+  };
+  const { accY, wsum } = splat(null, 0);
 
-  function splatOnCpu() {
+  function splatOnCpu(estimate, progress) {
     const accY = new Float32Array(W * H);
     const wsum = new Float32Array(W * H);
     const inv2s2 = 1 / (2 * sigma * sigma);
@@ -254,7 +263,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       const c = up[3 * lp + ch];
       if (!(c > 1e-5)) return;
       const value = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
-      const yEst = value * Math.min(8, upY[lp] / c);
+      let yEst = value * Math.min(8, upY[lp] / c);
+      if (estimate) yEst -= sampleBilinear(estimate, W, H, ox, oy);
       for (let k = 0; k < taps; k++) {
         const ex = px - reach + k - ox;
         const ey = py - reach + k - oy;
@@ -269,7 +279,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           wsum[o] += w;
         }
       }
-    }, onProgress);
+    }, progress);
     return { accY, wsum };
   }
 
@@ -279,8 +289,14 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   const sharpY = new Float32Array(W * H);
   let sumUp = 0;
   let sumSharp = 0;
+  for (let p = 0; p < W * H; p++) sharpY[p] = (accY[p] + upY[p] * lambda) / (wsum[p] + lambda);
+  // Back-projection: correct the result by how far each raw sample is from
+  // what the result predicts for it. Damped, so noise is not amplified.
+  for (let pass = 0; pass < passes; pass++) {
+    const r = splat(sharpY, pass + 1);
+    for (let p = 0; p < W * H; p++) sharpY[p] = Math.max(0, sharpY[p] + (0.8 * r.accY[p]) / (r.wsum[p] + lambda));
+  }
   for (let p = 0; p < W * H; p++) {
-    sharpY[p] = (accY[p] + upY[p] * lambda) / (wsum[p] + lambda);
     sumUp += upY[p];
     sumSharp += sharpY[p];
   }

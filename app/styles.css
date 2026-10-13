@@ -5,8 +5,8 @@
   --text: #e6e8eb;
   --muted: #8b939e;
   --heading: #b3bac4; /* section titles: lighter than subsection titles */
-  --accent: #f2b33d;
-  --accent-text: #1a1406;
+  --accent: #c8cdd5; /* light grey that sits with the dark toolbar */
+  --accent-text: #15171b;
   --slider-track: 2px;
   --slider-thumb-w: 12px;
   --slider-thumb-h: 6px;
@@ -28,6 +28,7 @@ html, body {
 body { display: flex; flex-direction: column; }
 
 button, select, input { font: inherit; color: inherit; }
+input[type=checkbox] { accent-color: var(--accent); }
 
 button {
   background: #262a31;
