@@ -235,10 +235,12 @@ function apertureFor(n) {
   const native = (state.info && state.info.cam && state.info.cam.capture && state.info.cam.capture.fNumber) || 2;
   const ratio = native / n;
   const radius = state.info ? state.info.radius : 4.5;
-  // A shaped bokeh, a changed depth of field, focus spread and tilt are
-  // drawn from the depth map at every aperture, from the sharp single view.
+  // Normally the blur is drawn from the depth map over the sharp single view
+  // (or the multi-view denoised merge), like Lytro's own renders: whatever
+  // is in focus keeps full sharpness. "Optical" instead refocuses by
+  // averaging the views, which is softer but follows the real optics.
   const field = focusField();
-  if ($('bokeh').value !== 'natural' || +$('dof-depth').value !== 0 || field.spread > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
+  if ($('bokeh').value !== 'optical' || +$('dof-depth').value !== 0 || field.spread > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
   // About one view's worth of the aperture: render that single view (fast).
   if (ratio < 0.15) return { aperture: 0, dof: 0 };
   if (ratio <= 1) return { aperture: ratio, dof: 0 };
@@ -322,7 +324,7 @@ function cameraParams() {
     dof: lens.dof * depthOfFieldScale(),
     // The synthetic blur's options: bokeh shape and brightness, and the
     // focus field (spread and tilt).
-    bokeh: { shape: $('bokeh').value === 'natural' ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value, ...focusField() },
+    bokeh: { shape: ['natural', 'optical'].includes($('bokeh').value) ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value, ...focusField() },
   };
 }
 
@@ -897,6 +899,10 @@ async function focusAt(event) {
 }
 
 canvas.addEventListener('click', (event) => {
+  if (state.picking) {
+    pickWhiteBalance(event);
+    return;
+  }
   if (suppressClick) {
     suppressClick = false;
     return;
@@ -906,7 +912,7 @@ canvas.addEventListener('click', (event) => {
 });
 
 canvas.addEventListener('pointerdown', (event) => {
-  if (!state.info || event.button !== 0) return;
+  if (!state.info || event.button !== 0 || state.picking) return;
   if (event.shiftKey || (view.k > 1 && state.mode !== 'camera')) {
     startPan(event);
     return;
@@ -1009,6 +1015,36 @@ $('library-choose').onclick = async () => {
   const dir = await native.chooseLibraryDir();
   if (dir) await showLibraryLocation();
 };
+
+// ---------------------------------------------------------------- white balance eyedropper
+
+// Click the eyedropper, then something in the photo that should be neutral:
+// the worker finds the temperature and tint that make it so.
+function setPicking(on) {
+  state.picking = on && canRender() && state.mode === 'camera';
+  $('wb-pick').setAttribute('aria-pressed', String(state.picking));
+  canvas.classList.toggle('picking', state.picking);
+}
+
+async function pickWhiteBalance(event) {
+  const [x, y] = viewPoint(event);
+  setPicking(false);
+  try {
+    const res = await engine.request('whiteBalanceAt', { x, y });
+    if (!res || !res.kelvin) return;
+    $('awb').checked = false;
+    $('wb-temperature').value = res.kelvin;
+    $('wb-tint').value = res.tint;
+    showSliderValue($('wb-temperature'));
+    showSliderValue($('wb-tint'));
+    await applySettings();
+    scheduleSave();
+  } catch (err) {
+    showError(err);
+  }
+}
+
+$('wb-pick').onclick = () => setPicking(!state.picking);
 
 // ---------------------------------------------------------------- export
 
@@ -1422,6 +1458,10 @@ $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.picking) {
+    setPicking(false);
+    return;
+  }
   if (e.target.matches('input, select, textarea')) return;
   if (e.code === 'Space') {
     e.preventDefault();

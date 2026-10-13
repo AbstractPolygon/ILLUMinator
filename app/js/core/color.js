@@ -124,3 +124,34 @@ export function applyLook(px, look) {
   px[1] = g;
   px[2] = b;
 }
+
+// Eyedropper: the temperature (kelvin) and tint that make `rgb` (one color
+// before white balance, in the camera's RGB) neutral after `matrix` (the
+// color matrix without white balance). Searches the slider ranges.
+export function solveWhiteBalance(rgb, matrix, asShot) {
+  const cost = (kelvin, tint) => {
+    const g = whiteBalanceGains(kelvin, asShot, tint);
+    const c = [rgb[0] * g[0], rgb[1] * g[1], rgb[2] * g[2]];
+    const r = matrix[0] * c[0] + matrix[1] * c[1] + matrix[2] * c[2];
+    const gr = matrix[3] * c[0] + matrix[4] * c[1] + matrix[5] * c[2];
+    const b = matrix[6] * c[0] + matrix[7] * c[1] + matrix[8] * c[2];
+    const y = Math.max(1e-9, (r + gr + b) / 3);
+    return ((r - gr) / y) ** 2 + ((b - gr) / y) ** 2;
+  };
+  let best = { kelvin: asShot, tint: 0, cost: Infinity };
+  for (let k = 2000; k <= 10000; k += 100) {
+    for (let t = -150; t <= 150; t += 5) {
+      const c = cost(k, t);
+      if (c < best.cost) best = { kelvin: k, tint: t, cost: c };
+    }
+  }
+  // Refine to the sliders' steps (50 K, 1).
+  const { kelvin: k0, tint: t0 } = best;
+  for (let k = Math.max(2000, k0 - 100); k <= Math.min(10000, k0 + 100); k += 50) {
+    for (let t = Math.max(-150, t0 - 5); t <= Math.min(150, t0 + 5); t++) {
+      const c = cost(k, t);
+      if (c < best.cost) best = { kelvin: k, tint: t, cost: c };
+    }
+  }
+  return { kelvin: best.kelvin, tint: best.tint };
+}

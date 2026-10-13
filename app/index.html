@@ -91,7 +91,12 @@
         <summary><h2>Process</h2></summary>
         <details class="subpanel">
           <summary><h3>White Balance</h3></summary>
-          <label class="check"><input id="awb" type="checkbox"> Auto</label>
+          <div class="row wb-row">
+            <label class="check"><input id="awb" type="checkbox"> Auto</label>
+            <button id="wb-pick" type="button" class="icon-only" title="Pick white balance from the photo: click something that should be neutral (Esc cancels)" aria-label="Pick white balance from the photo" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.7 5.6 18.4 3.3a1 1 0 0 0-1.4 0l-3.1 3.1-1.9-1.9-1.4 1.4 1.4 1.4-8.3 8.3V20h4.4l8.3-8.3 1.4 1.4 1.4-1.4-1.9-1.9 3.1-3.1a1 1 0 0 0 0-1.4zM7.6 18H6v-1.6l8.1-8.1 1.6 1.6z"/></svg>
+            </button>
+          </div>
           <label>Temperature <output for="wb-temperature" data-for="wb-temperature">5500 K</output>
             <input id="wb-temperature" type="range" min="2000" max="10000" step="50" value="5500" data-default="5500">
           </label>
@@ -186,6 +191,7 @@
           <label>Shape
             <select id="bokeh">
               <option value="natural">Natural</option>
+              <option value="optical">Optical (softer)</option>
               <option value="circle">Circle</option>
               <option value="hexagon">Hexagon</option>
             </select>

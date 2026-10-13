@@ -11,7 +11,7 @@ import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
-import { makeLook, whiteBalanceGains, DEFAULT_KELVIN } from './core/color.js';
+import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
@@ -588,6 +588,41 @@ async function depthMap({ id }) {
   return undefined;
 }
 
+// Eyedropper: temperature and tint that make the area around view pixel
+// (x, y) neutral. The area is averaged (5 x 5) so noise does not decide.
+async function whiteBalanceAt({ x, y }) {
+  let rgb;
+  let w;
+  let h;
+  let matrix;
+  if (state.pp) {
+    const pp = state.pp;
+    rgb = pp.linear(pp.images[0]);
+    w = pp.width;
+    h = pp.height;
+    matrix = colorMatrix({ ccm: null }, { ...state.settings, useCcm: false });
+  } else {
+    requireRaw();
+    rgb = render(0, 0);
+    w = state.sampler.outW;
+    h = state.sampler.outH;
+    matrix = colorMatrix(state.lf.cam, state.settings);
+  }
+  const sum = [0, 0, 0];
+  let n = 0;
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      const px = Math.round(x) + dx;
+      const py = Math.round(y) + dy;
+      if (px < 0 || py < 0 || px >= w || py >= h) continue;
+      for (let c = 0; c < 3; c++) sum[c] += rgb[3 * (py * w + px) + c];
+      n++;
+    }
+  }
+  if (!n || !(sum[1] > 0)) return null;
+  return solveWhiteBalance(sum.map((s) => s / n), matrix, asShotKelvin());
+}
+
 // Show spread overlay: pixels outside the sharp depth range around the
 // focus (with spread and tilt) in blue when nearer, orange when farther.
 async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0.5, 0.5] }) {
@@ -777,7 +812,7 @@ async function processedFrames({ id, job, list, kind }) {
   return { done: true };
 }
 
-const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

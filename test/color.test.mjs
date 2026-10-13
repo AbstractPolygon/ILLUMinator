@@ -31,3 +31,14 @@ test('hue sliders only touch their own colors', () => {
   assert.ok(Math.abs(red[0] - red[1]) < 1e-6, 'red desaturated');
   assert.ok(blue[2] - blue[0] > 0.39, 'blue untouched');
 });
+
+test('eyedropper finds the white balance that makes a color neutral', async () => {
+  const { solveWhiteBalance, whiteBalanceGains } = await import('../app/js/core/color.js');
+  const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  // A grey card shot under light that needs 3500 K and tint +20 to neutralize.
+  const g = whiteBalanceGains(3500, 5500, 20);
+  const card = [0.5 / g[0], 0.5 / g[1], 0.5 / g[2]];
+  const res = solveWhiteBalance(card, identity, 5500);
+  assert.ok(Math.abs(res.kelvin - 3500) <= 100, `kelvin ${res.kelvin}`);
+  assert.ok(Math.abs(res.tint - 20) <= 3, `tint ${res.tint}`);
+});
