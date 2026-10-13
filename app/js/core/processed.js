@@ -269,6 +269,7 @@ export class ProcessedPicture {
         highlights: bokeh.highlights,
         clip: 1,
         spread: (bokeh.spread || 0) * scale,
+        smooth: (bokeh.smooth || 0) * scale,
         tilt: (bokeh.tilt || [0, 0]).map((t) => t * scale),
         point: bokeh.point,
       });

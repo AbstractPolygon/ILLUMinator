@@ -254,6 +254,7 @@ uniform float uFocus;
 uniform vec2 uTilt;         // focus change across the picture (normalized x, y)
 uniform vec2 uPoint;        // the tilted focus plane turns around this point
 uniform float uSpread;      // depth range on each side of the focus kept sharp
+uniform float uSmooth;      // width of the soft edge after the sharp range
 uniform float uStrength;    // blur radius in pixels per unit of focus difference
 uniform float uClip;
 uniform float uHighlights;
@@ -265,7 +266,11 @@ void main() {
   ivec2 dp = clamp(ivec2((vec2(p) + 0.5) * uDepthScale), ivec2(0), dsz - 1);
   vec2 n = (vec2(p) + 0.5) / vec2(textureSize(uSrc, 0));
   float d = texelFetch(uDepth, dp, 0).r - (uFocus + dot(uTilt, n - uPoint));
-  d = sign(d) * max(abs(d) - uSpread, 0.0);
+  // Past the sharp range blur builds up gradually over uSmooth (see
+  // softEdge in core/dof.js).
+  float e = max(abs(d) - uSpread, 0.0);
+  if (uSmooth > 0.0) e = e < uSmooth ? e * e / (2.0 * uSmooth) : e - 0.5 * uSmooth;
+  d = sign(d) * e;
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float knee = 0.8 * uClip;
   float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
@@ -1053,7 +1058,7 @@ export class GpuRenderer {
 
   // Synthetic depth of field with bokeh. `strength`: blur radius in pixels
   // of this image per unit of focus difference. Returns the result texture.
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0 }) {
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0 }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -1069,6 +1074,7 @@ export class GpuRenderer {
     gl.uniform2f(P.u.uTilt, tilt[0], tilt[1]);
     gl.uniform2f(P.u.uPoint, point[0], point[1]);
     gl.uniform1f(P.u.uSpread, spread);
+    gl.uniform1f(P.u.uSmooth, smooth);
     gl.uniform1f(P.u.uStrength, strength);
     gl.uniform1f(P.u.uClip, clip);
     gl.uniform1f(P.u.uHighlights, highlights);

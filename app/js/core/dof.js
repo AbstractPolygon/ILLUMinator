@@ -131,11 +131,21 @@ function boostHighlights(rgb, clip, amount) {
 // pxPerUnit. Options: shape ('smooth' | 'circle' | 'hexagon'),
 // highlights (0..1), clip (the developed level where highlights clip), and
 // the focus field: spread (depth kept sharp on each side of the focus),
+// smooth (width of the soft edge where blur starts after the spread),
 // tilt ([x, y] focus change across the picture) turning around point
+// Focus distance past the sharp range -> amount of blur. With `smooth` the
+// blur starts gradually (a quadratic ease over that width) instead of at
+// once; the sharp range itself stays sharp.
+export function softEdge(excess, smooth) {
+  if (!(excess > 0)) return 0;
+  if (!(smooth > 0)) return excess;
+  return excess < smooth ? (excess * excess) / (2 * smooth) : excess - smooth / 2;
+}
+
 // ([x, y], normalized).
 export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxPerUnit = 14, options = {}) {
   if (!(strength > 0)) return rgb;
-  const { shape = 'smooth', highlights = 0, clip = 1, spread = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
+  const { shape = 'smooth', highlights = 0, clip = 1, spread = 0, smooth = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
   const src = boostHighlights(rgb, clip, highlights);
   const maxR = Math.max(1, strength * 1.6 * pxPerUnit);
   const radii = [0];
@@ -151,7 +161,7 @@ export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxP
     for (let x = 0; x < w; x++) {
       const d = depth[dy * dw + Math.min(dw - 1, Math.floor((x + 0.5) * sx))];
       const f = rowFocus + tilt[0] * ((x + 0.5) / w - point[0]);
-      const r = strength * Math.max(0, Math.abs(d - f) - spread) * pxPerUnit;
+      const r = strength * softEdge(Math.abs(d - f) - spread, smooth) * pxPerUnit;
       let k = 0;
       while (k < radii.length - 2 && radii[k + 1] < r) k++;
       const t = Math.max(0, Math.min(1, (r - radii[k]) / (radii[k + 1] - radii[k] || 1)));

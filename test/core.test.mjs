@@ -203,3 +203,12 @@ test('depth smoothing evens out noise but keeps edges where the picture has them
   assert.ok(spread(out, 0, 9) < 0.5 * spread(depth, 0, 9), 'noise reduced');
   assert.ok(out[5 * w + 9] < -0.7 && out[5 * w + 10] > 0.7, 'edge kept sharp');
 });
+
+test('focus spread smoothing eases blur in without changing the sharp range', async () => {
+  const { softEdge } = await import('../app/js/core/dof.js');
+  assert.equal(softEdge(-0.1, 0.4), 0);
+  assert.equal(softEdge(0.3, 0), 0.3);
+  assert.ok(softEdge(0.05, 0.4) < 0.01);
+  assert.ok(Math.abs(softEdge(0.4, 0.4) - 0.2) < 1e-9);
+  assert.ok(Math.abs(softEdge(1, 0.4) - 0.8) < 1e-9);
+});

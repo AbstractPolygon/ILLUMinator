@@ -673,7 +673,7 @@ function apertureFor(n) {
   // is in focus keeps full sharpness. "Optical" instead refocuses by
   // averaging the views, which is softer but follows the real optics.
   const field = focusField();
-  if ($('bokeh').value !== 'optical' || +$('dof-depth').value !== 0 || field.spread > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
+  if ($('bokeh').value !== 'optical' || +$('dof-depth').value !== 0 || field.spread > 0 || field.smooth > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
   // About one view's worth of the aperture: render that single view (fast).
   if (ratio < 0.15) return { aperture: 0, dof: 0 };
   if (ratio <= 1) return { aperture: ratio, dof: 0 };
@@ -694,6 +694,8 @@ function focusField() {
   const angle = (+$('tilt-rotation').value * Math.PI) / 180;
   return {
     spread: 1.6 * $('spread').value / 100,
+    // Width of the soft edge of the sharp range, in the same units.
+    smooth: 0.8 * $('spread-smooth').value / 100,
     tilt: [tilt * Math.cos(angle), tilt * Math.sin(angle)],
     point: [state.focusPoint.x, state.focusPoint.y],
   };
@@ -712,7 +714,6 @@ async function updateSpreadOverlay() {
   const overlay = $('spread-overlay');
   const on = $('spread-show').checked && hasDepth() && state.mode === 'camera' && !state.depthShown;
   overlay.hidden = !on;
-  $('spread-legend').hidden = !$('spread-show').checked;
   if (!on) return;
   if (spreadView.busy) {
     spreadView.pending = true;
@@ -1117,7 +1118,7 @@ function setMode(mode) {
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
   for (const id of ['depth-btn', 'spread-show', 'depth-smooth']) $(id).disabled = !depthTools;
-  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
+  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
@@ -1426,7 +1427,7 @@ $('depth-smooth').oninput = () => {
 };
 $('depth-smooth').onchange = () => {};
 
-for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) {
+for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) {
   $(id).oninput = () => {
     showFNumber();
     showSliderValue($(id));
