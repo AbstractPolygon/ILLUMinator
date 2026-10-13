@@ -33,6 +33,9 @@
     <button id="sample-btn" hidden>Synthetic sample</button>
     <span id="camera-status" class="hint"></span>
     <span class="spacer"></span>
+    <button id="about-btn" class="icon-only" title="About ILLUMinator" aria-label="About ILLUMinator" aria-haspopup="dialog" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="8" r="1.2" fill="currentColor"/><path d="M12 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
     <button id="settings-btn" class="icon-only" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
       <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
     </button>
@@ -357,6 +360,20 @@
       <menu>
         <span class="spacer"></span>
         <button value="close" class="primary">Done</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="about-dialog">
+    <form method="dialog">
+      <h2>ILLUMinator <span id="about-version" class="version"></span></h2>
+      <p>ILLUMinator opens photos from Lytro ILLUM and first generation Lytro cameras and lets you work with them as light fields: refocus after the shot, change the aperture and viewpoint, tilt the plane of focus, view the depth map, and export stills and animations.</p>
+      <p>It decodes the camera’s raw sensor data itself, applies the edits saved by Lytro Desktop, and keeps your photos and their edits in a library on your computer. It runs as a desktop app and in a web browser.</p>
+      <p class="hint">Copyright © AbstractPolygon, LLC. Licensed under PolyForm Shield 1.0.0.</p>
+      <menu>
+        <a class="button" href="https://github.com/AbstractPolygon/ILLUMinator" target="_blank" rel="noopener">View on GitHub</a>
+        <span class="spacer"></span>
+        <button value="close" class="primary">Close</button>
       </menu>
     </form>
   </dialog>

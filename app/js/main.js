@@ -1024,6 +1024,13 @@ $('settings-btn').onclick = async () => {
 };
 $('settings-dialog').addEventListener('close', () => $('settings-btn').setAttribute('aria-expanded', 'false'));
 
+$('about-btn').onclick = () => {
+  $('about-version').textContent = VERSION;
+  $('about-btn').setAttribute('aria-expanded', 'true');
+  $('about-dialog').showModal();
+};
+$('about-dialog').addEventListener('close', () => $('about-btn').setAttribute('aria-expanded', 'false'));
+
 $('library-choose').onclick = async () => {
   if (!native) return;
   const dir = await native.chooseLibraryDir();
