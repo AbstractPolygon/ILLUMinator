@@ -1,4 +1,4 @@
-// Local adjustments: up to eight masks, each with its own effects, applied
+// Local adjustments: up to 16 masks, each with its own effects, applied
 // to the finished picture (linear output RGB, after the tone and color
 // adjustments). gpu/renderer.js mirrors this.
 //
@@ -18,7 +18,7 @@
 // mask was made at. A radial mask with `followView` set moves a little
 // with the viewpoint, like the edge of a lens seen from off center.
 
-export const MAX_MASKS = 8;
+export const MAX_MASKS = 16;
 export const MASK_KINDS = ['radial', 'linear', 'depth'];
 
 const newId = () => Math.random().toString(36).slice(2, 10);
