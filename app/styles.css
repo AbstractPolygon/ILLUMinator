@@ -177,6 +177,9 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
   border-top: 1px solid var(--line); background: var(--panel); flex-wrap: wrap;
 }
 .modes { display: flex; gap: 6px; }
+.transport-buttons { display: flex; gap: 2px; }
+.transport-buttons .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; padding: 6px 0; }
+.transport-buttons .icon-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .transport input[type=range] { flex: 1; min-width: 120px; }
 .zoom { display: flex; gap: 2px; align-items: center; }
 .zoom button { padding: 6px 9px; min-width: 32px; }

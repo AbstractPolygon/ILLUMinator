@@ -9,7 +9,7 @@ import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
-import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount } from './core/keyframes.js';
+import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
 // (the Frame rate setting).
@@ -35,6 +35,7 @@ const state = {
   animKey: null, // settings the current frames were rendered with
   animDone: null, // promise resolved when every frame has arrived
   loop: 'loop', // or 'pingpong'
+  repeat: true, // play over and over (the loop button)
   index: 0,
   direction: 1,
   playing: false,
@@ -1004,7 +1005,16 @@ function advance() {
   const n = state.frames.length;
   if (n < 2) return;
   let next = state.index + state.direction;
-  if (state.loop === 'pingpong') {
+  if (!state.repeat && (next >= n || (state.loop === 'pingpong' && next < 0))) {
+    // Played once (a focus sweep: there and back): stop at the end.
+    if (state.loop === 'pingpong' && next >= n) {
+      state.direction = -state.direction;
+      next = state.index + state.direction;
+    } else {
+      setPlaying(false);
+      return;
+    }
+  } else if (state.loop === 'pingpong') {
     if (next >= n || next < 0) {
       state.direction = -state.direction;
       next = state.index + state.direction;
@@ -1029,8 +1039,11 @@ requestAnimationFrame(tick);
 function setPlaying(p) {
   if (p && !$('anim-on').checked) return;
   state.playing = p;
-  $('play-btn').textContent = p ? 'Pause' : 'Play';
+  showPlayIcon(p);
   if (p) {
+    // Played to the end without repeating: start over.
+    if (!state.repeat && state.loop !== 'pingpong' && state.index >= state.frames.length - 1) state.index = 0;
+    if (!state.repeat && state.loop === 'pingpong' && state.direction < 0 && state.index <= 0) state.direction = 1;
     setFullRes(false, { restore: false });
     setDepthShown(false, { restore: false });
     state.showingFrames = true;
@@ -1185,7 +1198,7 @@ function setMode(mode) {
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
-  for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
+  for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
   $('stereo-btn').disabled = !(state.info && state.info.hasRaw) || !camera;
   $('stereo-on').disabled = !(state.info && state.info.hasRaw) || !camera;
@@ -2188,7 +2201,8 @@ function currentValue(k) {
 }
 
 // Shows a keyframe's value in the controls (and the picture).
-function showValue(k, v) {
+// Sets the control behind track k to v.
+function applyValue(k, v) {
   if (k === 'aperture') {
     let best = 0;
     F_STOPS.forEach((n, i) => { if (Math.abs(Math.log(n / v)) < Math.abs(Math.log(F_STOPS[best] / v))) best = i; });
@@ -2210,8 +2224,26 @@ function showValue(k, v) {
     showSliderValue($('frame-pan-x'));
     showSliderValue($('frame-pan-y'));
   }
+}
+
+function showValue(k, v) {
+  applyValue(k, v);
   if (state.showingFrames) backToCamera();
   cameraChanged({ final: true });
+}
+
+// Shows the animation's settings at time t (no frames rendered yet).
+function previewAt(t) {
+  let any = false;
+  for (const k of TRACKS) {
+    const v = valueAt(anim, k, t);
+    if (v === undefined) continue;
+    applyValue(k, v);
+    any = true;
+  }
+  if (!any) return;
+  if (state.showingFrames) backToCamera();
+  cameraChanged({ final: false });
 }
 
 function playheadTime() {
@@ -2340,25 +2372,45 @@ function renderTimeline() {
   scroll.value = String(start);
 }
 
-function timeAt(e, el) {
-  const r = el.getBoundingClientRect();
+// The time under the pointer; `r` is the track's (or ruler's) box, taken
+// when a drag starts since the timeline is redrawn as it goes.
+function timeAt(e, r) {
   const { start, span } = viewWindow();
   const t = Math.min(anim.length, Math.max(0, start + ((e.clientX - r.left) / r.width) * span));
   return Math.round(t * KEY_FPS) / KEY_FPS;
 }
 
-// Click on the ruler or a track: move the playhead there.
+// Click or drag on the ruler or a track: the playhead follows the pointer,
+// showing the rendered frame there (or the animation's settings).
 function seekTimeline(e, el) {
-  const t = timeAt(e, el);
-  state.keyTime = t;
-  if (state.frames.length) {
-    const i = Math.min(state.frames.length - 1, Math.round(t * KEY_FPS));
+  e.preventDefault();
+  const r = el.getBoundingClientRect();
+  let last = -1;
+  const seek = (ev) => {
+    const t = timeAt(ev, r);
+    if (t === last) return;
+    last = t;
+    state.keyTime = t;
     if (state.playing) setPlaying(false);
-    state.showingFrames = true;
-    state.index = i;
-    showFrame(i);
-  }
-  renderTimeline();
+    if (state.frames.length) {
+      const i = Math.min(state.frames.length - 1, Math.round(t * KEY_FPS));
+      state.showingFrames = true;
+      state.index = i;
+      showFrame(i);
+    } else {
+      previewAt(t);
+    }
+    renderTimeline();
+    updateFrameLabel();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', seek);
+    window.removeEventListener('pointerup', up);
+    if (!state.frames.length) scheduleSave();
+  };
+  window.addEventListener('pointermove', seek);
+  window.addEventListener('pointerup', up);
+  seek(e);
 }
 
 // Drag a keyframe along its track; a click without moving selects it and
@@ -2367,12 +2419,13 @@ function dragKey(e, k, key, track) {
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX;
+  const r = track.getBoundingClientRect();
   let moved = false;
   keySel = { k, t: key.t };
   const move = (ev) => {
     if (!moved && Math.abs(ev.clientX - startX) < 3) return;
     moved = true;
-    const t = timeAt(ev, track);
+    const t = timeAt(ev, r);
     if (anim.tracks[k].some((other) => other !== key && Math.abs(other.t - t) < 0.5 / KEY_FPS)) return;
     key.t = t;
     keySel = { k, t };
@@ -3038,13 +3091,48 @@ $('sample-btn').onclick = () => {
   renderLibrary();
   openWith({ synthetic: { width: 3864, height: 2684 } });
 };
-$('play-btn').onclick = () => setPlaying(!state.playing);
+$('play-btn').onclick = () => setPlaying(true);
+$('pause-btn').onclick = () => setPlaying(false);
+// Stop: pause and go back to the start.
+$('stop-btn').onclick = () => {
+  setPlaying(false);
+  state.index = 0;
+  state.direction = 1;
+  state.keyTime = 0;
+  if (state.frames.length && state.showingFrames) showFrame(0);
+  else if (keyframesOn()) previewAt(0);
+  renderTimeline();
+  updateFrameLabel();
+};
+$('loop-btn').onclick = () => {
+  state.repeat = !state.repeat;
+  showLoop();
+};
+
+const icon = (d) => `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
+$('stop-btn').innerHTML = icon('M3.5 3.5h9v9h-9z');
+$('pause-btn').innerHTML = icon('M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z');
+$('play-btn').innerHTML = icon('M4 2.5v11l9.5-5.5z');
+$('loop-btn').innerHTML = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9V7.5a3 3 0 0 1 3-3h8M11 2l2.5 2.5L11 7"/><path d="M13.5 7v1.5a3 3 0 0 1-3 3h-8M5 14l-2.5-2.5L5 9"/></g></svg>';
+
+// The play button lights up while playing.
+function showPlayIcon(playing) {
+  $('play-btn').classList.toggle('active', playing);
+  $('pause-btn').classList.toggle('active', !playing && state.showingFrames && state.frames.length > 0);
+}
+
+function showLoop() {
+  $('loop-btn').classList.toggle('active', state.repeat);
+  $('loop-btn').setAttribute('aria-pressed', String(state.repeat));
+}
+showPlayIcon(false);
+showLoop();
 $('scrub').oninput = () => {
   if (!state.frames.length) ensureAnimation();
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
   state.playing = false;
-  $('play-btn').textContent = 'Play';
+  showPlayIcon(false);
   state.showingFrames = true;
   state.index = Math.min(+$('scrub').value, Math.max(0, state.frames.length - 1));
   showFrame(state.index);
@@ -3093,7 +3181,7 @@ function showAnimationEnabled() {
   const on = $('anim-on').checked;
   $('anim-controls').disabled = !on;
   const camera = state.mode === 'camera';
-  for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !on;
+  for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !on;
 }
 $('anim-on').onchange = () => {
   if (!$('anim-on').checked) {

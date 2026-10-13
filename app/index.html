@@ -106,7 +106,12 @@
         </div>
       </div>
       <div class="transport">
-        <button id="play-btn" title="Play / pause (space)">Play</button>
+        <div class="transport-buttons" role="group" aria-label="Playback">
+          <button id="stop-btn" class="icon-btn" type="button" title="Stop: back to the start" aria-label="Stop"></button>
+          <button id="pause-btn" class="icon-btn" type="button" title="Pause (space)" aria-label="Pause"></button>
+          <button id="play-btn" class="icon-btn" type="button" title="Play (space)" aria-label="Play"></button>
+          <button id="loop-btn" class="icon-btn" type="button" title="Loop: play over and over" aria-label="Loop" aria-pressed="true"></button>
+        </div>
         <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Animation position">
         <span id="frame-label" class="hint"></span>
         <label id="anim-length-row" class="anim-length" title="Length of the animation">Length
