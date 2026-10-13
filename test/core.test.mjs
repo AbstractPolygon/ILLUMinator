@@ -182,3 +182,24 @@ test('hot pixels are replaced by their same-color neighbors', async () => {
   assert.equal(raw[5 * w + 5], 100);
   assert.equal(raw[3 * w + 4], 180);
 });
+
+test('depth smoothing evens out noise but keeps edges where the picture has them', async () => {
+  const { smoothDepth } = await import('../app/js/core/depth.js');
+  const w = 20;
+  const h = 10;
+  const guide = new Float32Array(w * h * 3);
+  const depth = new Float32Array(w * h);
+  let s = 3;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647) - 0.5;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const near = x < 10; // a near object on the left, brighter in the picture
+      guide.fill(near ? 0.8 : 0.1, 3 * (y * w + x), 3 * (y * w + x) + 3);
+      depth[y * w + x] = (near ? -1 : 1) + 0.3 * rnd();
+    }
+  }
+  const out = smoothDepth(depth, w, h, guide, { amount: 0.5 });
+  const spread = (a, x0, x1) => { let lo = Infinity, hi = -Infinity; for (let y = 0; y < h; y++) for (let x = x0; x < x1; x++) { lo = Math.min(lo, a[y * w + x]); hi = Math.max(hi, a[y * w + x]); } return hi - lo; };
+  assert.ok(spread(out, 0, 9) < 0.5 * spread(depth, 0, 9), 'noise reduced');
+  assert.ok(out[5 * w + 9] < -0.7 && out[5 * w + 10] > 0.7, 'edge kept sharp');
+});

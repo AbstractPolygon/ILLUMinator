@@ -264,3 +264,57 @@ export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2
   const mean = finite.reduce((s, c) => s + c, 0) / Math.max(1, finite.length);
   return { alpha: alphas[best] + offset * step, confidence: mean > 0 ? (mean - costs[best]) / mean : 0 };
 }
+
+// Edge-aware depth smoothing (a joint bilateral filter): each depth value
+// becomes a weighted average of its neighbors, where neighbors that look
+// different in the photo (`guide`, linear RGB at the depth map's size)
+// count for little. Rough patches inside a surface even out while depth
+// edges stay on the photo's edges. `confidence` (0..1 per pixel, optional)
+// lets well-measured values outweigh guesses. `amount` 0..1 sets how far
+// the smoothing reaches (repeated 5 x 5 passes). Returns a new array.
+export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confidence = null } = {}) {
+  const passes = Math.round(amount * 8);
+  if (passes <= 0) return alpha;
+  const n = width * height;
+  // Guide brightness in a square-root space, so dark and bright areas
+  // separate edges alike.
+  const g = new Float32Array(n);
+  let mean = 0;
+  for (let i = 0; i < n; i++) {
+    g[i] = Math.sqrt(Math.max(0, 0.2126 * guide[3 * i] + 0.7152 * guide[3 * i + 1] + 0.0722 * guide[3 * i + 2]));
+    mean += g[i];
+  }
+  mean = Math.max(1e-6, mean / n);
+  const kRange = -0.5 / (0.08 * mean) ** 2;
+  const kSpace = -0.5 / (1.2 * 1.2);
+  const conf = confidence || null;
+  let src = Float32Array.from(alpha);
+  let dst = new Float32Array(n);
+  for (let pass = 0; pass < passes; pass++) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        const gi = g[i];
+        let sum = 0;
+        let wsum = 0;
+        for (let dy = -2; dy <= 2; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          for (let dx = -2; dx <= 2; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            const j = yy * width + xx;
+            const d = g[j] - gi;
+            let w = Math.exp(kSpace * (dx * dx + dy * dy) + kRange * d * d);
+            if (conf) w *= 0.15 + conf[j];
+            sum += src[j] * w;
+            wsum += w;
+          }
+        }
+        dst[i] = wsum > 0 ? sum / wsum : src[i];
+      }
+    }
+    [src, dst] = [dst, src];
+  }
+  return src;
+}

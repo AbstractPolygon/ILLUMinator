@@ -8,7 +8,7 @@ import {
   colorMatrix, autoExposure, toneMap, sensorToOutput, viewSizes,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { estimateDepth, focusAtPoint } from './core/depth.js';
+import { estimateDepth, focusAtPoint, smoothDepth } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
@@ -179,6 +179,7 @@ function rebuildSampler() {
   state.refocusViews = null;
   state.vignetting = null;
   state.depth = null;
+  state.depthRaw = null;
   if (state.gpu) {
     state.vignetting = estimateVignetting(lf.raw, lf.cam, state.dev, lf.grid);
     const vg = state.vignetting;
@@ -262,6 +263,7 @@ async function open({ id, bytes, synthetic }) {
   if (!state.lf.raw && state.lf.stacks.length) {
     onProgress('Decoding images', 0.5);
     state.pp = await buildProcessed(state.lf);
+    state.pp.setSmoothing(state.settings.depthSmoothing ?? 0.3);
     updateColor();
   }
   if (state.lf.raw) {
@@ -469,7 +471,9 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
 
 async function settings({ settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
+  const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   Object.assign(state.settings, s);
+  if (smoothingChanged && !detailChanged) applyDepthSmoothing();
   if (state.pp) {
     updateColor();
     return summary();
@@ -547,12 +551,29 @@ async function ensureDepth(id) {
   if (!(await ensureRefocusViews(id))) return false;
   if (!state.depth) {
     const { outW, outH } = state.sampler;
-    state.depth = estimateDepth(state.refocusViews, outW, outH, {
+    state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
       onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
     });
-    if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
+    applyDepthSmoothing();
   }
   return true;
+}
+
+// The measured depth, smoothed by the Depth > Smoothing setting (edge-aware,
+// guided by the picture). Re-run when the setting changes.
+function applyDepthSmoothing() {
+  const amount = state.settings.depthSmoothing ?? 0.3;
+  if (state.pp) {
+    state.pp.setSmoothing(amount);
+    return;
+  }
+  const raw = state.depthRaw;
+  if (!raw) return;
+  const { outW, outH } = state.sampler;
+  const guide = equalize(render(0, 0));
+  state.depth = { ...raw, alpha: smoothDepth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence }) };
+  state.depthSmoothingApplied = amount;
+  if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
 }
 
 // Color-coded depth map: near is warm, far is cool.

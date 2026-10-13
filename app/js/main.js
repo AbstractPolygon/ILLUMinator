@@ -672,7 +672,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'spread-show']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'spread-show', 'depth-smooth']) $(id).disabled = !depthTools;
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
@@ -978,6 +978,13 @@ function cameraChanged({ final }) {
   }
 }
 
+// Depth smoothing is applied in the worker like the color settings.
+$('depth-smooth').oninput = () => {
+  showSliderValue($('depth-smooth'));
+  applySettingsSoon();
+};
+$('depth-smooth').onchange = () => {};
+
 for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) {
   $(id).oninput = () => {
     showFNumber();
@@ -1279,6 +1286,7 @@ async function applySettings() {
     wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
     tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
     mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
+    depthSmoothing: $('depth-smooth').value / 100,
     details: {
       amount: +$('sharp-amount').value,
       radius: +$('sharp-radius').value,

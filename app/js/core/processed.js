@@ -13,6 +13,7 @@
 // picture's lambda range.
 
 import { applyDepthOfField } from './dof.js';
+import { smoothDepth } from './depth.js';
 
 const SRGB_TO_LINEAR = new Float32Array(256);
 for (let i = 0; i < 256; i++) {
@@ -123,6 +124,32 @@ export class ProcessedPicture {
     const coords = this.images.map((i) => Math.hypot(i.u, i.v));
     this.radius = kind === 'perspective' ? Math.max(1e-3, ...coords)
       : depth && (kind === 'warp' || kind === 'single') ? APERTURE_RADIUS : 0;
+  }
+
+  // Edge-aware smoothing of the file's depth map (Depth > Smoothing), guided
+  // by the picture scaled to the depth map's size.
+  setSmoothing(amount) {
+    if (!this.depth) return;
+    if (!this.depthOriginal) this.depthOriginal = this.depth;
+    if (this.smoothing === amount) return;
+    this.smoothing = amount;
+    this.alpha = null;
+    const d = this.depthOriginal;
+    if (!(amount > 0)) {
+      this.depth = d;
+      return;
+    }
+    const img = this.linear(this.images[0]);
+    const { width: w, height: h } = this;
+    const guide = new Float32Array(d.width * d.height * 3);
+    for (let y = 0; y < d.height; y++) {
+      const sy = Math.min(h - 1, Math.floor(((y + 0.5) * h) / d.height));
+      for (let x = 0; x < d.width; x++) {
+        const sx = Math.min(w - 1, Math.floor(((x + 0.5) * w) / d.width));
+        for (let c = 0; c < 3; c++) guide[3 * (y * d.width + x) + c] = img[3 * (sy * w + sx) + c];
+      }
+    }
+    this.depth = { ...d, lambda: smoothDepth(d.lambda, d.width, d.height, guide, { amount }) };
   }
 
   get canDrag() {
