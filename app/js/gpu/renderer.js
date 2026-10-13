@@ -197,6 +197,49 @@ void main() {
   outColor = vec4(wsum > 0.0 ? sum / wsum : vec3(0.0), 1.0);
 }`;
 
+// Multi-view denoising (core/mvdenoise.js): every refocus view sampled
+// where this pixel's scene point appears (shift from the depth map), weighted
+// by agreement with the current view, then blended with it.
+const MERGE_PASS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray uViews;
+uniform sampler2D uRef;
+uniform highp sampler2D uDepth;
+uniform int uCount;
+uniform vec4 uView[${MAX_VIEWS}]; // (u_k - u0) * detail, (v_k - v0) * detail
+uniform vec2 uCenter;             // u0 * detail, v0 * detail
+uniform vec2 uSize;
+uniform float uSigma;
+uniform float uBlend;
+out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 x = gl_FragCoord.xy - 0.5;
+  vec3 ref = texelFetch(uRef, p, 0).rgb;
+  float refS = sqrt(max(dot(ref, LUMA), 0.0));
+  ivec2 dsz = textureSize(uDepth, 0);
+  float a0 = texelFetch(uDepth, clamp(p, ivec2(0), dsz - 1), 0).r;
+  ivec2 pc = clamp(ivec2(floor(x - a0 * uCenter + 0.5)), ivec2(0), dsz - 1);
+  float a = texelFetch(uDepth, pc, 0).r;
+  float k = -0.5 / (uSigma * uSigma);
+  vec3 sum = ref;
+  float wsum = 1.0;
+  for (int i = 0; i < ${MAX_VIEWS}; i++) {
+    if (i >= uCount) break;
+    vec2 s = x + a * uView[i].xy;
+    if (s.x < 0.0 || s.y < 0.0 || s.x > uSize.x - 1.0 || s.y > uSize.y - 1.0) continue;
+    vec3 c = texture(uViews, vec3((s + 0.5) / uSize, float(i))).rgb;
+    float d = sqrt(max(dot(c, LUMA), 0.0)) - refS;
+    float w = exp(k * d * d);
+    sum += c * w;
+    wsum += w;
+  }
+  outColor = vec4(mix(ref, sum / wsum, uBlend), 1.0);
+}`;
+
 // Depth of field, step 1: per pixel, the blur radius (from the depth map)
 // and the color with clipped highlights given back some of their light.
 const DOF_PREP = `#version 300 es
@@ -662,6 +705,7 @@ export class GpuRenderer {
       refocus: program(gl, REFOCUS_PASS),
       dofPrep: program(gl, DOF_PREP),
       dofGather: program(gl, DOF_GATHER),
+      merge: program(gl, MERGE_PASS),
       detailNr: program(gl, DETAIL_NR),
       detailSharpen: program(gl, DETAIL_SHARPEN),
       present: program(gl, PRESENT),
@@ -895,6 +939,38 @@ export class GpuRenderer {
     gl.uniform2f(P.u.uSize, outW, outH);
     this.draw();
     return this.outTex;
+  }
+
+  // Multi-view denoised view at (u0, v0): needs buildViews() and setDepth().
+  // Returns a view-size texture.
+  mergedViewTex(u0, v0, { sigma, blend }) {
+    const gl = this.gl;
+    const { outW, outH } = this.sampler;
+    const { tex, samples, detail } = this.views;
+    const ref = this.renderViewTex(u0, v0);
+    const out = this.scratch(outW, outH, 'merged');
+    const data = new Float32Array(MAX_VIEWS * 4);
+    samples.forEach(({ u, v }, k) => {
+      data[4 * k] = (u - u0) * detail;
+      data[4 * k + 1] = (v - v0) * detail;
+    });
+    const P = this.programs.merge;
+    this.target(out, outW, outH);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uViews, 2);
+    this.bindTex(2, tex, gl.TEXTURE_2D_ARRAY);
+    gl.uniform1i(P.u.uRef, 1);
+    this.bindTex(1, ref);
+    gl.uniform1i(P.u.uDepth, 3);
+    this.bindTex(3, this.depthTex);
+    gl.uniform1i(P.u.uCount, samples.length);
+    gl.uniform4fv(P.u.uView, data);
+    gl.uniform2f(P.u.uCenter, u0 * detail, v0 * detail);
+    gl.uniform2f(P.u.uSize, outW, outH);
+    gl.uniform1f(P.u.uSigma, sigma);
+    gl.uniform1f(P.u.uBlend, blend);
+    this.draw();
+    return out;
   }
 
   // As renderView(), leaving the result in the view-size output texture.

@@ -200,6 +200,10 @@
         </details>
         <details class="subpanel">
           <summary><h3>Noise Reduction</h3></summary>
+          <label class="check"><input id="mv-on" type="checkbox"> Multi-view</label>
+          <label>Blend <output for="mv-blend" data-for="mv-blend">100</output>
+            <input id="mv-blend" type="range" min="0" max="100" step="1" value="100" data-default="100" disabled>
+          </label>
           <label>Luminance <output for="nr-luminance" data-for="nr-luminance">0</output>
             <input id="nr-luminance" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>

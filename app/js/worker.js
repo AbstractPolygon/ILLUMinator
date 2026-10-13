@@ -13,6 +13,7 @@ import { applyDepthOfField } from './core/dof.js';
 import { defringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN } from './core/color.js';
 import { makeDetail, applyDetail } from './core/detail.js';
+import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -20,7 +21,7 @@ const state = {
   lf: null,
   sampler: null,
   dev: null,
-  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {} },
+  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {}, mvDenoise: { on: false, blend: 1 } },
   look: null,
   detail: null, // Details panel filters (core/detail.js)
   baseExposure: 1,
@@ -239,18 +240,35 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
     if (state.jobs.frames !== job) return { cancelled: true };
     const { u, v } = path[i];
     if (state.gpu) {
-      const tex = aperture > 0 ? state.gpu.refocusTo(alpha, apertureOptions({ u, v, aperture })) : state.gpu.renderViewTex(u, v);
+      const tex = aperture > 0 ? state.gpu.refocusTo(alpha, apertureOptions({ u, v, aperture })) : await singleView(id, u, v);
       await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
     const rgb = aperture > 0
       ? refocusRGB(alpha, apertureOptions({ u, v, aperture }))
-      : equalize(render(u, v));
+      : await singleView(id, u, v);
     frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alpha, dof, 1, bokeh));
     await tick();
   }
   return { done: true };
+}
+
+// The picture seen from viewpoint (u, v) through a pinhole: one view, or
+// with multi-view denoising on, every refocus view merged into it (see
+// core/mvdenoise.js). A GPU texture on the GPU, linear RGB otherwise.
+async function singleView(id, u, v) {
+  const mv = state.settings.mvDenoise;
+  if (mv && mv.on && mv.blend > 0 && (await ensureDepth(id))) {
+    const m = state.centerMeans;
+    const sigma = mergeSigma(0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]);
+    if (state.gpu) return state.gpu.mergedViewTex(u, v, { sigma, blend: mv.blend });
+    const { outW, outH } = state.sampler;
+    return mergeViews(state.refocusViews, outW, outH, state.depth.alpha, equalize(render(u, v)), {
+      u0: u, v0: v, detail: state.settings.detail, sigma, blend: mv.blend,
+    });
+  }
+  return state.gpu ? state.gpu.renderViewTex(u, v) : equalize(render(u, v));
 }
 
 // The views used for refocusing are built once per sampler and shared by
@@ -384,7 +402,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
       if (!(await ensureRefocusViews(id))) return { cancelled: true };
       tex = state.gpu.refocusTo(alpha, apertureOptions({ u, v, aperture }));
     } else {
-      tex = state.gpu.renderViewTex(u, v);
+      tex = await singleView(id, u, v);
     }
     await presentGpu(id, tex, state.sampler.outW, state.sampler.outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'result' });
     return undefined;
@@ -394,7 +412,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     if (!(await ensureRefocusViews(id))) return { cancelled: true };
     rgb = refocusRGB(alpha, apertureOptions({ u, v, aperture }));
   } else {
-    rgb = equalize(render(u, v));
+    rgb = await singleView(id, u, v);
   }
   rgb = await withDepthOfField(id, rgb, state.sampler.outW, state.sampler.outH, alpha, dof, 1, bokeh);
   const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH);

@@ -1212,6 +1212,7 @@ async function applySettings() {
     autoWb: $('awb').checked,
     wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
     tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
+    mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
     details: {
       amount: +$('sharp-amount').value,
       radius: +$('sharp-radius').value,
@@ -1232,6 +1233,7 @@ async function applySettings() {
   $('fringe-controls').disabled = !settings.defringe.on;
   $('wb-temperature').disabled = settings.autoWb;
   $('wb-tint').disabled = settings.autoWb;
+  $('mv-blend').disabled = !settings.mvDenoise.on;
   $('fringe-radius-label').textContent = `${settings.defringe.radius} px`;
   showFringeHues();
   if (!state.info || !state.info.hasRaw) return;
@@ -1317,7 +1319,7 @@ for (const input of document.querySelectorAll('.color-panel input[type=range], .
   });
 }
 
-for (const id of ['awb', 'detail', 'fringe-on', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+for (const id of ['awb', 'mv-on', 'detail', 'fringe-on', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 
