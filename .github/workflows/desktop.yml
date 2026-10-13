@@ -1,0 +1,55 @@
+# Builds the desktop app installers on GitHub's own machines: a Windows
+# installer (.exe) and macOS disk images (.dmg, Apple Silicon and Intel).
+# Run it from the Actions tab (Build desktop apps → Run workflow), or push a
+# version tag such as v0.5.1. The installers are attached to the run, under
+# Artifacts. They are not code signed: Windows SmartScreen and macOS
+# Gatekeeper warn on first launch.
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            args: --win
+          - os: macos-latest
+            name: macos
+            args: --mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          # No signing certificate: build unsigned.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ILLUMinator-${{ matrix.name }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+          if-no-files-found: error

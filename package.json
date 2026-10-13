@@ -37,14 +37,46 @@
       }
     ],
     "mac": {
-      "category": "public.app-category.photography"
+      "category": "public.app-category.photography",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "linux": {
       "target": "AppImage",
       "category": "Graphics"
-    }
+    },
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "dmg": {
+      "title": "ILLUMinator ${version}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.16.1"
   }
 }

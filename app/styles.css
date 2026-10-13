@@ -617,3 +617,6 @@ label.lut-amount { margin-top: 14px; }
 
 /* An on/off checkbox above the slider it controls. */
 [data-panel=camera] label.check:has(#pivot-on, #tilt-on) { margin-bottom: 10px; }
+
+/* Rendering: Video size above the export buttons. */
+.video-size { margin-top: 12px; }

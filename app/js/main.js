@@ -3924,21 +3924,25 @@ async function exportVideo() {
     const g = geometryFor(frames[0].width, frames[0].height);
     const w = g ? g.width : frames[0].width;
     const h = g ? g.height : frames[0].height;
-    const up = Math.max(1, Math.round(1080 / Math.max(w, h)));
+    // Enlarged to the chosen Video size (long side), in even pixels for the
+    // encoder; the bitrate follows the size.
+    const target = +$('video-size').value || 2160;
+    const up = target / Math.max(w, h);
+    const even = (v) => Math.max(2, 2 * Math.round(v / 2));
     const c = document.createElement('canvas');
-    c.width = w * up;
-    c.height = h * up;
+    c.width = even(w * up);
+    c.height = even(h * up);
     const cctx = c.getContext('2d');
     cctx.imageSmoothingQuality = 'high';
     const stream = c.captureStream(state.fps);
     const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12e6 });
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Math.round(12e6 * (c.width * c.height) / (1920 * 1080)) });
     const chunks = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     const done = new Promise((r) => { recorder.onstop = r; });
     recorder.start();
     for (let i = 0; i < order.length; i++) {
-      if (g) drawGeometry(cctx, frames[order[i]], g, up);
+      if (g) drawGeometry(cctx, frames[order[i]], g, c.width / w);
       else cctx.drawImage(frames[order[i]], 0, 0, c.width, c.height);
       showProgress('Recording video', i / order.length);
       await new Promise((r) => setTimeout(r, 1000 / state.fps));
