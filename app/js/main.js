@@ -2170,7 +2170,7 @@ function localSettings() {
 // to move, click to select (and show), Delete to remove; the selected one
 // sets the curve to the next. Framing (zoom and pan) is applied when the
 // picture is drawn, like the pivot.
-const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', pan: 'Pan' };
+const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', panX: 'Pan X', panY: 'Pan Y' };
 
 // Every setting of a local adjustment (living filters included) has a
 // track too: 'mask:<id>:<attr>'.
@@ -2264,7 +2264,8 @@ function loadAnimation() {
       setKey(anim, 'focus', t, k.focus || 0);
       setKey(anim, 'view', t, [k.u || 0, k.v || 0]);
       setKey(anim, 'zoom', t, k.zoom || 1);
-      setKey(anim, 'pan', t, [k.panX || 0, k.panY || 0]);
+      setKey(anim, 'panX', t, k.panX || 0);
+      setKey(anim, 'panY', t, k.panY || 0);
     });
     anim.length = Math.max(1, (raw.length - 1) * 2);
   } else {
@@ -2315,7 +2316,8 @@ function currentValue(k) {
     case 'focus': return +$('focus').value;
     case 'view': return [state.camera.u, state.camera.v];
     case 'zoom': return +$('frame-zoom').value / 100;
-    default: return [+$('frame-pan-x').value / 100, +$('frame-pan-y').value / 100];
+    case 'panX': return +$('frame-pan-x').value / 100;
+    default: return +$('frame-pan-y').value / 100;
   }
 }
 
@@ -2348,10 +2350,9 @@ function applyValue(k, v) {
     $('frame-zoom').value = Math.round(v * 100);
     showSliderValue($('frame-zoom'));
   } else {
-    $('frame-pan-x').value = Math.round(v[0] * 100);
-    $('frame-pan-y').value = Math.round(v[1] * 100);
-    showSliderValue($('frame-pan-x'));
-    showSliderValue($('frame-pan-y'));
+    const id = k === 'panX' ? 'frame-pan-x' : 'frame-pan-y';
+    $(id).value = Math.round(v * 100);
+    showSliderValue($(id));
   }
 }
 
@@ -3050,8 +3051,9 @@ function keyframeFrames() {
     const view = v.view ?? [state.camera.u, state.camera.v];
     path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50), masks });
     const z = v.zoom ?? +$('frame-zoom').value / 100;
-    const pan = v.pan ?? [+$('frame-pan-x').value / 100, +$('frame-pan-y').value / 100];
-    frames.push(framing(z, pan[0], pan[1]));
+    const panX = v.panX ?? +$('frame-pan-x').value / 100;
+    const panY = v.panY ?? +$('frame-pan-y').value / 100;
+    frames.push(framing(z, panX, panY));
   }
   return { path, framing: frames };
 }
@@ -3059,7 +3061,7 @@ function keyframeFrames() {
 // ---------------------------------------------------------------- curves view
 
 // The keyframe editor's Curves view (like Blender's Graph Editor): each
-// setting as a curve over time, every component of a viewpoint or pan
+// setting as a curve over time, each part of a viewpoint
 // separately, each fitted to the height of the view. Drag a keyframe to
 // change its time and value; drag anywhere else to move the playhead.
 
@@ -3070,13 +3072,13 @@ const CHANNELS = [
   { k: 'view', c: 0, name: 'Viewpoint X', color: '#ef5350' },
   { k: 'view', c: 1, name: 'Viewpoint Y', color: '#66bb6a' },
   { k: 'zoom', c: 0, name: 'Zoom', color: '#fff176' },
-  { k: 'pan', c: 0, name: 'Pan X', color: '#f48fb1' },
-  { k: 'pan', c: 1, name: 'Pan Y', color: '#aed581' },
+  { k: 'panX', c: 0, name: 'Pan X', color: '#f48fb1' },
+  { k: 'panY', c: 0, name: 'Pan Y', color: '#aed581' },
 ];
 const channelId = (ch) => `${ch.k}.${ch.c}`;
 const MASK_COLORS = ['#ff8a65', '#4db6ac', '#9575cd', '#e0e0e0', '#81c784', '#64b5f6', '#ffd54f', '#f06292', '#a1887f', '#90a4ae', '#ce93d8'];
 
-// The Curves view's channels, by group (a viewpoint or pan is two).
+// The Curves view's channels, by group (a viewpoint is two).
 function channelList() {
   const out = [];
   for (const grp of trackGroups()) {

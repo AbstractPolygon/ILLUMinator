@@ -80,3 +80,10 @@ test('a segment as Bezier handles draws the same curve', async () => {
   a.tracks.focus[1].ease = { type: 'hold', bezier: b };
   assert.equal(segmentBezier(a, 'focus', 1), null);
 });
+
+test('an old pan track becomes Pan X and Pan Y', () => {
+  const a = parseAnimation(JSON.stringify({ length: 2, tracks: { pan: [{ t: 0, v: [0.5, -0.25] }, { t: 1, v: [0, 1] }] } }));
+  assert.deepEqual(a.tracks.panX.map((k) => k.v), [0.5, 0]);
+  assert.deepEqual(a.tracks.panY.map((k) => k.v), [-0.25, 1]);
+  near(valueAt(a, 'panY', 1), 1);
+});

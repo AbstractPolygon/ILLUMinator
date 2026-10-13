@@ -7,7 +7,8 @@
 //   focus     focus value
 //   view      [u, v] viewpoint
 //   zoom      1..3
-//   pan       [x, y], -1..1 each
+//   panX      -1..1 (earlier versions kept one 'pan' track of [x, y])
+//   panY      -1..1
 // ease: { type: 'auto' | 'linear' | 'smooth' | 'in' | 'out' | 'hold' | 'custom',
 //         bezier: [x1, y1, x2, y2] } (custom: a cubic Bezier from (0, 0) to
 //         (1, 1) through those handles; y may leave 0..1 to overshoot).
@@ -15,7 +16,7 @@
 // clamped handles: the speed carries through each keyframe, flattening at
 // highs, lows and the ends, without overshooting.
 
-export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'pan'];
+export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY'];
 // Besides those, 'mask:<id>:<attr>': a setting of local adjustment <id>
 // (its strength, a shape setting or an effect; see core/local.js).
 export const isMaskTrack = (k) => /^mask:[\w-]+:[a-z]+$/.test(k);
@@ -38,7 +39,7 @@ export function emptyAnimation() {
   return { length: DEFAULT_LENGTH, tracks: Object.fromEntries(TRACKS.map((k) => [k, []])) };
 }
 
-const isVec = (k) => k === 'view' || k === 'pan';
+const isVec = (k) => k === 'view';
 
 export function parseAnimation(text) {
   let a;
@@ -50,6 +51,12 @@ export function parseAnimation(text) {
   const out = emptyAnimation();
   if (!a || typeof a !== 'object') return out;
   if (Number.isFinite(a.length) && a.length > 0) out.length = Math.min(120, a.length);
+  // An old 'pan' track becomes Pan X and Pan Y.
+  if (a.tracks && Array.isArray(a.tracks.pan) && !a.tracks.panX && !a.tracks.panY) {
+    const keys = a.tracks.pan.filter((key) => key && Array.isArray(key.v) && key.v.length === 2);
+    a.tracks.panX = keys.map((key) => ({ ...key, v: key.v[0] }));
+    a.tracks.panY = keys.map((key) => ({ ...key, v: key.v[1] }));
+  }
   const names = [...TRACKS, ...Object.keys((a.tracks && typeof a.tracks === 'object' && a.tracks) || {}).filter(isMaskTrack)];
   for (const k of names) {
     const list = a.tracks && Array.isArray(a.tracks[k]) ? a.tracks[k] : [];
