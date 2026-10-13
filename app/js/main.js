@@ -1963,6 +1963,14 @@ function deleteMask(i) {
   renderMasks();
 }
 
+// Asks before deleting mask i, in a small menu by `anchor`.
+function askDeleteMask(i, anchor) {
+  const m = getMasks()[i];
+  if (!m) return;
+  showMenu(anchor, []);
+  confirmInMenu(`Delete ${maskLabel(m, i)}? Its effect is removed from the photo.`, 'Delete', () => deleteMask(i));
+}
+
 function renderMasks() {
   const masks = getMasks();
   if (maskSel >= masks.length) maskSel = masks.length - 1;
@@ -1979,7 +1987,10 @@ function renderMasks() {
     const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', title: 'Delete mask' });
     del.innerHTML = TRASH_ICON;
     del.setAttribute('aria-label', `Delete ${maskLabel(m, i)}`);
-    del.onclick = () => deleteMask(i);
+    del.onclick = (e) => {
+      e.stopPropagation();
+      askDeleteMask(i, del);
+    };
     li.append(name, del);
     return li;
   }));
@@ -2038,7 +2049,7 @@ for (const input of document.querySelectorAll('.local-panel input[type=range]'))
 }
 for (const id of ['mask-on', 'mask-invert']) $(id).addEventListener('change', () => maskFromEditor(true));
 $('mask-show').addEventListener('change', () => applySettingsSoon());
-$('mask-delete').onclick = () => deleteMask(maskSel);
+$('mask-delete').onclick = () => askDeleteMask(maskSel, $('mask-delete'));
 
 renderMasks();
 
