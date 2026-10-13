@@ -8,6 +8,7 @@
   --accent: #c8cdd5; /* light grey that sits with the dark toolbar */
   --accent-text: #15171b;
   --key-selected: #4da3ff; /* selected keyframes: clear blue, not yellow */
+  --live: #4b98e5; /* the playhead, auto key and a keyframe at the playhead */
   --slider-track: 2px;
   --slider-thumb-w: 12px;
   --slider-thumb-h: 6px;
@@ -76,7 +77,7 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 10px 12px;
 }
 .library { width: 210px; border-right: 1px solid var(--line); }
-.controls { width: 296px; border-left: 1px solid var(--line); }
+.controls { width: 312px; border-left: 1px solid var(--line); }
 
 h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8px; }
 /* Sections in the right sidebar are spaced by a gap, so the first visible
@@ -201,19 +202,27 @@ label.check input { margin: 0; }
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 fieldset.plain:disabled { opacity: 0.45; }
 label output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* Keyframe diamonds in a column of their own at the right of the settings
-   (as in DaVinci Resolve's Inspector): dim when not animated, lit when
-   animated, red with a keyframe at the playhead. */
-/* Every slider leaves the column free, so they all line up. */
-.controls label:has(> input[type=range]), label:has(> .key-toggle) { position: relative; padding-right: 24px; }
-.key-toggle {
-  position: absolute; right: 0; top: -1px; width: 18px; height: 18px; padding: 0;
-  border: 0; background: none; color: var(--muted); opacity: 0.45;
-  font-size: 11px; line-height: 18px; text-align: center; cursor: pointer;
+/* Keyframe controls in a column of their own at the right of the settings
+   (as in DaVinci Resolve's Inspector): ◀ ◆ ▶. The diamond is the keyframe
+   editor's: hollow when the setting is not animated, filled when it is, blue
+   with a keyframe at the playhead; the arrows show while it is animated. */
+.controls label:has(> input[type=range]), label:has(> .key-nav) { position: relative; padding-right: 42px; }
+.key-nav { position: absolute; right: 0; top: -1px; display: flex; align-items: center; height: 18px; }
+.key-nav button {
+  width: 16px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
-.key-toggle:hover { opacity: 1; }
-.key-toggle.on { color: var(--text); opacity: 1; }
-.key-toggle.here { color: #ff5a4f; }
+.key-nav button:hover:not(:disabled) { color: var(--text); }
+.key-nav .key-step { visibility: hidden; width: 11px; }
+.key-nav.on .key-step { visibility: visible; }
+.key-nav .key-step:disabled { opacity: 0.3; }
+.key-diamond {
+  width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg);
+  border: 1.5px solid currentColor; background: transparent;
+}
+.key-toggle.on { color: var(--text); }
+.key-toggle.on .key-diamond { background: currentColor; }
+.key-toggle.here { color: var(--live); }
 .row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
@@ -544,8 +553,8 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-time { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 .tl-main { display: flex; gap: 10px; align-items: flex-start; }
 .tl-autokey { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-.tl-autokey input { margin: 0; accent-color: #e5534b; }
-.tl-autokey:has(input:checked) { color: #e5534b; }
+.tl-autokey input { margin: 0; accent-color: var(--live); }
+.tl-autokey:has(input:checked) { color: var(--live); }
 .tl-views { display: inline-flex; }
 .tl-views button { display: inline-flex; align-items: center; justify-content: center; padding: 4px 9px; }
 /* One control in two halves: shared middle edge, the chosen half filled. */
@@ -588,7 +597,7 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-track.tl-summary { background: #1b1f24; }
 .tl-key.tl-sum { background: var(--muted); }
 .tl-box { position: absolute; border: 1px dashed rgba(200, 205, 213, 0.7); background: rgba(200, 205, 213, 0.08); pointer-events: none; z-index: 3; }
-.tl-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid #e5534b; pointer-events: none; }
+.tl-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid var(--live); pointer-events: none; }
 .tl-curve { flex: none; }
 .tl-curve-canvas { display: block; width: 150px; height: 150px; touch-action: none; cursor: crosshair; }
 

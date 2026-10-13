@@ -34,7 +34,7 @@ With *Animate: Keyframes*, the keyframe editor opens under the play bar. Drag it
 A group's summary row shows a diamond wherever the group has keyframes; dragging one moves every keyframe at that time.
 
 **Adding keyframes.**
-- The ◆ at the right of a setting in the sidebar turns its animation on or off, as in DaVinci Resolve's Inspector. Off (dim): clicking it adds a keyframe at the playhead (and turns on *Animate: Keyframes* if needed). On (lit): clicking it removes all of that setting's keyframes. It turns red when a keyframe sits at the playhead.
+- With a photo open, the ◆ at the right of a setting in the sidebar turns its animation on or off. Hollow: clicking it adds a keyframe at the playhead (and turns on *Animate: Keyframes* if needed). Filled: the setting is animated, and clicking it removes all of its keyframes. It turns blue when a keyframe sits at the playhead. While a setting is animated, the arrows either side of its ◆ move the playhead to its previous and next keyframe.
 - The ◆ beside a track keys that setting at the playhead; the ◆ on a group heading keys the whole group.
 - *Key all* keys every track of the open groups.
 - *Auto key*: while on, changing a setting records a keyframe at the playhead, on that setting's track only.

@@ -1262,6 +1262,7 @@ function setMode(mode) {
   $('frame-label').textContent = '';
   renderTimeline();
   refresh();
+  updateKeyButtons();
 }
 
 // ---------------------------------------------------------------- info
@@ -1287,6 +1288,7 @@ function showResolutionSizes() {
 
 function renderInfo() {
   showResolutionSizes();
+  updateKeyButtons();
   const info = state.info;
   const rows = [];
   if (state.current) rows.push(['File', state.current.name]);
@@ -2365,19 +2367,31 @@ function keyButtonTracks(id) {
 }
 
 function setupKeyButtons() {
+  // Thin chevrons, so the three take little room.
+  const chevron = (dir) => `<svg viewBox="0 0 6 10" width="5" height="9" aria-hidden="true"><path d="${dir < 0 ? 'M4.5 1.5 1.5 5 4.5 8.5' : 'M1.5 1.5 4.5 5 1.5 8.5'}" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   for (const id of [...Object.keys(KEY_CONTROLS), ...Object.keys(KEY_MASK_CONTROLS)]) {
     const el = $(id);
     const label = el && el.closest('label');
     if (!label) continue;
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'key-toggle', textContent: '◆' });
-    b.dataset.keyFor = id;
-    b.hidden = true;
-    b.onclick = (e) => {
-      // Not the label's control.
+    // ◀ ◆ ▶ as in DaVinci Resolve's Inspector: the arrows (shown while the
+    // setting is animated) jump to its previous and next keyframe.
+    const nav = Object.assign(document.createElement('span'), { className: 'key-nav' });
+    nav.dataset.keyFor = id;
+    nav.hidden = true;
+    const prev = Object.assign(document.createElement('button'), { type: 'button', className: 'key-step', innerHTML: chevron(-1), title: 'Previous keyframe' });
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'key-toggle' });
+    b.append(Object.assign(document.createElement('span'), { className: 'key-diamond' }));
+    const next = Object.assign(document.createElement('button'), { type: 'button', className: 'key-step', innerHTML: chevron(1), title: 'Next keyframe' });
+    // Not the label's control.
+    nav.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      // Like DaVinci Resolve's Inspector, the diamonds are always there: one
-      // clicked while the animation is off turns keyframe animation on.
+    };
+    prev.onclick = () => stepKey(id, -1);
+    next.onclick = () => stepKey(id, 1);
+    b.onclick = () => {
+      // The diamonds are always there: one clicked while the animation is
+      // off turns keyframe animation on.
       if (!keyframesOn()) {
         $('anim-on').checked = true;
         $('anim').value = 'keyframes';
@@ -2398,30 +2412,54 @@ function setupKeyButtons() {
       }
       saveAnimation();
     };
-    label.append(b);
+    nav.append(prev, b, next);
+    label.append(nav);
   }
 }
 setupKeyButtons();
 
+// The keyframe times of a sidebar setting's tracks, in order.
+function keyTimes(id) {
+  const times = new Set();
+  for (const k of keyButtonTracks(id)) for (const key of anim.tracks[k]) times.add(Math.round(key.t * KEY_FPS));
+  return [...times].sort((a, b) => a - b).map((f) => f / KEY_FPS);
+}
+
+// Moves the playhead to the setting's previous (dir -1) or next keyframe.
+function stepKey(id, dir) {
+  const now = playheadTime();
+  const eps = 0.5 / KEY_FPS;
+  const times = keyTimes(id);
+  const t = dir < 0 ? times.filter((x) => x < now - eps).pop() : times.find((x) => x > now + eps);
+  if (t !== undefined) seekTo(t);
+}
+
 function updateKeyButtons() {
-  const on = !!(state.info && state.info.hasRaw) && state.mode === 'camera';
+  const on = canRender() && state.mode === 'camera';
+  const navs = document.querySelectorAll('.key-nav');
   if (!on) {
-    for (const b of document.querySelectorAll('.key-toggle')) b.hidden = true;
+    for (const nav of navs) nav.hidden = true;
     return;
   }
-  const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
+  const now = playheadTime();
+  const eps = 0.5 / KEY_FPS;
   const animating = keyframesOn();
-  for (const b of document.querySelectorAll('.key-toggle')) {
-    const ks = keyButtonTracks(b.dataset.keyFor);
-    b.hidden = !ks.length;
+  for (const nav of navs) {
+    const id = nav.dataset.keyFor;
+    const ks = keyButtonTracks(id);
+    nav.hidden = !ks.length;
     if (!ks.length) continue;
-    const keyed = animating && ks.some((k) => anim.tracks[k].length);
-    const here = keyed && ks.some((k) => anim.tracks[k].some((key) => Math.abs(key.t - t) < 0.5 / KEY_FPS));
+    const times = animating ? keyTimes(id) : [];
+    const keyed = times.length > 0;
+    const here = times.some((x) => Math.abs(x - now) < eps);
+    const [prev, b, next] = nav.children;
+    nav.classList.toggle('on', keyed);
     b.classList.toggle('on', keyed);
     b.classList.toggle('here', here);
-    const name = b.closest('label').firstChild.textContent.trim().toLowerCase();
+    prev.disabled = !times.some((x) => x < now - eps);
+    next.disabled = !times.some((x) => x > now + eps);
+    const name = nav.closest('label').firstChild.textContent.trim().toLowerCase();
     b.title = keyed ? `Stop animating ${name} (removes its keyframes)` : `Animate ${name}: a keyframe at the playhead`;
-    b.setAttribute('aria-pressed', String(keyed));
   }
 }
 
@@ -3171,7 +3209,7 @@ function drawCurve() {
     g.stroke();
     g.beginPath();
     g.arc(X(hx), Y(hy), 5, 0, 2 * Math.PI);
-    g.fillStyle = '#e5534b';
+    g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--live');
     g.fill();
   }
 }
@@ -3523,7 +3561,7 @@ function drawCurves() {
   const head = playheadTime();
   if (head >= start && head <= start + span) {
     const x = Math.round(xOf(head)) + 0.5;
-    g.strokeStyle = '#e5534b';
+    g.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--live');
     g.lineWidth = 1.5;
     g.beginPath();
     g.moveTo(x, 0);
