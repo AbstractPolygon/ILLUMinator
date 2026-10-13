@@ -172,6 +172,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   const up = new Float32Array(W * H * 3);
   const upY = new Float32Array(W * H);
   const focus = new Float32Array(W * H);
+  const rUse = g.pitch * aperture;
+  // A narrowed aperture spreads each lens's samples over less.
+  const spreadRadius = Number.isFinite(apertureSigma) ? Math.min(rUse, 2 * apertureSigma) : rUse;
   for (let j = 0; j < H; j++) {
     const by = Math.min(bh - 1.001, Math.max(0, ((j + 0.5) / scale) * detail - 0.5));
     const y0 = Math.floor(by);
@@ -191,17 +194,26 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       }
       upY[p] = 0.2126 * up[3 * p] + 0.7152 * up[3 * p + 1] + 0.0722 * up[3 * p + 2];
       let inFocus = 1;
-      if (depth && !allInFocus) {
+      let local = alpha;
+      if (depth) {
         const q = y0 * bw + x0;
         const d = (depth[q] * (1 - ax) + depth[q + 1] * ax) * (1 - ay) + (depth[q + bw] * (1 - ax) + depth[q + bw + 1] * ax) * ay;
-        const e = (d - alpha) / depthTolerance;
-        inFocus = Math.exp(-e * e);
+        if (allInFocus) {
+          local = d;
+        } else {
+          const e = (d - alpha) / depthTolerance;
+          inFocus = Math.exp(-e * e);
+        }
       }
-      focus[p] = inFocus;
+      // Near the depth the camera focused at, every pixel under a lens lands
+      // on almost the same spot: there is no detail between the lenses to
+      // recover, and the splats pile up in a hexagonal pattern. Detail is
+      // only used where one lens's samples spread far enough to interleave
+      // with its neighbours'.
+      focus[p] = inFocus * coverage(Math.abs(local) * spreadRadius);
     }
   }
 
-  const rUse = g.pitch * aperture;
   const reach = Math.ceil(1.5 * sigma);
   // One splat of every raw pixel; with `estimate`, each sample contributes
   // its difference from the estimate at its position instead (a residual).
@@ -311,6 +323,16 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     out[3 * p + 2] = up[3 * p + 2] * k;
   }
   return { width: W, height: H, rgb: out, pattern };
+}
+
+// How well the samples of neighbouring lenses interleave, from how far one
+// lens's samples spread (in lens spacings): 0 below COVER_LOW, 1 above
+// COVER_HIGH.
+const COVER_LOW = 0.35;
+const COVER_HIGH = 0.9;
+export function coverage(spread) {
+  const t = Math.min(1, Math.max(0, (spread - COVER_LOW) / (COVER_HIGH - COVER_LOW)));
+  return t * t * (3 - 2 * t);
 }
 
 const PHASE_BINS = 16;
