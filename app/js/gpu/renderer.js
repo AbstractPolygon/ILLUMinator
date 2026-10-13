@@ -204,6 +204,9 @@ uniform sampler2D uSrc;
 uniform highp sampler2D uDepth;
 uniform vec2 uDepthScale;   // depth map pixels per image pixel
 uniform float uFocus;
+uniform vec2 uTilt;         // focus change across the picture (normalized x, y)
+uniform vec2 uPoint;        // the tilted focus plane turns around this point
+uniform float uSpread;      // depth range on each side of the focus kept sharp
 uniform float uStrength;    // blur radius in pixels per unit of focus difference
 uniform float uClip;
 uniform float uHighlights;
@@ -213,7 +216,9 @@ void main() {
   vec3 c = texelFetch(uSrc, p, 0).rgb;
   ivec2 dsz = textureSize(uDepth, 0);
   ivec2 dp = clamp(ivec2((vec2(p) + 0.5) * uDepthScale), ivec2(0), dsz - 1);
-  float d = texelFetch(uDepth, dp, 0).r - uFocus;
+  vec2 n = (vec2(p) + 0.5) / vec2(textureSize(uSrc, 0));
+  float d = texelFetch(uDepth, dp, 0).r - (uFocus + dot(uTilt, n - uPoint));
+  d = sign(d) * max(abs(d) - uSpread, 0.0);
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float knee = 0.8 * uClip;
   float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
@@ -878,7 +883,7 @@ export class GpuRenderer {
 
   // Synthetic depth of field with bokeh. `strength`: blur radius in pixels
   // of this image per unit of focus difference. Returns the result texture.
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1 }) {
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0 }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -891,6 +896,9 @@ export class GpuRenderer {
     this.bindTex(3, this.depthTex);
     gl.uniform2f(P.u.uDepthScale, this.depthSize[0] / w, this.depthSize[1] / h);
     gl.uniform1f(P.u.uFocus, focus);
+    gl.uniform2f(P.u.uTilt, tilt[0], tilt[1]);
+    gl.uniform2f(P.u.uPoint, point[0], point[1]);
+    gl.uniform1f(P.u.uSpread, spread);
     gl.uniform1f(P.u.uStrength, strength);
     gl.uniform1f(P.u.uClip, clip);
     gl.uniform1f(P.u.uHighlights, highlights);
@@ -900,7 +908,8 @@ export class GpuRenderer {
     gl.generateMipmap(gl.TEXTURE_2D);
 
     const [lo, hi] = this.depthRange;
-    const maxR = Math.min(64, strength * Math.max(Math.abs(hi - focus), Math.abs(lo - focus)));
+    const reach = Math.abs(tilt[0]) + Math.abs(tilt[1]);
+    const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread));
     const taps = Math.max(32, Math.min(MAX_TAPS, Math.round(maxR * maxR * 1.2)));
     P = this.programs.dofGather;
     this.target(out, w, h);

@@ -70,11 +70,11 @@
         <summary><h2>Color</h2></summary>
         <details class="subpanel">
           <summary><h3>White Balance</h3></summary>
-          <label>Temperature <output for="wb-temperature" data-for="wb-temperature">0</output>
-            <input id="wb-temperature" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          <label>Temperature <output for="wb-temperature" data-for="wb-temperature">5500 K</output>
+            <input id="wb-temperature" type="range" min="2000" max="10000" step="50" value="5500" data-default="5500">
           </label>
           <label>Tint <output for="wb-tint" data-for="wb-tint">0</output>
-            <input id="wb-tint" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+            <input id="wb-tint" type="range" min="-150" max="150" step="1" value="0" data-default="0">
           </label>
           <label class="check"><input id="awb" type="checkbox"> Auto</label>
         </details>
@@ -130,31 +130,60 @@
 
       <details class="panel" data-panel="camera">
         <summary><h2>Camera</h2></summary>
-        <label>Focus <input id="focus" type="range" min="-1.6" max="1.6" step="0.02" value="0"></label>
-        <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
-          <input id="fstop" type="range" min="0" max="11" step="1" value="0">
-        </label>
-        <label>Bokeh
-          <select id="bokeh">
-            <option value="natural">Natural</option>
-            <option value="circle">Circle</option>
-            <option value="hexagon">Hexagon</option>
-          </select>
-        </label>
-        <label>Blur strength <output id="blur-label" for="blur">1×</output>
-          <input id="blur" type="range" min="1" max="8" step="0.5" value="1">
-        </label>
-        <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
-        <label>Detail
-          <select id="detail">
-            <option value="1" selected>1× (fast)</option>
-            <option value="1.5">1.5×</option>
-            <option value="2">2×</option>
-          </select>
-        </label>
-        <label class="check"><input id="depth-btn" type="checkbox"> Show depth</label>
-        <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
+        <details class="subpanel">
+          <summary><h3>Depth</h3></summary>
+          <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
+            <input id="fstop" type="range" min="0" max="11" step="1" value="0">
+          </label>
+          <label>Depth <output data-for="focus" for="focus">0.00</output>
+            <input id="focus" type="range" min="-1.6" max="1.6" step="0.02" value="0" data-default="0">
+          </label>
+          <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
+          <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Focus Spread</h3></summary>
+          <label>Focus Point <output id="focus-point">Center</output></label>
+          <p class="hint">Click the picture to set the focus point.</p>
+          <label>Spread <output data-for="spread" for="spread">0</output>
+            <input id="spread" type="range" min="0" max="100" step="1" value="0" data-default="0">
+          </label>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Tilt</h3></summary>
+          <label>Tilt <output data-for="tilt" for="tilt">0</output>
+            <input id="tilt" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Rotation <output data-for="tilt-rotation" for="tilt-rotation">0°</output>
+            <input id="tilt-rotation" type="range" min="-90" max="90" step="1" value="0" data-default="0">
+          </label>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Bokeh</h3></summary>
+          <label>Shape
+            <select id="bokeh">
+              <option value="natural">Natural</option>
+              <option value="circle">Circle</option>
+              <option value="hexagon">Hexagon</option>
+            </select>
+          </label>
+          <label>Blur strength <output id="blur-label" for="blur">1×</output>
+            <input id="blur" type="range" min="1" max="8" step="0.5" value="1">
+          </label>
+          <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Rendering</h3></summary>
+          <label>Detail
+            <select id="detail">
+              <option value="1" selected>1× (fast)</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option>
+            </select>
+          </label>
+        </details>
       </details>
+
 
       <details class="panel" id="fullres-panel" hidden>
         <summary><h2>Full resolution</h2></summary>

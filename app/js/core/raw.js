@@ -148,6 +148,8 @@ export function cameraInfo(metadata, fallbackLayout) {
       fNumber: lens.fNumber,
       focalLength: lens.focalLength,
       dcfFile: get(md, 'picture', 'dcfFile'),
+      // Color temperature the camera's white balance was set for (kelvin).
+      cct: first(get(md, 'algorithms', 'awb', 'computed', 'cct'), get(md, 'settings', 'whiteBalance', 'cct')),
     },
   };
 }

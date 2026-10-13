@@ -129,10 +129,13 @@ function boostHighlights(rgb, clip, amount) {
 // lower resolution than rgb). focus: the focus value kept sharp.
 // strength: blur radius in pixels of `rgb` is strength * |depth - focus| *
 // pxPerUnit. Options: shape ('smooth' | 'circle' | 'hexagon'),
-// highlights (0..1) and clip (the developed level where highlights clip).
+// highlights (0..1), clip (the developed level where highlights clip), and
+// the focus field: spread (depth kept sharp on each side of the focus),
+// tilt ([x, y] focus change across the picture) turning around point
+// ([x, y], normalized).
 export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxPerUnit = 14, options = {}) {
   if (!(strength > 0)) return rgb;
-  const { shape = 'smooth', highlights = 0, clip = 1 } = options;
+  const { shape = 'smooth', highlights = 0, clip = 1, spread = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
   const src = boostHighlights(rgb, clip, highlights);
   const maxR = Math.max(1, strength * 1.6 * pxPerUnit);
   const radii = [0];
@@ -144,9 +147,11 @@ export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxP
   const sy = dh / h;
   for (let y = 0; y < h; y++) {
     const dy = Math.min(dh - 1, Math.floor((y + 0.5) * sy));
+    const rowFocus = focus + tilt[1] * ((y + 0.5) / h - point[1]);
     for (let x = 0; x < w; x++) {
       const d = depth[dy * dw + Math.min(dw - 1, Math.floor((x + 0.5) * sx))];
-      const r = strength * Math.abs(d - focus) * pxPerUnit;
+      const f = rowFocus + tilt[0] * ((x + 0.5) / w - point[0]);
+      const r = strength * Math.max(0, Math.abs(d - f) - spread) * pxPerUnit;
       let k = 0;
       while (k < radii.length - 2 && radii[k + 1] < r) k++;
       const t = Math.max(0, Math.min(1, (r - radii[k]) / (radii[k + 1] - radii[k] || 1)));

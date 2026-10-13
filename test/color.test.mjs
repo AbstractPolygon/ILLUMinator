@@ -7,7 +7,7 @@ test('all-zero color settings need no per-pixel work', () => {
 });
 
 test('white balance keeps luminance and warms with temperature', () => {
-  const [r, g, b] = whiteBalanceGains(0.5, 0);
+  const [r, g, b] = whiteBalanceGains(8000, 5500, 0);
   assert.ok(r > 1 && b < 1);
   assert.ok(Math.abs(0.2126 * r + 0.7152 * g + 0.0722 * b - 1) < 1e-9);
 });

@@ -11,6 +11,7 @@ const state = {
   info: null,
   mode: 'camera', // or 'lenslets'
   camera: { u: 0, v: 0 }, // viewpoint, sensor pixels within the lens aperture
+  focusPoint: { x: 0.5, y: 0.5 }, // focus spread and tilt center, normalized picture coordinates
   // Camera mode shows either the live camera view or, while playing or
   // scrubbing, a frame of the animation.
   showingFrames: false,
@@ -115,6 +116,8 @@ function resetView() {
   state.stack = null;
   state.still = null;
   state.camera = { u: 0, v: 0 };
+  state.focusPoint = { x: 0.5, y: 0.5 };
+  showFocusPoint();
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
 }
@@ -138,6 +141,7 @@ async function openWith(args, transfer) {
     hideProgress();
     state.info = info;
     $('placeholder').hidden = true;
+    resetTemperature(info);
     renderInfo();
     if (!info.hasRaw && info.stacks.length) {
       await loadStack(info.stacks);
@@ -239,9 +243,9 @@ function apertureFor(n) {
   const native = (state.info && state.info.cam && state.info.cam.capture && state.info.cam.capture.fNumber) || 2;
   const ratio = native / n;
   const radius = state.info ? state.info.radius : 4.5;
-  // A shaped bokeh is drawn from the depth map at every aperture, from the
-  // sharp single view.
-  if ($('bokeh').value !== 'natural') return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
+  // A shaped bokeh, focus spread and tilt are drawn from the depth map at
+  // every aperture, from the sharp single view.
+  if ($('bokeh').value !== 'natural' || focusField().spread > 0 || focusField().tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
   // About one view's worth of the aperture: render that single view (fast).
   if (ratio < 0.15) return { aperture: 0, dof: 0 };
   if (ratio <= 1) return { aperture: ratio, dof: 0 };
@@ -251,6 +255,25 @@ function apertureFor(n) {
 function showFNumber() {
   const n = fNumber();
   $('fstop-label').textContent = `f/${n}`;
+}
+
+// Focus spread and tilt. Depth values run from -1.6 to 1.6, so full spread
+// keeps that whole range sharp around the focus depth, and full tilt changes
+// the focus depth by 1.6 from one edge of the picture to the other. The
+// tilted focus plane turns around the focus point (normalized x, y).
+function focusField() {
+  const tilt = 1.6 * $('tilt').value / 100;
+  const angle = (+$('tilt-rotation').value * Math.PI) / 180;
+  return {
+    spread: 1.6 * $('spread').value / 100,
+    tilt: [tilt * Math.cos(angle), tilt * Math.sin(angle)],
+    point: [state.focusPoint.x, state.focusPoint.y],
+  };
+}
+
+function showFocusPoint() {
+  const { x, y } = state.focusPoint;
+  $('focus-point').textContent = x === 0.5 && y === 0.5 ? 'Center' : `${Math.round(x * 100)}%, ${Math.round(y * 100)}%`;
 }
 
 // Camera settings shared by the live view, animations and full resolution.
@@ -264,7 +287,9 @@ function cameraParams() {
     alpha: +$('focus').value,
     aperture: lens.aperture,
     dof: lens.dof * +$('blur').value,
-    bokeh: { shape: $('bokeh').value === 'natural' ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value },
+    // The synthetic blur's options: bokeh shape and brightness, and the
+    // focus field (spread and tilt).
+    bokeh: { shape: $('bokeh').value === 'natural' ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value, ...focusField() },
   };
 }
 
@@ -587,7 +612,7 @@ function setMode(mode) {
   const raw = !!(state.info && state.info.hasRaw);
   for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
   const camera = mode === 'camera';
-  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'blur', 'highlights']) $(id).disabled = !raw || !camera;
+  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'blur', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !raw || !camera;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -813,10 +838,17 @@ async function focusAt(event) {
     return;
   }
   const [x, y] = viewPoint(event);
+  const rect = canvas.getBoundingClientRect();
+  state.focusPoint = {
+    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+  };
+  showFocusPoint();
   const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v }, { onProgress: showProgress });
   hideProgress();
   if (!res || typeof res.alpha !== 'number') return;
   $('focus').value = res.alpha.toFixed(2);
+  showSliderValue($('focus'));
   if (fNumber() > 4) {
     $('fstop').value = F_STOPS.indexOf(2.8);
     showFNumber();
@@ -894,9 +926,10 @@ function cameraChanged({ final }) {
   }
 }
 
-for (const id of ['focus', 'fstop', 'bokeh', 'blur', 'highlights']) {
+for (const id of ['focus', 'fstop', 'bokeh', 'blur', 'highlights', 'spread', 'tilt', 'tilt-rotation']) {
   $(id).oninput = () => {
     showFNumber();
+    showSliderValue($(id));
     $('blur-label').textContent = `${$('blur').value}×`;
     cameraChanged({ final: false });
   };
@@ -1128,7 +1161,7 @@ async function applySettings() {
     ev: +$('ev').value,
     saturation: 1 + $('saturation').value / 100,
     autoWb: $('awb').checked,
-    wb: { temperature: $('wb-temperature').value / 100, tint: $('wb-tint').value / 100 },
+    wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
     tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
@@ -1157,6 +1190,19 @@ function showFringeHues() {
   for (const key of FRINGES) $(`fringe-${key}-hue-label`).textContent = `${(+$(`fringe-${key}-hue`).value + 360) % 360}°`;
 }
 
+// Temperature starts at the white balance the camera used for this photo.
+function resetTemperature(info) {
+  const cct = info && info.cam && info.cam.capture && info.cam.capture.cct;
+  const k = Math.min(10000, Math.max(2000, Math.round((cct || 5500) / 50) * 50));
+  const input = $('wb-temperature');
+  input.dataset.default = k;
+  if (+input.value !== k) {
+    input.value = k;
+    applySettingsSoon();
+  }
+  showSliderValue(input);
+}
+
 const TONES = ['contrast', 'highlights', 'shadows', 'whites', 'blacks'];
 const HUE_SLIDERS = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'];
 
@@ -1182,8 +1228,22 @@ function showSliderValue(input) {
   if (!out) return;
   const v = +input.value;
   const sign = v > 0 ? '+' : v < 0 ? '−' : '';
-  out.textContent = input.id === 'ev' ? `${sign}${Math.abs(v).toFixed(2)} EV` : `${sign}${Math.abs(v)}`;
+  if (input.id === 'ev') out.textContent = `${sign}${Math.abs(v).toFixed(2)} EV`;
+  else if (input.id === 'focus') out.textContent = `${sign}${Math.abs(v).toFixed(2)}`;
+  else if (input.id === 'tilt-rotation') out.textContent = `${v}°`;
+  else if (input.id === 'wb-temperature') out.textContent = `${v} K`;
+  else out.textContent = `${sign}${Math.abs(v)}`;
 }
+// Camera sliders with a default reset the same way.
+for (const input of document.querySelectorAll('[data-panel=camera] input[type=range][data-default]')) {
+  showSliderValue(input);
+  input.addEventListener('dblclick', () => {
+    input.value = input.dataset.default;
+    input.oninput();
+    input.onchange();
+  });
+}
+
 for (const input of document.querySelectorAll('.color-panel input[type=range]')) {
   showSliderValue(input);
   input.addEventListener('input', () => {

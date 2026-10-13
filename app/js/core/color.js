@@ -11,15 +11,35 @@
 
 export const HUES = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'];
 
-// Camera RGB gains for temperature (warmer > 0) and tint (magenta > 0),
-// normalized to keep luminance.
-export function whiteBalanceGains(temperature = 0, tint = 0) {
-  const r = 2 ** (0.6 * temperature);
-  const b = 2 ** (-0.6 * temperature);
-  const g = 2 ** (-0.35 * tint);
+// Linear RGB of light from a black body at `kelvin` (1000-40000 K), after
+// Tanner Helland's fit, with green = 1.
+export function blackBody(kelvin) {
+  const t = Math.min(400, Math.max(10, kelvin / 100));
+  const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+  const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+  const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  const lin = (v) => {
+    const c = Math.min(1, Math.max(1e-3, v / 255));
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const G = lin(g);
+  return [lin(r) / G, 1, lin(b) / G];
+}
+
+// Camera RGB gains that re-balance a picture white balanced for `asShot`
+// kelvin as if for `kelvin` (higher looks warmer, like Lightroom), and add
+// tint (-150 green to 150 magenta). Normalized to keep luminance.
+export function whiteBalanceGains(kelvin, asShot, tint = 0) {
+  const from = blackBody(asShot);
+  const to = blackBody(kelvin);
+  const r = from[0] / to[0];
+  const b = from[2] / to[2];
+  const g = 2 ** (-0.35 * (tint / 100));
   const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return [r / y, g / y, b / y];
 }
+
+export const DEFAULT_KELVIN = 5500;
 
 // The per-pixel adjustments, or null when they are all at zero.
 export function makeLook(settings = {}) {

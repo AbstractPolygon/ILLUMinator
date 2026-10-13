@@ -11,7 +11,7 @@ import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe } from './core/defringe.js';
-import { makeLook, whiteBalanceGains } from './core/color.js';
+import { makeLook, whiteBalanceGains, DEFAULT_KELVIN } from './core/color.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -19,7 +19,7 @@ const state = {
   lf: null,
   sampler: null,
   dev: null,
-  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { temperature: 0, tint: 0 }, tone: {}, color: {} },
+  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {} },
   look: null,
   baseExposure: 1,
   matrix: null,
@@ -78,13 +78,19 @@ function render(u, v) {
   return renderView(lf.raw, lf.cam, dev, sampler, u, v, state.scratch);
 }
 
+function asShotKelvin() {
+  const c = state.lf && state.lf.cam && state.lf.cam.capture;
+  return (c && c.cct) || DEFAULT_KELVIN;
+}
+
 function updateColor() {
   const { lf } = state;
   const center = render(0, 0);
   state.centerMeans = channelMeans(center);
   const s = state.settings;
   const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
-  const manual = whiteBalanceGains(s.wb.temperature, s.wb.tint);
+  const asShot = asShotKelvin();
+  const manual = whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = auto.map((g, i) => g * manual[i]);
   state.look = makeLook(s);
   const ccm = colorMatrix(lf.cam, s);
@@ -126,6 +132,9 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       strength: dof * pxPerUnit,
       shape: bokeh.shape,
       highlights: bokeh.highlights,
+      tilt: bokeh.tilt,
+      point: bokeh.point,
+      spread: bokeh.spread,
       clip: state.dev.clip,
     });
   }
@@ -298,7 +307,7 @@ async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}
   if (!(await ensureDepth(id))) return rgb;
   const { outW, outH } = state.sampler;
   return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail, {
-    shape: bokeh.shape, highlights: bokeh.highlights, clip: state.dev.clip,
+    shape: bokeh.shape, highlights: bokeh.highlights, clip: state.dev.clip, tilt: bokeh.tilt, point: bokeh.point, spread: bokeh.spread,
   });
 }
 

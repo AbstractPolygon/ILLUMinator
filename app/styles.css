@@ -222,13 +222,13 @@ input[type=range] {
 }
 input[type=range]::-webkit-slider-runnable-track {
   height: var(--slider-track);
-  background: var(--line);
+  background: var(--channel, var(--line));
   border: 0;
   border-radius: 0;
 }
 input[type=range]::-moz-range-track {
   height: var(--slider-track);
-  background: var(--line);
+  background: var(--channel, var(--line));
   border: 0;
   border-radius: 0;
 }
@@ -251,8 +251,19 @@ input[type=range]::-moz-range-thumb {
   border-radius: 0;
   box-shadow: none;
 }
-input[type=range]:hover::-webkit-slider-runnable-track { background: var(--muted); }
-input[type=range]:hover::-moz-range-track { background: var(--muted); }
+input[type=range]:hover::-webkit-slider-runnable-track { background: var(--channel, var(--muted)); }
+input[type=range]:hover::-moz-range-track { background: var(--channel, var(--muted)); }
+
+/* Channels that show what the slider does. */
+#wb-temperature { --channel: linear-gradient(to right, #3d7bff, #ffd23d); }
+#wb-tint { --channel: linear-gradient(to right, #2fd14a, #2fd1d1); }
+#hue-red { --channel: linear-gradient(to right, #000, #ff3030); }
+#hue-yellow { --channel: linear-gradient(to right, #000, #ffe030); }
+#hue-green { --channel: linear-gradient(to right, #000, #30e050); }
+#hue-cyan { --channel: linear-gradient(to right, #000, #30e0e0); }
+#hue-blue { --channel: linear-gradient(to right, #000, #3060ff); }
+#hue-magenta { --channel: linear-gradient(to right, #000, #f030f0); }
+input[type=range]:disabled { --channel: var(--line); }
 input[type=range]:focus { outline: none; }
 input[type=range]:focus-visible::-webkit-slider-thumb { background: var(--text); }
 input[type=range]:focus-visible::-moz-range-thumb { background: var(--text); }
