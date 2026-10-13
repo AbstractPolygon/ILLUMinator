@@ -3432,6 +3432,8 @@ function setTimelineHeight(h) {
   const tl = $('timeline');
   const sized = Number.isFinite(h) && h >= 0;
   tl.classList.toggle('sized', sized);
+  // All the way down: only the toolbar.
+  tl.classList.toggle('collapsed', sized && h === 0);
   if (sized) tl.style.setProperty('--tl-h', `${h}px`);
   else tl.style.removeProperty('--tl-h');
   try {
@@ -3473,6 +3475,7 @@ try {
   const h = saved === null ? NaN : +saved;
   if (h >= 0) {
     $('timeline').classList.add('sized');
+    $('timeline').classList.toggle('collapsed', h === 0);
     $('timeline').style.setProperty('--tl-h', `${h}px`);
   }
 } catch {
