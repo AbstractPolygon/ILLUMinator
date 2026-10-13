@@ -572,3 +572,6 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 .anim-length .num { width: 64px; }
 .ccm-grid .num { width: 100%; }
 .controls > .panel > .row.export { margin-top: 8px; margin-bottom: 8px; }
+
+/* Rendering > Quality: room between the checkbox and the Resolution field. */
+#depth-hq-row { margin-bottom: 10px; }
