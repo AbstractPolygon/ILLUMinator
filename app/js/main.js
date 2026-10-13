@@ -2289,8 +2289,6 @@ let keySel = null; // { k, t }: the main selected keyframe
 const tlSel = new Set();
 // The Curves view of the keyframe editor (see drawCurves).
 const tlCurves = { on: false, hidden: new Set(), hits: [] };
-// Heights of the tracks and channel list, for minTimelineHeight.
-const tlContent = { keys: 0, channels: 0 };
 
 function keyframesOn() {
   return $('anim-on').checked && $('anim').value === 'keyframes';
@@ -2717,30 +2715,6 @@ function renderTimeline() {
   $('tl-grid').hidden = curves;
   $('tl-curves').hidden = !curves;
   if (curves) drawCurves();
-  // Too short now (say, a scrollbar appeared): grow to fit every track.
-  const tl = $('timeline');
-  if (tl.classList.contains('sized') && parseFloat(tl.style.getPropertyValue('--tl-h')) < minTimelineHeight()) setTimelineHeight(minTimelineHeight());
-}
-
-// The least height that still shows every track (or every channel of the
-// Curves view), with the timeline's scrollbar when there is one.
-function minTimelineHeight() {
-  // Where the Camera group's last row ends: the tracks of living filters and
-  // other adjustments may scroll out of sight. (The lists stretch to fill
-  // the editor, so their own heights say nothing.)
-  const contentHeight = (el) => {
-    const camera = el.querySelectorAll('[data-group="camera"]');
-    const last = camera.length ? camera[camera.length - 1] : el.lastElementChild;
-    if (!last) return 0;
-    return last.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop;
-  };
-  // Only the view on show counts (Camera may be collapsed in it).
-  const content = tlCurves.on ? Math.ceil(contentHeight($('tl-channels'))) : Math.ceil(contentHeight($('tl-grid')));
-  if (tlCurves.on) tlContent.channels = content;
-  else tlContent.keys = content;
-  const scroll = $('tl-scroll');
-  const extra = scroll.hidden ? 0 : scroll.offsetHeight + 4;
-  return Math.max(content, 40) + extra;
 }
 
 // The time under the pointer; `r` is the track's (or ruler's) box, taken
@@ -3452,14 +3426,16 @@ function setCurvesView(on) {
 }
 // Drag the editor's top edge to make it taller or shorter (the picture
 // gets the rest); a double-click goes back to the natural height.
+// `h`: the height of the tracks in pixels, down to 0 (only the editor's
+// toolbar shows), or null for their natural height.
 function setTimelineHeight(h) {
   const tl = $('timeline');
-  if (h > 0) h = Math.max(h, minTimelineHeight());
-  tl.classList.toggle('sized', h > 0);
-  if (h > 0) tl.style.setProperty('--tl-h', `${h}px`);
+  const sized = Number.isFinite(h) && h >= 0;
+  tl.classList.toggle('sized', sized);
+  if (sized) tl.style.setProperty('--tl-h', `${h}px`);
   else tl.style.removeProperty('--tl-h');
   try {
-    if (h > 0) localStorage.setItem('illuminator.timelineHeight', String(h));
+    if (sized) localStorage.setItem('illuminator.timelineHeight', String(h));
     else localStorage.removeItem('illuminator.timelineHeight');
   } catch {
     // Not kept between sessions then.
@@ -3481,7 +3457,7 @@ $('tl-resize').addEventListener('pointerdown', (e) => {
   const others = h(document.querySelector('.modes-row')) + h(document.querySelector('.transport')) + h($('timeline')) - startH;
   const max = Math.max(120, stage - others - 80);
   const move = (ev) => {
-    setTimelineHeight(Math.round(Math.min(Math.max(max, minTimelineHeight()), startH - (ev.clientY - startY))));
+    setTimelineHeight(Math.round(Math.min(max, Math.max(0, startH - (ev.clientY - startY)))));
   };
   const up = () => {
     handle.classList.remove('dragging');
@@ -3491,10 +3467,11 @@ $('tl-resize').addEventListener('pointerdown', (e) => {
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
 });
-$('tl-resize').ondblclick = () => setTimelineHeight(0);
+$('tl-resize').ondblclick = () => setTimelineHeight(null);
 try {
-  const h = +localStorage.getItem('illuminator.timelineHeight');
-  if (h > 0) {
+  const saved = localStorage.getItem('illuminator.timelineHeight');
+  const h = saved === null ? NaN : +saved;
+  if (h >= 0) {
     $('timeline').classList.add('sized');
     $('timeline').style.setProperty('--tl-h', `${h}px`);
   }

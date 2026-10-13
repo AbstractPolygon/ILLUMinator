@@ -515,7 +515,7 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .timeline { flex: none; border-top: 1px solid var(--line); background: var(--panel); padding: 6px 12px 8px; position: relative; display: flex; flex-direction: column; gap: 6px; }
 .tl-resize { position: absolute; left: 0; right: 0; top: -4px; height: 8px; cursor: ns-resize; z-index: 2; touch-action: none; }
 /* Resized by the user: the tracks scroll and the curves fill the height. */
-.timeline.sized .tl-main { height: var(--tl-h); align-items: stretch; }
+.timeline.sized .tl-main { height: var(--tl-h); align-items: stretch; overflow: hidden; }
 .timeline.sized .tl-grid-wrap { min-height: 0; }
 .timeline.sized .tl-grid { overflow-y: auto; overflow-x: hidden; align-content: start; }
 .timeline.sized .tl-curves { flex: 1; min-height: 0; height: auto; }
