@@ -94,7 +94,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 function toPixels(rgb, w, h) {
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
-  if (!f || !f.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure);
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
   const srgb = new Float32Array(rgb.length);

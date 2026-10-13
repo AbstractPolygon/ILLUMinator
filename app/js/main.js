@@ -1063,9 +1063,16 @@ async function applySettings() {
     useCcm: $('ccm').checked,
     autoWb: $('awb').checked,
     detail: +$('detail').value,
-    // [amount, hue] for purple, green, red and blue fringes.
-    defringe: FRINGES.map((key) => [+$(`fringe-${key}`).value, (+$(`fringe-${key}-hue`).value + 360) % 360]),
+    defringe: {
+      on: $('fringe-on').checked,
+      radius: +$('fringe-radius').value,
+      threshold: +$('fringe-threshold').value,
+      // [amount, hue] for purple, green, red and blue fringes.
+      colors: FRINGES.map((key) => [+$(`fringe-${key}`).value, (+$(`fringe-${key}-hue`).value + 360) % 360]),
+    },
   };
+  $('fringe-controls').disabled = !settings.defringe.on;
+  $('fringe-radius-label').textContent = `${settings.defringe.radius} px`;
   showFringeHues();
   if (!state.info || !state.info.hasRaw) return;
   const info = await engine.request('settings', { settings });
@@ -1081,7 +1088,8 @@ function showFringeHues() {
   for (const key of FRINGES) $(`fringe-${key}-hue-label`).textContent = `${(+$(`fringe-${key}-hue`).value + 360) % 360}°`;
 }
 
-for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail', 'fringe-on', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+$('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 
 document.addEventListener('keydown', (e) => {

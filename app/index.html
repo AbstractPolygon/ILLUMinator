@@ -111,6 +111,12 @@
 
       <details class="panel">
         <summary><h2>Defringe</h2></summary>
+        <label class="check"><input id="fringe-on" type="checkbox"> Enabled</label>
+        <fieldset id="fringe-controls" class="plain" disabled>
+        <label>Radius <output id="fringe-radius-label" for="fringe-radius">2 px</output>
+          <input id="fringe-radius" type="range" min="1" max="6" step="1" value="2">
+        </label>
+        <label>Threshold <input id="fringe-threshold" type="range" min="0.05" max="0.8" step="0.05" value="0.25"></label>
         <label>Purple amount <input id="fringe-purple" type="range" min="0" max="1" step="0.05" value="0"></label>
         <label>Purple hue <output id="fringe-purple-hue-label" for="fringe-purple-hue">300°</output>
           <input id="fringe-purple-hue" type="range" min="240" max="340" step="5" value="300">
@@ -127,6 +133,7 @@
         <label>Blue hue <output id="fringe-blue-hue-label" for="fringe-blue-hue">220°</output>
           <input id="fringe-blue-hue" type="range" min="180" max="260" step="5" value="220">
         </label>
+        </fieldset>
       </details>
 
       <details class="panel" data-panel="camera" open>

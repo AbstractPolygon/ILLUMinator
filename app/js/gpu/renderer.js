@@ -293,6 +293,8 @@ uniform mat3 uMatrix;
 uniform float uExposure;
 uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
 uniform int uFringeOn;
+uniform int uFringeRadius;
+uniform float uFringeThreshold;
 out vec4 outColor;
 
 vec3 colorAt(ivec2 q) { return uMatrix * texelFetch(uSrc, q, 0).rgb; }
@@ -321,8 +323,10 @@ void main() {
   if (uFringeOn == 1) {
     float mx = 0.0;
     float mn = 1e9;
-    for (int dy = -2; dy <= 2; dy++) {
-      for (int dx = -2; dx <= 2; dx++) {
+    for (int dy = -6; dy <= 6; dy++) {
+      if (dy < -uFringeRadius || dy > uFringeRadius) continue;
+      for (int dx = -6; dx <= 6; dx++) {
+        if (dx < -uFringeRadius || dx > uFringeRadius) continue;
         ivec2 q = clamp(p + ivec2(dx, dy), ivec2(0), size - 1);
         float y = dot(colorAt(q), vec3(0.2126, 0.7152, 0.0722));
         mx = max(mx, y);
@@ -330,7 +334,7 @@ void main() {
       }
     }
     float contrast = mx > 1e-6 ? (mx - mn) / mx : 0.0;
-    float edge = clamp((contrast - 0.25) / 0.35, 0.0, 1.0);
+    float edge = clamp((contrast - uFringeThreshold) / 0.35, 0.0, 1.0);
     float hue = hueOf(sqrt(max(c, vec3(0.0))));
     if (edge > 0.0 && hue >= 0.0) {
       float k = 0.0;
@@ -965,7 +969,8 @@ export class GpuRenderer {
   }
 
   // Color matrix, defringing, exposure and sRGB, drawn to the canvas and
-  // handed over as an ImageBitmap. fringe: [[amount, hue] x 4].
+  // handed over as an ImageBitmap. fringe: defringe settings
+  // { on, radius, threshold, colors: [[amount, hue] x 4] }.
   present(src, w, h, { matrix, exposure, fringe }) {
     const gl = this.gl;
     const P = this.programs.present;
@@ -978,9 +983,11 @@ export class GpuRenderer {
     this.bindTex(1, src);
     gl.uniformMatrix3fv(P.u.uMatrix, true, matrix);
     gl.uniform1f(P.u.uExposure, exposure);
-    const f = fringe || [];
-    const on = f.some(([amount]) => amount > 0);
+    const f = (fringe && fringe.colors) || [];
+    const on = !!(fringe && fringe.on) && f.some(([amount]) => amount > 0);
     gl.uniform1i(P.u.uFringeOn, on ? 1 : 0);
+    gl.uniform1i(P.u.uFringeRadius, Math.max(1, Math.min(6, Math.round((fringe && fringe.radius) || 2))));
+    gl.uniform1f(P.u.uFringeThreshold, (fringe && fringe.threshold) ?? 0.25);
     gl.uniform2fv(P.u.uFringe, Float32Array.from([0, 1, 2, 3].flatMap((i) => (f[i] ? [f[i][0], f[i][1]] : [0, 0]))));
     this.draw();
     return this.canvas.transferToImageBitmap();

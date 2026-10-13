@@ -19,15 +19,16 @@ function hueOf(r, g, b) {
 }
 
 // rgb: linear sRGB (w x h), modified copy returned.
-// fringe: [[amount 0..1, hue in degrees], ...] e.g. purple, green, red, blue.
-export function defringe(rgb, w, h, fringe = []) {
-  const ranges = fringe.filter(([amount]) => amount > 0);
-  if (!ranges.length) return rgb;
+// options: { on, radius (pixels searched for an edge), threshold (contrast
+// that counts as an edge, 0..1), colors: [[amount 0..1, hue degrees], ...] }.
+export function defringe(rgb, w, h, { on = true, radius = 2, threshold = 0.25, colors = [] } = {}) {
+  const ranges = colors.filter(([amount]) => amount > 0);
+  if (!on || !ranges.length) return rgb;
   const n = w * h;
   const lum = new Float32Array(n);
   for (let i = 0; i < n; i++) lum[i] = 0.2126 * rgb[3 * i] + 0.7152 * rgb[3 * i + 1] + 0.0722 * rgb[3 * i + 2];
-  // Local contrast: brightness range in a 5x5 window relative to its maximum.
-  const R = 2;
+  // Local contrast: brightness range in a window relative to its maximum.
+  const R = Math.max(1, Math.round(radius));
   const rowMax = new Float32Array(n);
   const rowMin = new Float32Array(n);
   for (let y = 0; y < h; y++) {
@@ -54,7 +55,7 @@ export function defringe(rgb, w, h, fringe = []) {
         if (rowMin[i] < mn) mn = rowMin[i];
       }
       const contrast = mx > 1e-6 ? (mx - mn) / mx : 0;
-      const edge = Math.max(0, Math.min(1, (contrast - 0.25) / 0.35));
+      const edge = Math.max(0, Math.min(1, (contrast - threshold) / 0.35));
       if (edge <= 0) continue;
       const p = y * w + x;
       const r = rgb[3 * p];
