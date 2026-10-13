@@ -606,8 +606,11 @@
             <button id="png-btn" disabled>Save PNG</button>
             <button id="webm-btn">Export video</button>
           </div>
-          <label class="check" title="Shows the picture in 3D for red / cyan glasses while you edit"><input id="stereo-on" type="checkbox"> Show 3D (anaglyph)</label>
-          <label>3D
+        </div>
+        <details class="subpanel">
+          <summary><h3>3D</h3></summary>
+          <label class="check" title="Shows the picture in 3D for red / cyan glasses while you edit"><input id="stereo-on" type="checkbox"> Show 3D</label>
+          <label>3D type
             <select id="stereo-mode">
               <option value="anaglyph">Anaglyph (red / cyan glasses)</option>
               <option value="parallel">Side by side</option>
@@ -618,7 +621,7 @@
             <input id="stereo-baseline" type="range" min="10" max="100" step="5" value="60" data-default="60">
           </label>
           <button id="stereo-btn" class="wide" disabled>Save 3D image</button>
-        </div>
+        </details>
       </details>
 
       <details class="panel" data-panel="lenslets" hidden>
