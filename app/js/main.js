@@ -999,8 +999,10 @@ async function showLibraryLocation() {
 
 $('settings-btn').onclick = async () => {
   await showLibraryLocation();
+  $('settings-btn').setAttribute('aria-expanded', 'true');
   $('settings-dialog').showModal();
 };
+$('settings-dialog').addEventListener('close', () => $('settings-btn').setAttribute('aria-expanded', 'false'));
 
 $('library-choose').onclick = async () => {
   if (!native) return;
