@@ -4,6 +4,7 @@ From the **Rendering** panel:
 
 - **Save PNG:** the picture as shown, with all edits, crop and rotation.
 - **Full resolution:** turn it on (or press F), choose a *Scale* and *Detail recovery*, then *Render*. The still uses every pixel the sensor recorded, several times the resolution of the live picture. *Save PNG* then saves the full resolution still.
+- **Show 3D (anaglyph):** shows the picture in 3D for red / cyan glasses while you edit; turn it off for the normal view.
 - **Save 3D image:** a stereo pair from two viewpoints across the lens: *Anaglyph* (for red / cyan glasses), *Side by side* or *Cross-eyed*. *Baseline* sets how far apart the two eyes are; more gives a stronger 3D effect.
 - **Export video:** the animation (Animation panel, *Enabled*) as a WebM video (MP4 where the browser records only that), at up to 1080 pixels.
 

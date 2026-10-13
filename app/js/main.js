@@ -806,9 +806,15 @@ async function renderCamera() {
   }
   v.busy = true;
   try {
-    const msg = await engine.request('view', cameraParams(), { onProgress: showProgress });
-    hideProgress();
-    if (msg && (msg.pixels || msg.bitmap) && showsCamera()) draw(toImageData(msg));
+    if (stereoShown()) {
+      const img = await stereoAnaglyph(cameraParams());
+      hideProgress();
+      if (img && showsCamera()) draw(img);
+    } else {
+      const msg = await engine.request('view', cameraParams(), { onProgress: showProgress });
+      hideProgress();
+      if (msg && (msg.pixels || msg.bitmap) && showsCamera()) draw(toImageData(msg));
+    }
   } catch (err) {
     showError(err);
   } finally {
@@ -1144,6 +1150,7 @@ function setMode(mode) {
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
   $('stereo-btn').disabled = !(state.info && state.info.hasRaw) || !camera;
+  $('stereo-on').disabled = !(state.info && state.info.hasRaw) || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
@@ -2460,6 +2467,45 @@ function keyframeFrames() {
 
 // ---------------------------------------------------------------- 3D
 
+// Show 3D: the live picture as an anaglyph (red from the left eye, green
+// and blue from the right), drawn like any other picture.
+function stereoShown() {
+  return $('stereo-on').checked && !!(state.info && state.info.hasRaw);
+}
+
+function eyeOffset() {
+  return (state.info.radius || 4.5) * (+$('stereo-baseline').value / 100);
+}
+
+async function stereoAnaglyph(p) {
+  const b = eyeOffset();
+  const imgs = [];
+  for (const u of [p.u - b, p.u + b]) {
+    const msg = await engine.request('view', { ...p, u }, { onProgress: showProgress });
+    if (!msg || !(msg.pixels || msg.bitmap)) return null;
+    imgs.push(toImageData(msg));
+  }
+  const [L, R] = imgs.map((img) => {
+    if (img instanceof ImageData) return img;
+    const c = Object.assign(document.createElement('canvas'), { width: img.width, height: img.height });
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    return g.getImageData(0, 0, img.width, img.height);
+  });
+  const out = new ImageData(new Uint8ClampedArray(R.data), R.width, R.height);
+  for (let i = 0; i < out.data.length; i += 4) out.data[i] = 0.299 * L.data[i] + 0.587 * L.data[i + 1] + 0.114 * L.data[i + 2];
+  return out;
+}
+
+$('stereo-on').onchange = () => {
+  if (state.showingFrames) backToCamera();
+  setFullRes(false, { restore: false });
+  refresh();
+};
+$('stereo-baseline').onchange = () => {
+  if (stereoShown()) refresh();
+};
+
 // A stereo pair from two viewpoints across the lens aperture: anaglyph
 // (red / cyan glasses), side by side (parallel viewing) or cross-eyed.
 // Crop, rotation and the pivot apply to both eyes alike.
@@ -2468,7 +2514,7 @@ async function saveStereo() {
   $('stereo-btn').disabled = true;
   try {
     const p = cameraParams();
-    const b = (state.info.radius || 4.5) * (+$('stereo-baseline').value / 100);
+    const b = eyeOffset();
     const eyes = [p.u - b, p.u + b];
     const shots = [];
     for (const u of eyes) {
