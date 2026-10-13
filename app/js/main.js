@@ -4332,6 +4332,11 @@ async function restoreEdits(info) {
   state.restoring = true;
   try {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
+    // Tilt is off by default; edits saved before it could be turned off keep
+    // the tilt they had.
+    const cam = saved && saved.camera;
+    if (cam && !('tilt-on' in cam) && +cam.tilt) $('tilt-on').checked = true;
+    for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = !$('tilt-on').checked || $('tilt-on').disabled;
     $('pivot').disabled = !$('pivot-on').checked;
     curve.draw();
     showColorMatrix();
