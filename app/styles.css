@@ -527,3 +527,4 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 .num-arrows button:hover, .num-arrows button:hover:not(:disabled) { background: none; color: var(--text); }
 .anim-length .num { width: 64px; }
 .ccm-grid .num { width: 100%; }
+.controls > .panel > .row.export { margin-top: 8px; margin-bottom: 8px; }
