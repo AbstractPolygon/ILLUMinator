@@ -3926,7 +3926,7 @@ async function exportVideo() {
     const h = g ? g.height : frames[0].height;
     // Enlarged to the chosen Video size (long side), in even pixels for the
     // encoder; the bitrate follows the size.
-    const target = +$('video-size').value || 2160;
+    const target = +$('video-size').value || 1080;
     const up = target / Math.max(w, h);
     const even = (v) => Math.max(2, 2 * Math.round(v / 2));
     const c = document.createElement('canvas');
