@@ -78,6 +78,9 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .library { width: 210px; border-right: 1px solid var(--line); }
 .controls { width: 318px; border-left: 1px solid var(--line); }
+/* The right sidebar's left edge: drag to resize it. */
+.side-resize { flex: none; width: 8px; margin: 0 -4px; position: relative; z-index: 3; cursor: ew-resize; touch-action: none; }
+.side-resize:hover, .side-resize.dragging { background: linear-gradient(to right, transparent 3px, var(--muted) 3px, var(--muted) 5px, transparent 5px); }
 
 h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8px; }
 /* Sections in the right sidebar are spaced by a gap, so the first visible
@@ -247,7 +250,8 @@ dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
 
 @media (max-width: 900px) {
   main { flex-direction: column; overflow-y: auto; }
-  .library, .controls { width: auto; border: 0; }
+  .library, .controls { width: auto !important; border: 0; }
+  .side-resize { display: none; }
   .viewer { min-height: 50vh; }
 }
 

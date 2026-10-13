@@ -2367,8 +2367,9 @@ function keyButtonTracks(id) {
 }
 
 function setupKeyButtons() {
-  // Thin chevrons, so the three take little room.
-  const chevron = (dir) => `<svg viewBox="0 0 7 12" width="7" height="12" aria-hidden="true"><path d="${dir < 0 ? 'M5.5 1.5 1.5 6 5.5 10.5' : 'M1.5 1.5 5.5 6 1.5 10.5'}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  // Thin chevrons, so the three take little room; the tip sits on the
+  // diamond's middle row of pixels.
+  const chevron = (dir) => `<svg viewBox="0 0 7 12" width="7" height="12" aria-hidden="true"><path d="${dir < 0 ? 'M5.5 2 1.5 6.5 5.5 11' : 'M1.5 2 5.5 6.5 1.5 11'}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   for (const id of [...Object.keys(KEY_CONTROLS), ...Object.keys(KEY_MASK_CONTROLS)]) {
     const el = $(id);
     const label = el && el.closest('label');
@@ -3744,6 +3745,50 @@ $('tl-resize').addEventListener('pointerdown', (e) => {
   window.addEventListener('pointerup', up);
 });
 $('tl-resize').ondblclick = () => setTimelineHeight(null);
+
+// The right sidebar's width: drag its left edge (double-click for the
+// normal width). Remembered between sessions.
+function setSidebarWidth(w) {
+  const side = $('controls');
+  if (w === null) side.style.removeProperty('width');
+  else side.style.width = `${Math.round(w)}px`;
+  layoutCanvas();
+  try {
+    if (w === null) localStorage.removeItem('illuminator.sidebarWidth');
+    else localStorage.setItem('illuminator.sidebarWidth', String(Math.round(w)));
+  } catch {
+    // Not remembered; it still applies now.
+  }
+}
+$('controls-resize').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const handle = $('controls-resize');
+  const startX = e.clientX;
+  const startW = $('controls').getBoundingClientRect().width;
+  // Room is kept for the picture.
+  const max = Math.max(280, Math.min(640, window.innerWidth - 520));
+  handle.classList.add('dragging');
+  let frame = 0;
+  const move = (ev) => {
+    const w = Math.min(max, Math.max(260, startW - (ev.clientX - startX)));
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => setSidebarWidth(w));
+  };
+  const up = () => {
+    handle.classList.remove('dragging');
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+});
+$('controls-resize').ondblclick = () => setSidebarWidth(null);
+try {
+  const saved = +localStorage.getItem('illuminator.sidebarWidth');
+  if (saved >= 260) $('controls').style.width = `${Math.min(640, saved)}px`;
+} catch {
+  // Storage unavailable: the normal width.
+}
 try {
   const saved = localStorage.getItem('illuminator.timelineHeight');
   const h = saved === null ? NaN : +saved;
