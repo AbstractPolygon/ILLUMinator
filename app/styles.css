@@ -80,21 +80,24 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   border-radius: 4px;
 }
 .panel > summary::-webkit-details-marker { display: none; }
-.panel > summary h2 { margin: 4px 0 8px; }
-.panel > summary::after {
+.panel > summary h2 { margin: 4px 0; }
+.panel[open] > summary { margin-bottom: 4px; }
+/* Chevron left of the title: points right when closed, down when open. */
+.panel > summary::before {
   content: "";
+  flex: none;
   width: 6px; height: 6px;
+  margin: 0 2px 0 1px;
   border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
-  transform: rotate(45deg); margin: 0 4px 6px 0;
+  transform: translateY(-2px) rotate(45deg);
   transition: transform 0.12s;
 }
-.panel:not([open]) > summary::after { transform: rotate(-45deg); margin-bottom: 2px; }
+.panel:not([open]) > summary::before { transform: rotate(-45deg); }
 .panel > summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.panel:not([open]) > summary h2 { margin-bottom: 4px; }
 #histogram { display: block; width: 100%; height: 80px; border-radius: 6px; background: #0b0c0e; border: 1px solid var(--line); }
 
 #library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
