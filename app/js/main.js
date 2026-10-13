@@ -588,6 +588,7 @@ async function openWith(args, transfer) {
 
 function draw(img) {
   if (!img) return;
+  if (img.pair) return drawPair(img);
   startNoticeTimer();
   state.lastImage = img;
   const g = geometryFor(img.width, img.height);
@@ -606,6 +607,32 @@ function draw(img) {
   canvas.classList.remove('hidden');
   scheduleHistogram();
   if (state.wantThumb && state.mode === 'camera') saveThumbnail();
+}
+
+// A stereo pair next to each other (left eye first, or right eye first for
+// cross-eyed viewing), each eye through the crop and rotation.
+function drawPair(img) {
+  startNoticeTimer();
+  state.lastImage = img;
+  const [first, second] = img.mode === 'cross' ? [img.pair[1], img.pair[0]] : img.pair;
+  const g = geometryFor(first.width, first.height);
+  const w = g ? g.width : first.width;
+  const h = g ? g.height : first.height;
+  if (canvas.width !== 2 * w || canvas.height !== h) {
+    canvas.width = 2 * w;
+    canvas.height = h;
+    layoutCanvas();
+  }
+  state.geom = null;
+  const eye = Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const e = eye.getContext('2d');
+  [first, second].forEach((view, i) => {
+    if (g) drawGeometry(e, view, g);
+    else e.putImageData(view, 0, 0);
+    ctx.drawImage(eye, i * w, 0);
+  });
+  canvas.classList.remove('hidden');
+  scheduleHistogram();
 }
 
 // ---------------------------------------------------------------- histogram
@@ -807,7 +834,7 @@ async function renderCamera() {
   v.busy = true;
   try {
     if (stereoShown()) {
-      const img = await stereoAnaglyph(cameraParams());
+      const img = await stereoPreview(cameraParams());
       hideProgress();
       if (img && showsCamera()) draw(img);
     } else {
@@ -1648,8 +1675,10 @@ function drawGeometry(c2d, img, g, k = 1) {
 // Where an event on the picture falls in the rendered picture, as fractions.
 function sourceFraction(event) {
   const rect = canvas.getBoundingClientRect();
-  const fx = (event.clientX - rect.left) / rect.width;
+  let fx = (event.clientX - rect.left) / rect.width;
   const fy = (event.clientY - rect.top) / rect.height;
+  // Side by side: either half points at the same place.
+  if (state.lastImage && state.lastImage.pair) fx = (fx * 2) % 1;
   if (!state.geom) return [fx, fy];
   const [x, y] = applyMatrix(state.geom.inverse, fx * canvas.width, fy * canvas.height);
   return [x / state.geom.srcW, y / state.geom.srcH];
@@ -2467,8 +2496,7 @@ function keyframeFrames() {
 
 // ---------------------------------------------------------------- 3D
 
-// Show 3D: the live picture as an anaglyph (red from the left eye, green
-// and blue from the right), drawn like any other picture.
+// Show 3D: the live picture in the chosen 3D type.
 function stereoShown() {
   return $('stereo-on').checked && !!(state.info && state.info.hasRaw);
 }
@@ -2484,7 +2512,9 @@ function eyeParams(p, u) {
   return { ...p, u, aperture: Math.min(p.aperture || 1, 0.5) };
 }
 
-async function stereoAnaglyph(p) {
+// The live 3D picture in the chosen 3D type: an anaglyph, or both eyes
+// side by side (drawn by drawPair).
+async function stereoPreview(p) {
   const b = eyeOffset();
   const imgs = [];
   for (const u of [p.u - b, p.u + b]) {
@@ -2499,6 +2529,8 @@ async function stereoAnaglyph(p) {
     g.drawImage(img, 0, 0);
     return g.getImageData(0, 0, img.width, img.height);
   });
+  const mode = $('stereo-mode').value;
+  if (mode !== 'anaglyph') return { pair: [L, R], mode, width: L.width, height: L.height };
   const out = new ImageData(new Uint8ClampedArray(R.data), R.width, R.height);
   for (let i = 0; i < out.data.length; i += 4) out.data[i] = 0.299 * L.data[i] + 0.587 * L.data[i + 1] + 0.114 * L.data[i + 2];
   return out;
@@ -2509,6 +2541,9 @@ $('stereo-on').onchange = () => {
   setFullRes(false, { restore: false });
   refresh();
 };
+$('stereo-mode').addEventListener('change', () => {
+  if (stereoShown()) refresh();
+});
 $('stereo-baseline').addEventListener('input', () => {
   if (stereoShown()) refresh();
 });
