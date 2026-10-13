@@ -543,7 +543,8 @@ function backToCamera() {
 async function renderStill() {
   const scale = +$('still-scale').value;
   try {
-    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale }, { onProgress: showProgress });
+    const passes = +$('still-passes').value;
+    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale, passes }, { onProgress: showProgress });
     const msg = await promise;
     // Ignore a result that arrives after full resolution was switched off.
     if (msg && (msg.pixels || msg.bitmap) && state.fullRes) {
@@ -1240,6 +1241,7 @@ $('fullres-on').onchange = () => setFullResMode($('fullres-on').checked);
 $('render-btn').onclick = renderFullRes;
 $('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
 $('still-scale').onchange = () => setFullRes(false);
+$('still-passes').onchange = () => setFullRes(false);
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
 for (const id of ['lens-x', 'lens-y']) $(id).oninput = () => renderLenslets();
@@ -1295,6 +1297,7 @@ async function applySettings() {
     },
   };
   $('fringe-controls').disabled = !settings.defringe.on;
+  $('fringe-auto').disabled = !settings.defringe.on;
   // Auto defringe sets the colors itself.
   for (const key of FRINGES) {
     $(`fringe-${key}`).disabled = settings.defringe.auto;

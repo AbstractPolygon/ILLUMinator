@@ -405,7 +405,7 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
 // its refocused position. With the aperture closed every depth is kept sharp
 // (each lens uses the depth under it); otherwise the picture is refocused at
 // `alpha` with detail where it is in focus and smooth blur elsewhere.
-async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh }) {
+async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0 }) {
   requireRaw();
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
@@ -420,7 +420,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const base = allInFocus ? equalize(render(u, v)) : refocusRGB(alpha, opts);
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
-    scale, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
+    scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
     onProgress: (p) => progress('Rendering full resolution', p),
     gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });

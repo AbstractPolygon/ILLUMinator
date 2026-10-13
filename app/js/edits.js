@@ -26,7 +26,7 @@ export const EDIT_GROUPS = {
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
   defringe: ['fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
-  rendering: ['detail', 'still-scale'],
+  rendering: ['detail', 'still-scale', 'still-passes'],
 };
 
 function readValue(el) {

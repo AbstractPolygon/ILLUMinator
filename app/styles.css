@@ -323,3 +323,8 @@ label:has(select) { margin-bottom: 10px; }
 .wb-row label.check { margin: 0; }
 .icon-only[aria-pressed="true"] { color: var(--accent); }
 #view.picking { cursor: crosshair; }
+
+/* Checkboxes side by side. */
+.check-row { gap: 20px; margin: 4px 0; }
+.check-row label.check { margin: 0; }
+.check-row label.check:has(input:disabled) { opacity: 0.45; }

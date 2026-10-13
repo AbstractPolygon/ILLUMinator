@@ -232,9 +232,11 @@
 
       <details class="panel">
         <summary><h2>Optics</h2></summary>
-        <label class="check"><input id="fringe-on" type="checkbox"> Enabled</label>
+        <div class="row check-row">
+          <label class="check"><input id="fringe-on" type="checkbox"> Enabled</label>
+          <label class="check"><input id="fringe-auto" type="checkbox" disabled> Auto</label>
+        </div>
         <fieldset id="fringe-controls" class="plain" disabled>
-        <label class="check"><input id="fringe-auto" type="checkbox"> Auto</label>
         <label>Radius <output id="fringe-radius-label" for="fringe-radius">2 px</output>
           <input id="fringe-radius" type="range" min="1" max="6" step="1" value="2">
         </label>
@@ -303,6 +305,13 @@
                 <option value="2">2× lens grid</option>
                 <option value="3" selected>3× lens grid</option>
                 <option value="4">4× lens grid</option>
+              </select>
+            </label>
+            <label>Detail recovery
+              <select id="still-passes">
+                <option value="0">Off</option>
+                <option value="2" selected>Low (2 passes)</option>
+                <option value="4">High (4 passes, slower)</option>
               </select>
             </label>
             <button id="render-btn" class="wide" disabled>Render</button>
