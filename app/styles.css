@@ -216,10 +216,12 @@ dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
 }
 .subpanel:not([open]) > summary::after { transform: rotate(-45deg); }
 .subpanel > summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.subpanel[open] { padding-bottom: 4px; }
-/* A section ending in a collapsed subsection: the subsection row's own
-   spacing is enough, like every other subsection row. */
-.controls > .panel[open]:has(> .subpanel:last-child:not([open])) { padding-bottom: 0; }
+.subpanel[open] { padding-bottom: 6px; }
+.subpanel[open] > :last-child,
+.subpanel[open] > :has(+ [hidden]:last-child) { margin-bottom: 0; }
+/* A section ending in a subsection (open or collapsed): the subsection's
+   own spacing is enough, like every other subsection. */
+.controls > .panel[open]:has(> .subpanel:last-child) { padding-bottom: 0; }
 
 /* Sliders (all of them share these sizes): a 2px channel and a square
    handle, drawn with fills only. */
@@ -306,6 +308,8 @@ button.wide { display: block; width: 100%; }
 .setting .path.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 /* Divider lines between the right sidebar's sections. */
 .controls > .panel { padding: 8px 0; }
+/* The first title lines up with "Photos" in the left sidebar. */
+.controls > .panel:first-child { padding-top: 4px; }
 .controls > .panel + .panel { border-top: 1px solid var(--line); }
 /* A dropdown under its label, with room before the next control. */
 label select { display: block; margin-top: 4px; }
