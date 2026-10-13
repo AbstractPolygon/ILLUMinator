@@ -77,7 +77,7 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 10px 12px;
 }
 .library { width: 210px; border-right: 1px solid var(--line); }
-.controls { width: 318px; border-left: 1px solid var(--line); }
+.controls { width: 308px; border-left: 1px solid var(--line); }
 /* The right sidebar's left edge: drag to resize it. */
 .side-resize { flex: none; width: 8px; margin: 0 -4px; position: relative; z-index: 3; cursor: ew-resize; touch-action: none; }
 .side-resize:hover, .side-resize.dragging { background: linear-gradient(to right, transparent 3px, var(--muted) 3px, var(--muted) 5px, transparent 5px); }
@@ -208,15 +208,18 @@ label output { float: right; color: var(--muted); font-variant-numeric: tabular-
 /* Keyframe controls in a column of their own at the right of the settings
    (as in DaVinci Resolve's Inspector): ◀ ◆ ▶. The diamond is the keyframe
    editor's: hollow when the setting is not animated, filled when it is, blue
-   with a keyframe at the playhead; the arrows show while it is animated. */
-.controls label:has(> input[type=range]), label:has(> .key-nav) { position: relative; padding-right: 48px; }
+   with a keyframe at the playhead; an arrow shows when there is a keyframe
+   that way. */
+/* Only settings that can be keyframed leave room for the column; other
+   sliders keep the full width. */
+label:has(> .key-nav) { position: relative; padding-right: 38px; }
 .key-nav { position: absolute; right: 0; top: -1px; display: flex; align-items: center; height: 18px; }
 .key-nav button {
-  width: 16px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted);
+  width: 12px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted);
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .key-nav button:hover:not(:disabled) { color: var(--text); }
-.key-nav .key-step { visibility: hidden; width: 14px; }
+.key-nav .key-step { visibility: hidden; width: 9px; }
 .key-nav.on .key-step { visibility: visible; }
 /* An arrow shows only when there is a keyframe that way. */
 .key-nav .key-step:disabled { visibility: hidden; }

@@ -15,6 +15,8 @@
 //   tilt, tiltRotation  Tilt (-100..100) and its rotation (degrees), used
 //             with Tilt on
 //   highlights  bokeh highlights (0..1)
+//   amount    the Viewpoint path's Amount (0.1..1), with Animate: Viewpoint
+//   near, far the Focus sweep's Near and Far, with Animate: Focus sweep
 // ease: { type: 'auto' | 'linear' | 'smooth' | 'in' | 'out' | 'hold' | 'custom',
 //         bezier: [x1, y1, x2, y2] } (custom: a cubic Bezier from (0, 0) to
 //         (1, 1) through those handles; y may leave 0..1 to overshoot).
@@ -22,7 +24,7 @@
 // clamped handles: the speed carries through each keyframe, flattening at
 // highs, lows and the ends, without overshooting.
 
-export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY', 'pivot', 'pointX', 'pointY', 'spread', 'spreadSmooth', 'tilt', 'tiltRotation', 'highlights'];
+export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY', 'pivot', 'pointX', 'pointY', 'spread', 'spreadSmooth', 'tilt', 'tiltRotation', 'highlights', 'amount', 'near', 'far'];
 // Besides those, 'mask:<id>:<attr>': a setting of local adjustment <id>
 // (its strength, a shape setting or an effect; see core/local.js).
 export const isMaskTrack = (k) => /^mask:[\w-]+:[a-z]+$/.test(k);

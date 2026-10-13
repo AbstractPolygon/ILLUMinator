@@ -936,16 +936,21 @@ function animationRequest() {
   }
   if ($('anim').value === 'focus') {
     const n = +$('steps').value;
-    const near = +$('near').value;
-    const far = +$('far').value;
-    const alphas = Array.from({ length: n }, (_, i) => near + ((far - near) * i) / (n - 1));
+    // Near and Far may be keyframed: step i is at i / frame rate.
+    const alphas = Array.from({ length: n }, (_, i) => {
+      const t = i / KEY_FPS;
+      const near = valueAt(anim, 'near', t) ?? +$('near').value;
+      const far = valueAt(anim, 'far', t) ?? +$('far').value;
+      return near + ((far - near) * i) / (n - 1);
+    });
     // A small aperture would show little change: sweep at least wide open.
     const aperture = Math.max(p.aperture, 1);
     return { type: 'refocusFrames', kind: 'refocus', loop: 'pingpong', values: alphas, args: { alphas, u: p.u, v: p.v, aperture, dof: p.dof, bokeh: p.bokeh } };
   }
   const n = +$('frames').value;
-  const r = state.info.radius * +$('amount').value;
   const path = Array.from({ length: n }, (_, i) => {
+    // Amount may be keyframed: frame i is at i / frame rate.
+    const r = state.info.radius * (valueAt(anim, 'amount', i / KEY_FPS) ?? +$('amount').value);
     const [x, y] = pathPoint($('path').value, i / n);
     return { u: x * r, v: y * r };
   });
@@ -2279,6 +2284,7 @@ function localSettings() {
 const TRACK_NAMES = {
   aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', panX: 'Pan X', panY: 'Pan Y', pivot: 'Pivot depth',
   pointX: 'Focus point X', pointY: 'Focus point Y', spread: 'Spread', spreadSmooth: 'Smoothing', tilt: 'Tilt', tiltRotation: 'Rotation', highlights: 'Highlights',
+  amount: 'Amount', near: 'Near', far: 'Far',
 };
 
 // The camera's tracks by section of the Camera panel (and the Animation
@@ -2290,8 +2296,19 @@ const CAMERA_SECTIONS = [
   { id: 'cam-tilt', name: 'Tilt', tracks: ['tilt', 'tiltRotation'], when: () => $('tilt-on').checked },
   { id: 'cam-perspective', name: 'Perspective', tracks: ['view', 'pivot'] },
   { id: 'cam-bokeh', name: 'Bokeh', tracks: ['highlights'] },
-  { id: 'cam-framing', name: 'Framing', tracks: ['zoom', 'panX', 'panY'] },
 ];
+
+// The Animation panel's tracks, by what is animated: Framing with
+// keyframes, Amount with the viewpoint path, Near and Far with the focus
+// sweep.
+const ANIMATION_SECTIONS = [
+  { id: 'anim-framing', name: 'Framing', tracks: ['zoom', 'panX', 'panY'], mode: 'keyframes' },
+  { id: 'anim-viewpoint', name: 'Viewpoint path', tracks: ['amount'], mode: 'viewpoint' },
+  { id: 'anim-focus', name: 'Focus sweep', tracks: ['near', 'far'], mode: 'focus' },
+];
+// The Animate setting each Animation panel track works with (the others
+// work with Keyframes).
+const TRACK_MODE = { amount: 'viewpoint', near: 'focus', far: 'focus' };
 
 // Every setting of a local adjustment (living filters included) has a
 // track too: 'mask:<id>:<attr>'.
@@ -2325,19 +2342,31 @@ function setMaskAttr(m, a, v) {
 // `parent: 'camera'`; Camera itself has `sections` and no tracks of its
 // own to show), then one for each local adjustment, named after the living
 // filter that made it (or the mask).
-function trackGroups() {
-  const sections = CAMERA_SECTIONS
-    .filter((sec) => !sec.when || sec.when())
-    .map((sec) => ({ id: sec.id, name: sec.name, parent: 'camera', tracks: sec.tracks.filter((k) => k !== 'pivot' || $('pivot-on').checked) }));
-  const groups = [{ id: 'camera', name: 'Camera', sections: true, tracks: sections.flatMap((sec) => sec.tracks) }, ...sections];
-  // `off`: a disabled adjustment, whose keyframes the editor hides.
-  getMasks().forEach((m, i) => groups.push({ id: m.id, name: m.name || maskLabel(m, i), off: !m.on, tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) }));
+// Every group is a section (a sidebar panel: `sections`, with every track
+// of its subsections) or a subsection of one (`parent`). With `mode` (an
+// Animate setting, default the current one) only the groups that animate
+// in that mode: Camera, Local Adjustments and Framing with Keyframes; the
+// viewpoint path's or focus sweep's settings with those.
+function trackGroups(mode = $('anim').value) {
+  const groups = [];
+  const section = (id, name, subs) => {
+    if (!subs.length) return;
+    groups.push({ id, name, sections: true, tracks: subs.filter((g) => !g.off).flatMap((g) => g.tracks) }, ...subs.map((g) => ({ ...g, parent: id })));
+  };
+  if (mode === 'keyframes') {
+    section('camera', 'Camera', CAMERA_SECTIONS
+      .filter((sec) => !sec.when || sec.when())
+      .map((sec) => ({ id: sec.id, name: sec.name, tracks: sec.tracks.filter((k) => k !== 'pivot' || $('pivot-on').checked) })));
+    // `off`: a disabled adjustment, whose keyframes the editor hides.
+    section('local', 'Local Adjustments', getMasks().map((m, i) => ({ id: m.id, name: m.name || maskLabel(m, i), off: !m.on, tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) })));
+  }
+  section('animation', 'Animation', ANIMATION_SECTIONS.filter((sec) => sec.mode === mode).map((sec) => ({ id: sec.id, name: sec.name, tracks: sec.tracks })));
   for (const g of groups) for (const k of g.tracks) if (!anim.tracks[k]) anim.tracks[k] = [];
   return groups;
 }
 
-function tracks() {
-  return trackGroups().filter((g) => !g.sections).flatMap((g) => g.tracks);
+function tracks(mode) {
+  return trackGroups(mode).filter((g) => !g.sections && !g.off).flatMap((g) => g.tracks);
 }
 
 // Keyframe buttons in the sidebar: a ◆ at the right of each setting that
@@ -2349,6 +2378,7 @@ const KEY_CONTROLS = {
   spread: ['spread'], 'spread-smooth': ['spreadSmooth'], tilt: ['tilt'], 'tilt-rotation': ['tiltRotation'],
   viewpoint: ['view'], pivot: ['pivot'], highlights: ['highlights'],
   'frame-zoom': ['zoom'], 'frame-pan-x': ['panX'], 'frame-pan-y': ['panY'],
+  amount: ['amount'], near: ['near'], far: ['far'],
 };
 // Settings of the selected local adjustment: control id -> attribute.
 const KEY_MASK_CONTROLS = {
@@ -2358,8 +2388,11 @@ const KEY_MASK_CONTROLS = {
 };
 
 // The tracks behind a keyframe button (none while they are not shown).
+// The Animate setting a sidebar setting's keyframes work with.
+const keyButtonMode = (id) => (KEY_CONTROLS[id] && TRACK_MODE[KEY_CONTROLS[id][0]]) || 'keyframes';
+
 function keyButtonTracks(id) {
-  const shown = new Set(tracks());
+  const shown = new Set(tracks(keyButtonMode(id)));
   if (KEY_CONTROLS[id]) return KEY_CONTROLS[id].filter((k) => shown.has(k));
   const m = getMasks()[maskSel];
   const k = m && `mask:${m.id}:${KEY_MASK_CONTROLS[id]}`;
@@ -2393,9 +2426,10 @@ function setupKeyButtons() {
     b.onclick = () => {
       // The diamonds are always there: one clicked while the animation is
       // off turns keyframe animation on.
-      if (!keyframesOn()) {
+      const mode = keyButtonMode(id);
+      if (!$('anim-on').checked || $('anim').value !== mode) {
         $('anim-on').checked = true;
-        $('anim').value = 'keyframes';
+        $('anim').value = mode;
         for (const c of ['anim-on', 'anim']) $(c).dispatchEvent(new Event('change'));
       }
       const ks = keyButtonTracks(id);
@@ -2444,12 +2478,13 @@ function updateKeyButtons() {
   }
   const now = playheadTime();
   const eps = 0.5 / KEY_FPS;
-  const animating = keyframesOn();
   for (const nav of navs) {
     const id = nav.dataset.keyFor;
     const ks = keyButtonTracks(id);
     nav.hidden = !ks.length;
     if (!ks.length) continue;
+    // Lit only while its keyframes are in use (animation on, in their mode).
+    const animating = $('anim-on').checked && $('anim').value === keyButtonMode(id);
     const times = animating ? keyTimes(id) : [];
     const keyed = times.length > 0;
     const here = times.some((x) => Math.abs(x - now) < eps);
@@ -2466,7 +2501,7 @@ function updateKeyButtons() {
 
 // Camera starts open, with the sections the keyframes began with (Depth,
 // Perspective, Framing); the others, and each adjustment's group, closed.
-const OPEN_AT_FIRST = new Set(['camera', 'cam-depth', 'cam-perspective', 'cam-framing']);
+const OPEN_AT_FIRST = new Set(['camera', 'cam-depth', 'cam-perspective', 'local', 'animation', 'anim-framing', 'anim-viewpoint', 'anim-focus']);
 const tlGroups = { closed: new Set(), opened: new Set() };
 const groupCollapsed = (id) => (OPEN_AT_FIRST.has(id) ? tlGroups.closed.has(id) : !tlGroups.opened.has(id));
 // Only keyed: the editor shows only the settings that have keyframes (and
@@ -2510,7 +2545,7 @@ function trackName(k) {
 // With the group's name, for tooltips.
 function trackTitle(k) {
   if (!isMaskTrack(k)) return TRACK_NAMES[k];
-  const g = trackGroups().find((x) => x.tracks.includes(k));
+  const g = trackGroups().find((x) => !x.sections && x.tracks.includes(k));
   return `${g ? g.name : 'Mask'} ${trackName(k).toLowerCase()}`;
 }
 let anim = emptyAnimation();
@@ -2522,6 +2557,21 @@ const tlCurves = { on: false, hidden: new Set(), hits: [] };
 
 function keyframesOn() {
   return $('anim-on').checked && $('anim').value === 'keyframes';
+}
+
+// The keyframe editor shows with any animation: with Keyframes every
+// group, with a viewpoint path or focus sweep the settings of that.
+function keyEditorOn() {
+  return $('anim-on').checked;
+}
+
+// The editor's length: the keyframed animation's, or the viewpoint path's
+// or focus sweep's (one frame per step, at the frame rate).
+function animLength() {
+  const mode = $('anim').value;
+  if (mode === 'viewpoint') return Math.max(1, +$('frames').value - 1) / KEY_FPS;
+  if (mode === 'focus') return Math.max(1, +$('steps').value - 1) / KEY_FPS;
+  return anim.length;
 }
 
 // Earlier versions kept a plain list of keyframes, evenly spaced.
@@ -2601,12 +2651,15 @@ function currentValue(k) {
     case 'tilt': return +$('tilt').value;
     case 'tiltRotation': return +$('tilt-rotation').value;
     case 'highlights': return +$('highlights').value;
+    case 'amount': return +$('amount').value;
+    case 'near': return +$('near').value;
+    case 'far': return +$('far').value;
     default: return +$('frame-pan-y').value / 100;
   }
 }
 
 // Camera tracks set straight from a slider.
-const TRACK_SLIDERS = { spread: 'spread', spreadSmooth: 'spread-smooth', tilt: 'tilt', tiltRotation: 'tilt-rotation', highlights: 'highlights' };
+const TRACK_SLIDERS = { spread: 'spread', spreadSmooth: 'spread-smooth', tilt: 'tilt', tiltRotation: 'tilt-rotation', highlights: 'highlights', amount: 'amount', near: 'near', far: 'far' };
 
 // Shows a keyframe's value in the controls (and the picture).
 // Sets the control behind track k to v.
@@ -2641,7 +2694,8 @@ function applyValue(k, v) {
     showFocusPoint();
   } else if (TRACK_SLIDERS[k]) {
     const el = $(TRACK_SLIDERS[k]);
-    el.value = k === 'highlights' ? v : Math.round(v);
+    // Whole numbers for sliders that step in them.
+    el.value = +el.step >= 1 ? Math.round(v) : v;
     showSliderValue(el);
   } else if (k === 'zoom') {
     $('frame-zoom').value = Math.round(v * 100);
@@ -2695,7 +2749,7 @@ function autoKey() {
   const now = currentValues();
   const base = autoKeyBase;
   autoKeyBase = now;
-  if (!$('tl-autokey').checked || !keyframesOn() || state.mode !== 'camera' || state.restoring) return;
+  if (!$('tl-autokey').checked || !keyEditorOn() || state.mode !== 'camera' || state.restoring) return;
   const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
   let added = false;
   for (const k of tracks()) {
@@ -2712,7 +2766,7 @@ $('tl-autokey').onchange = () => {
 
 function playheadTime() {
   if (state.showingFrames && state.frames.length) return (state.drawFrame ?? state.index) / KEY_FPS;
-  return Math.min(anim.length, state.keyTime || 0);
+  return Math.min(animLength(), state.keyTime || 0);
 }
 
 function clearSelection() {
@@ -2745,7 +2799,7 @@ const isSelected = (k, key) => tlSel.has(key) || (keySel && keySel.k === k && Ma
 // all together: kept within the animation and clear of other keyframes.
 function moveKeys(items, dt) {
   const t0s = items.map((i) => i.t0);
-  dt = Math.min(anim.length - Math.max(...t0s), Math.max(-Math.min(...t0s), dt));
+  dt = Math.min(animLength() - Math.max(...t0s), Math.max(-Math.min(...t0s), dt));
   dt = Math.round(dt * KEY_FPS) / KEY_FPS;
   const moving = new Set(items.map((i) => i.key));
   const next = items.map((i) => Math.round((i.t0 + dt) * KEY_FPS) / KEY_FPS);
@@ -2769,7 +2823,7 @@ const fmtTime = (t) => `${t.toFixed(2)} s`;
 const tlView = { start: 0, span: 0 };
 
 function viewWindow() {
-  const len = anim.length;
+  const len = animLength();
   const span = tlView.span > 0 ? Math.min(len, tlView.span) : len;
   const start = Math.min(Math.max(0, tlView.start), len - span);
   tlView.start = start;
@@ -2778,7 +2832,7 @@ function viewWindow() {
 
 // Zooms the timeline by `factor` (> 1 zooms in) around time `at`.
 function zoomTimeline(factor, at) {
-  const len = anim.length;
+  const len = animLength();
   const { start, span } = viewWindow();
   const next = Math.min(len, Math.max(4 / KEY_FPS, span / factor));
   const pivot = at ?? Math.min(start + span, Math.max(start, playheadTime()));
@@ -2801,7 +2855,7 @@ function updatePlayhead() {
     el.style.left = `${(100 * (head - start)) / span}%`;
     el.hidden = head < start - 1e-6 || head > start + span + 1e-6;
   }
-  $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(anim.length)}`;
+  $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(animLength())}`;
   // The sidebar's arrows and diamonds follow the playhead.
   updateKeyButtons();
 }
@@ -2878,7 +2932,7 @@ function groupRow(grp, { pos, inView, head }) {
 
 function renderTimeline() {
   updateKeyButtons();
-  const on = keyframesOn() && state.mode === 'camera';
+  const on = keyEditorOn() && state.mode === 'camera';
   if ($('timeline').hidden === on) {
     $('timeline').hidden = !on;
     // The picture gets less (or more) room.
@@ -2886,7 +2940,7 @@ function renderTimeline() {
   }
   if (!on) return;
   const grid = $('tl-grid');
-  const len = anim.length;
+  const len = animLength();
   const { start, span } = viewWindow();
   const pos = (t) => `${(100 * (t - start)) / span}%`;
   const inView = (t) => t >= start - 1e-6 && t <= start + span + 1e-6;
@@ -2973,7 +3027,7 @@ function renderTimeline() {
 // when a drag starts since the timeline is redrawn as it goes.
 function timeAt(e, r) {
   const { start, span } = viewWindow();
-  const t = Math.min(anim.length, Math.max(0, start + ((e.clientX - r.left) / r.width) * span));
+  const t = Math.min(animLength(), Math.max(0, start + ((e.clientX - r.left) / r.width) * span));
   return Math.round(t * KEY_FPS) / KEY_FPS;
 }
 
@@ -3360,6 +3414,9 @@ const CHANNELS = [
   { k: 'tilt', c: 0, name: 'Tilt', color: '#ff8a65' },
   { k: 'tiltRotation', c: 0, name: 'Rotation', color: '#a1887f' },
   { k: 'highlights', c: 0, name: 'Highlights', color: '#f06292' },
+  { k: 'amount', c: 0, name: 'Amount', color: '#4fc3f7' },
+  { k: 'near', c: 0, name: 'Near', color: '#ba68c8' },
+  { k: 'far', c: 0, name: 'Far', color: '#81c784' },
 ];
 const channelId = (ch) => `${ch.k}.${ch.c}`;
 const MASK_COLORS = ['#ff8a65', '#4db6ac', '#9575cd', '#e0e0e0', '#81c784', '#64b5f6', '#ffd54f', '#f06292', '#a1887f', '#90a4ae', '#ce93d8'];
@@ -3371,9 +3428,13 @@ function channelList() {
     if (grp.off) continue;
     if (grp.sections) continue;
     const shown = shownTracks(grp);
-    if (grp.parent === 'camera') out.push(...CHANNELS.filter((ch) => shown.includes(ch.k)).map((ch) => ({ ...ch, group: grp })));
-    // Colors by place in the group, so a curve keeps its color when others are hidden.
-    else shown.forEach((k) => out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[grp.tracks.indexOf(k) % MASK_COLORS.length], group: grp }));
+    for (const k of shown) {
+      // Named channels (a viewpoint is two); the others colored by place in
+      // the group, so a curve keeps its color when others are hidden.
+      const named = CHANNELS.filter((ch) => ch.k === k);
+      if (named.length) out.push(...named.map((ch) => ({ ...ch, group: grp })));
+      else out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[grp.tracks.indexOf(k) % MASK_COLORS.length], group: grp });
+    }
   }
   return out;
 }
@@ -3426,6 +3487,9 @@ function channelLimits(ch) {
     case 'spreadSmooth': return [0, 100];
     case 'tilt': return [-100, 100];
     case 'tiltRotation': return [-90, 90];
+    case 'amount': return [0.1, 1];
+    case 'near': return [-1.6, 0];
+    case 'far': return [0, 1.6];
     default: return [-1, 1];
   }
 }
@@ -3521,7 +3585,7 @@ function drawCurves() {
     g.lineWidth = 1.5;
     g.beginPath();
     for (let x = 0; x <= cssW + 2; x += 2) {
-      const t = Math.min(anim.length, Math.max(0, start + ((x - PLOT_PAD) / plotW) * span));
+      const t = Math.min(animLength(), Math.max(0, start + ((x - PLOT_PAD) / plotW) * span));
       const y = yOf(channelValue(ch, valueAt(anim, ch.k, t)));
       if (x === 0) g.moveTo(x, y);
       else g.lineTo(x, y);
@@ -4599,7 +4663,14 @@ function animationSettingsChanged() {
     renderCamera();
   }
 }
-for (const id of ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps']) $(id).onchange = animationSettingsChanged;
+for (const id of ['anim', 'path', 'frames', 'steps']) $(id).onchange = animationSettingsChanged;
+// Amount, Near and Far can be keyframed (Auto key records them).
+for (const id of ['amount', 'near', 'far']) {
+  $(id).onchange = () => {
+    autoKey();
+    animationSettingsChanged();
+  };
+}
 
 // Animation > Enabled: playing, scrubbing and video export.
 function showAnimationEnabled() {
