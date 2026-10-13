@@ -5,10 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Illuminator</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
   <header class="toolbar">
-    <h1>Illuminator <span id="version" class="version"></span></h1>
+    <h1>
+      <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polygon points="12,3 19.79,7.5 19.79,16.5 12,21 4.21,16.5 4.21,7.5" />
+      <line x1="12" y1="12" x2="12" y2="3" />
+      <line x1="12" y1="12" x2="19.79" y2="7.5" />
+      <line x1="12" y1="12" x2="19.79" y2="16.5" />
+      <line x1="12" y1="12" x2="12" y2="21" />
+      <line x1="12" y1="12" x2="4.21" y2="16.5" />
+      <line x1="12" y1="12" x2="4.21" y2="7.5" />
+      <circle cx="12" cy="3" r="1.0" fill="currentColor" stroke="none" />
+      <circle cx="19.79" cy="7.5" r="1.0" fill="currentColor" stroke="none" />
+      <circle cx="19.79" cy="16.5" r="1.0" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="21" r="1.0" fill="currentColor" stroke="none" />
+      <circle cx="4.21" cy="16.5" r="1.0" fill="currentColor" stroke="none" />
+      <circle cx="4.21" cy="7.5" r="1.0" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      </svg>
+      Illuminator <span id="version" class="version"></span>
+    </h1>
     <button id="open-btn" class="primary">Open…</button>
     <button id="camera-btn">Import from camera…</button>
     <button id="sample-btn">Synthetic sample</button>

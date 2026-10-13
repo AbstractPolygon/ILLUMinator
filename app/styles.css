@@ -53,7 +53,8 @@ select { background: #262a31; border: 1px solid var(--line); border-radius: 6px;
   background: var(--panel);
   flex-wrap: wrap;
 }
-.toolbar h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: 0.02em; }
+.toolbar h1 { font-size: 16px; margin: 0 12px 0 0; letter-spacing: 0.02em; display: flex; align-items: center; gap: 6px; }
+.toolbar h1 .logo { width: 22px; height: 22px; flex: none; }
 #camera-status.connected { color: var(--accent); }
 
 main { flex: 1; display: flex; min-height: 0; }
