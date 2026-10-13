@@ -1,6 +1,6 @@
 # ILLUMinator
 
-Open, refocus and animate Lytro ILLUM (and first generation) light field photos. Runs as a desktop app (Electron, with USB camera import) or in a browser.
+Open, refocus and animate Lytro ILLUM light field photos. Runs as a desktop app (Electron, with USB camera import) or in a browser.
 
 ```
 npm install
