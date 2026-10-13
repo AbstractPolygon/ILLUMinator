@@ -611,6 +611,8 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-key.tl-sum { background: var(--muted); }
 .tl-box { position: absolute; border: 1px dashed rgba(200, 205, 213, 0.7); background: rgba(200, 205, 213, 0.08); pointer-events: none; z-index: 3; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid var(--live); pointer-events: none; }
+/* A grip either side of the line: drag the playhead from any row. */
+.tl-playhead::before { content: ''; position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; pointer-events: auto; cursor: ew-resize; }
 .tl-curve { flex: none; }
 .tl-curve-canvas { display: block; width: 150px; height: 150px; touch-action: none; cursor: crosshair; }
 

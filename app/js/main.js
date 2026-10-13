@@ -2893,7 +2893,8 @@ function groupRow(grp, { pos, inView, head }) {
   const label = groupHeading(grp);
   const track = Object.assign(document.createElement('div'), { className: 'tl-track tl-summary' });
   track.onpointerdown = (e) => {
-    if (e.target === track) boxSelectKeys(e, track);
+    if (e.target.classList.contains('tl-playhead')) seekTimeline(e, track);
+    else if (e.target === track) boxSelectKeys(e, track);
   };
   const times = new Map();
   for (const k of grp.tracks) {
@@ -2981,7 +2982,8 @@ function renderTimeline() {
     label.append(add, document.createTextNode(trackName(k)));
     const track = Object.assign(document.createElement('div'), { className: 'tl-track' });
     track.onpointerdown = (e) => {
-      if (e.target === track) boxSelectKeys(e, track);
+      if (e.target.classList.contains('tl-playhead')) seekTimeline(e, track);
+      else if (e.target === track) boxSelectKeys(e, track);
     };
     for (const key of anim.tracks[k]) {
       if (!inView(key.t)) continue;
