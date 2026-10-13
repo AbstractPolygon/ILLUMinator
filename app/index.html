@@ -267,7 +267,7 @@
           </select>
         </label>
         <div class="stack">
-          <button id="fullres-btn" class="wide" aria-pressed="false" title="Full resolution on/off (F)">Full resolution</button>
+          <label class="check" title="Full resolution on/off (F)"><input id="fullres-on" type="checkbox"> Full resolution</label>
           <div id="fullres-panel" hidden>
             <label>Scale
               <select id="still-scale">
@@ -276,9 +276,10 @@
                 <option value="4">4× lens grid</option>
               </select>
             </label>
+            <button id="render-btn" class="wide" disabled>Render</button>
           </div>
           <div class="row export">
-            <button id="png-btn">Save PNG</button>
+            <button id="png-btn" disabled>Save PNG</button>
             <button id="webm-btn">Export video</button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 {
   "name": "illuminator",
   "productName": "Illuminator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Open, refocus and animate Lytro ILLUM and first generation light field photographs",
   "license": "MIT",
   "private": true,

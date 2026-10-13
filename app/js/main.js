@@ -27,7 +27,8 @@ const state = {
   fps: 24,
   lastTick: 0,
   still: null, // ImageData of the full resolution render
-  fullRes: false,
+  fullResMode: false, // the Full resolution checkbox
+  fullRes: false, // a full resolution still is shown (or rendering)
   depthShown: false,
   library: [],
   current: null,
@@ -370,6 +371,7 @@ async function renderCamera() {
 function refresh() {
   if (!state.info) return;
   if (state.mode === 'lenslets') renderLenslets();
+  else if (state.fullRes && state.still) draw(state.still);
   else if (state.fullRes) renderStill();
   else if (state.depthShown) renderDepth();
   else if (state.showingFrames) showFrame(state.index);
@@ -553,15 +555,29 @@ async function renderStill() {
   }
 }
 
-// Full resolution is a toggle over the camera view: it re-renders what the
-// camera shows (viewpoint, focus, aperture, depth of field) from every
-// sensor pixel.
+// Full resolution re-renders what the camera shows (viewpoint, focus,
+// aperture, depth of field) from every sensor pixel. The checkbox turns the
+// mode on (Scale and Render appear); Render makes the still. Any change to
+// the picture returns to the live view until Render is pressed again.
+function setFullResMode(on) {
+  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) on = false;
+  state.fullResMode = on;
+  $('fullres-on').checked = on;
+  $('fullres-panel').hidden = !on;
+  $('render-btn').disabled = !on;
+  if (!on) setFullRes(false);
+}
+
+function renderFullRes() {
+  if (!state.fullResMode) return;
+  if (state.fullRes) renderStill();
+  else setFullRes(true);
+}
+
 function setFullRes(on, { restore = true } = {}) {
-  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) return;
+  if (on && !(state.fullResMode && state.info && state.info.hasRaw && state.mode === 'camera')) return;
   if (on === state.fullRes) return;
   state.fullRes = on;
-  $('fullres-btn').setAttribute('aria-pressed', String(on));
-  $('fullres-panel').hidden = !on;
   if (on) {
     setPlaying(false);
     state.showingFrames = false;
@@ -650,12 +666,14 @@ function setMode(mode) {
   // Focus stacks bring their own blur; the depth effects need a depth map.
   const depthTools = hasDepth() && camera;
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
-  $('fullres-btn').disabled = !raw || !camera;
+  $('fullres-on').disabled = !raw || !camera;
+  if (!raw || !camera) setFullResMode(false);
   for (const id of ['depth-btn', 'spread-show']) $(id).disabled = !depthTools;
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
+  $('png-btn').disabled = !state.info;
   if (!state.info) return;
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
@@ -940,9 +958,8 @@ canvas.addEventListener('dblclick', () => {
 function cameraChanged({ final }) {
   invalidateAnimation();
   updateSpreadOverlay();
-  if (state.fullRes) {
-    if (final) renderStill();
-  } else if (!state.depthShown) {
+  if (state.fullRes) setFullRes(false, { restore: false });
+  if (!state.depthShown) {
     backToCamera();
     renderCamera();
   }
@@ -1149,9 +1166,10 @@ $('scrub').oninput = () => {
 };
 $('png-btn').onclick = savePng;
 $('webm-btn').onclick = exportVideo;
-$('fullres-btn').onclick = () => setFullRes(!state.fullRes);
+$('fullres-on').onchange = () => setFullResMode($('fullres-on').checked);
+$('render-btn').onclick = renderFullRes;
 $('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
-$('still-scale').onchange = () => state.fullRes && renderStill();
+$('still-scale').onchange = () => setFullRes(false);
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
 for (const id of ['lens-x', 'lens-y']) $(id).oninput = () => renderLenslets();
@@ -1160,6 +1178,7 @@ async function updateGrid(args) {
   const info = await engine.request('setGrid', args, { onProgress: showProgress });
   hideProgress();
   state.info = { ...state.info, ...info };
+  if (state.fullRes) setFullRes(false, { restore: false });
   state.still = null;
   invalidateAnimation();
   renderInfo();
@@ -1221,6 +1240,8 @@ async function applySettings() {
   if (info) state.info = { ...state.info, ...info };
   showAutoFringe();
   showResolutionSizes();
+  // Back to the live view: Render makes a new full resolution still.
+  if (state.fullRes) setFullRes(false, { restore: false });
   state.still = null;
   invalidateAnimation();
   if (state.showingFrames) backToCamera();
@@ -1326,7 +1347,7 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === '-' || e.key === '_') {
     zoomBy(1 / 1.5);
   } else if (e.key === 'f' || e.key === 'F') {
-    setFullRes(!state.fullRes);
+    setFullResMode(!state.fullResMode);
   } else if (e.key === 'd' || e.key === 'D') {
     setDepthShown(!state.depthShown);
   } else if (e.key === '0') {
