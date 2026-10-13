@@ -449,3 +449,6 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .crop-box [data-h="s"] { left: 50%; top: 100%; cursor: ns-resize; }
 .crop-box [data-h="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
 .crop-box [data-h="w"] { left: 0; top: 50%; cursor: ew-resize; }
+
+/* Tone curve graph. */
+.curve-canvas { display: block; width: 100%; aspect-ratio: 1; max-width: 100%; margin: 4px 0 8px; touch-action: none; cursor: crosshair; }

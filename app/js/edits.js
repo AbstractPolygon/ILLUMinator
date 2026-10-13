@@ -21,7 +21,8 @@ const FRINGES = ['purple', 'green', 'red', 'blue'];
 // spread, full resolution) are not edits and are left out.
 export const EDIT_GROUPS = {
   process: ['awb', 'wb-temperature', 'wb-tint', 'ev', 'tone-contrast', 'tone-highlights', 'tone-shadows', 'tone-whites',
-    'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`)],
+    'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`),
+    'curve-points', 'curve-highlights', 'curve-lights', 'curve-darks', 'curve-shadows'],
   camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'highlights'],
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
   defringe: ['fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
@@ -32,6 +33,7 @@ export const EDIT_GROUPS = {
 
 function readValue(el) {
   if (el.type === 'checkbox') return el.checked;
+  if ('text' in el.dataset) return el.value;
   if (el.tagName === 'SELECT') return el.value;
   return Number(el.value);
 }

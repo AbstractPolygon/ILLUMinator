@@ -39,6 +39,8 @@ export function whiteBalanceGains(kelvin, asShot, tint = 0) {
   return [r / y, g / y, b / y];
 }
 
+import { curveTable, curveAt } from './curve.js';
+
 export const DEFAULT_KELVIN = 5500;
 
 // The per-pixel adjustments, or null when they are all at zero.
@@ -53,9 +55,11 @@ export function makeLook(settings = {}) {
     blacks: tone.blacks || 0,
     vibrance: sat.vibrance || 0,
     hues: HUES.map((h) => sat[h] || 0),
+    // Tone curve table (core/curve.js), or null.
+    curve: settings.curve ? curveTable(settings.curve) : null,
   };
   const active = look.contrast || look.highlights || look.shadows || look.whites || look.blacks
-    || look.vibrance || look.hues.some((v) => v);
+    || look.vibrance || look.hues.some((v) => v) || look.curve;
   return active ? look : null;
 }
 
@@ -76,6 +80,7 @@ export function toneCurve(x, look) {
   x += look.highlights * 0.85 * c * c * (1 - c);
   // Contrast blends toward (or away from) an S curve.
   x += look.contrast * 0.8 * (smooth(x) - (x < 0 ? 0 : x > 1 ? 1 : x));
+  if (look.curve) x = curveAt(look.curve, x);
   return x < 0 ? 0 : x;
 }
 

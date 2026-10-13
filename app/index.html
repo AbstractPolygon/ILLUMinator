@@ -196,6 +196,24 @@
           </label>
         </details>
         <details class="subpanel">
+          <summary><h3>Tone Curve</h3></summary>
+          <canvas id="curve-canvas" class="curve-canvas" width="240" height="240" role="img" aria-label="Tone curve" title="Click to add a point, drag to move it, double-click to remove it"></canvas>
+          <label>Highlights <output data-for="curve-highlights" for="curve-highlights">0</output>
+            <input id="curve-highlights" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Lights <output data-for="curve-lights" for="curve-lights">0</output>
+            <input id="curve-lights" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Darks <output data-for="curve-darks" for="curve-darks">0</output>
+            <input id="curve-darks" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Shadows <output data-for="curve-shadows" for="curve-shadows">0</output>
+            <input id="curve-shadows" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <button id="curve-reset" type="button" class="wide">Reset curve</button>
+          <input id="curve-points" type="hidden" value="0,0;1,1" data-text>
+        </details>
+        <details class="subpanel">
           <summary><h3>Color</h3></summary>
           <label>Saturation <output for="saturation" data-for="saturation">0</output>
             <input id="saturation" type="range" min="-100" max="100" step="1" value="0" data-default="0">

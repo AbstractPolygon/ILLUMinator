@@ -440,6 +440,8 @@ uniform int uLookOn;
 uniform vec4 uTone;        // contrast, highlights, shadows, whites
 uniform vec2 uTone2;       // blacks, vibrance
 uniform float uHues[6];    // red, yellow, green, cyan, blue, magenta
+uniform int uCurveOn;
+uniform float uCurve[65];  // tone curve table (core/curve.js)
 out vec4 outColor;
 
 vec3 colorAt(ivec2 q) { return uMatrix * texelFetch(uSrc, q, 0).rgb; }
@@ -465,6 +467,15 @@ float toneCurve(float x) {
   x += uTone.z * 0.85 * c * (1.0 - c) * (1.0 - c);
   x += uTone.y * 0.85 * c * c * (1.0 - c);
   x += uTone.x * 0.8 * (smoothstep(0.0, 1.0, x) - clamp(x, 0.0, 1.0));
+  if (uCurveOn == 1) {
+    if (x <= 0.0) x = uCurve[0] + x;
+    else if (x >= 1.0) x = uCurve[64] + (x - 1.0);
+    else {
+      float f = x * 64.0;
+      int i = int(floor(f));
+      x = mix(uCurve[i], uCurve[i + 1], f - float(i));
+    }
+  }
   return max(x, 0.0);
 }
 
@@ -1257,6 +1268,8 @@ export class GpuRenderer {
       gl.uniform4f(P.u.uTone, look.contrast, look.highlights, look.shadows, look.whites);
       gl.uniform2f(P.u.uTone2, look.blacks, look.vibrance);
       gl.uniform1fv(P.u.uHues, Float32Array.from(look.hues));
+      gl.uniform1i(P.u.uCurveOn, look.curve ? 1 : 0);
+      if (look.curve) gl.uniform1fv(P.u.uCurve, look.curve);
     }
     this.draw();
     return this.canvas.transferToImageBitmap();

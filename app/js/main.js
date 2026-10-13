@@ -7,6 +7,8 @@ import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar,
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
+import { parsePoints, formatPoints } from './core/curve.js';
+import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1832,6 +1834,34 @@ document.addEventListener('keydown', (e) => {
   }
 }, true);
 
+// ---------------------------------------------------------------- tone curve
+
+const CURVE_REGIONS = ['shadows', 'darks', 'lights', 'highlights'];
+function curveRegions() {
+  return CURVE_REGIONS.map((k) => $(`curve-${k}`).value / 100);
+}
+
+const curve = curveEditor($('curve-canvas'), {
+  getPoints: () => parsePoints($('curve-points').value),
+  getRegions: curveRegions,
+  setPoints: (pts, final) => {
+    $('curve-points').value = formatPoints(pts);
+    applySettingsSoon();
+    if (final) scheduleSave();
+  },
+});
+for (const k of CURVE_REGIONS) $(`curve-${k}`).addEventListener('input', () => curve.draw());
+$('curve-reset').onclick = () => {
+  $('curve-points').value = '0,0;1,1';
+  for (const k of CURVE_REGIONS) {
+    $(`curve-${k}`).value = 0;
+    showSliderValue($(`curve-${k}`));
+  }
+  curve.draw();
+  applySettingsSoon();
+  scheduleSave();
+};
+
 // ---------------------------------------------------------------- white balance eyedropper
 
 // Click the eyedropper, then something in the photo that should be neutral:
@@ -2100,6 +2130,7 @@ async function applySettings() {
     autoWb: $('awb').checked,
     wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
     tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
+    curve: { points: parsePoints($('curve-points').value), regions: curveRegions() },
     mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
     depthSmoothing: $('depth-smooth').value / 100,
     details: {
@@ -2200,6 +2231,7 @@ async function restoreEdits(info) {
   try {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
     $('pivot').disabled = !$('pivot-on').checked;
+    curve.draw();
     resetTemperature(info, { keep: !!saved });
     state.camera = { ...view };
     state.focusPoint = { ...focusPoint };
