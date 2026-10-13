@@ -19,7 +19,7 @@ Below the picture: **Stop** (back to the start), **Pause**, **Play** and **Loop*
 With a photo open, every setting that can be animated has ◀ ◆ ▶ at its right in the sidebar, in a separate column (as in DaVinci Resolve's Inspector):
 
 - **◆** turns the setting's animation on or off. *Hollow:* not animated; clicking it adds a keyframe at the playhead, and turns on *Animate: Keyframes* if needed. *Filled:* animated; clicking it removes all of that setting's keyframes. *Blue:* a keyframe of the setting sits at the playhead.
-- **◀ ▶** appear while the setting is animated, and move the playhead to its previous and next keyframe.
+- **◀ ▶** move the playhead to the setting's previous and next keyframe. Each shows only when there is a keyframe that way.
 
 They are on every Camera setting (the *Focus Point* row covers the focus and the focus point together, the *Viewpoint* row the viewpoint), on *Zoom*, *Pan X* and *Pan Y*, and on every setting of the selected local adjustment.
 

@@ -215,7 +215,8 @@ label output { float: right; color: var(--muted); font-variant-numeric: tabular-
 .key-nav button:hover:not(:disabled) { color: var(--text); }
 .key-nav .key-step { visibility: hidden; width: 11px; }
 .key-nav.on .key-step { visibility: visible; }
-.key-nav .key-step:disabled { opacity: 0.3; }
+/* An arrow shows only when there is a keyframe that way. */
+.key-nav .key-step:disabled { visibility: hidden; }
 .key-diamond {
   width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg);
   border: 1.5px solid currentColor; background: transparent;

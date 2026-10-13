@@ -2801,6 +2801,8 @@ function updatePlayhead() {
     el.hidden = head < start - 1e-6 || head > start + span + 1e-6;
   }
   $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(anim.length)}`;
+  // The sidebar's arrows and diamonds follow the playhead.
+  updateKeyButtons();
 }
 
 const CHEVRON_RIGHT = '<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
