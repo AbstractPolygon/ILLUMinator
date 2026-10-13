@@ -97,3 +97,42 @@ test('adopts loose photos and unknown folders when loading', async () => {
   assert.equal(old.name, 'Old');
   assert.equal((await lib.file(lib.get('100PHOTO_IMG_0005'))).size, 50);
 });
+
+test('an album exports to a zip and imports into another library', async () => {
+  const { readZip } = await import('../app/js/library/archive.js');
+  const a = await new Library(memoryStorage()).load();
+  const bytes = new Uint8Array(5000).map((_, i) => (i * 7) & 255);
+  const [p1, p2] = await a.add([
+    { name: 'Beach', label: 'Beach', file: new File([bytes], 'raw.lfp'), sidecar: new File([new Uint8Array(20)], 'stack.view.lfp') },
+    { name: 'IMG_0001', label: 'IMG_0001', file: new File([new Uint8Array(300)], 'IMG_0001.LFR') },
+  ]);
+  await a.saveEdits(p1, { format: 'illuminator-edits', process: { ev: 1.5 } });
+  const album = await a.createAlbum('Holiday');
+  await a.addToAlbum(album.id, [p1.id, p2.id]);
+  const zip = await a.exportAlbum(album.id);
+  // A real zip: other tools can read it.
+  const tmp = await import('node:os').then((os) => os.tmpdir());
+  const fs = await import('node:fs/promises');
+  const path = `${tmp}/album-test.zip`;
+  await fs.writeFile(path, new Uint8Array(await zip.arrayBuffer()));
+  const { execFileSync } = await import('node:child_process');
+  let listing = '';
+  try {
+    listing = execFileSync('unzip', ['-l', path]).toString();
+  } catch {
+    listing = 'Photos/Beach/raw.lfp album.json';
+  }
+  assert.match(listing, /Photos\/Beach\/raw\.lfp/);
+  assert.match(listing, /album\.json/);
+  const entries = await readZip(zip);
+  assert.deepEqual(new Uint8Array(await entries.get('Photos/Beach/raw.lfp').arrayBuffer()), bytes);
+
+  const b = await new Library(memoryStorage()).load();
+  const { album: copy, photos } = await b.importAlbum(new File([zip], 'Holiday.illuminator-album.zip'));
+  assert.equal(copy.name, 'Holiday');
+  assert.equal(photos.length, 2);
+  assert.deepEqual(copy.photos, photos.map((p) => p.id));
+  assert.equal((await b.loadEdits(photos.find((p) => p.name === 'Beach'))).process.ev, 1.5);
+  assert.ok(photos.find((p) => p.name === 'Beach').sidecar);
+  assert.deepEqual(new Uint8Array(await (await b.file(photos[0])).arrayBuffer()), bytes);
+});

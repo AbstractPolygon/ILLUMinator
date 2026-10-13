@@ -10,6 +10,7 @@ import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
 import { parseCube, encodeLut, decodeLut } from './core/lut.js';
+import { ARCHIVE_SUFFIX } from './library/archive.js';
 import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
@@ -486,6 +487,10 @@ function albumMenu(id, li, button) {
         if (name) await lib.renameAlbum(id, name);
         renderLibrary();
       }),
+    },
+    {
+      label: 'Export album…',
+      action: () => exportAlbum(id),
     },
     {
       label: 'Delete album…',
@@ -4037,9 +4042,53 @@ $('camera-select-all').onclick = () => {
 
 // ---------------------------------------------------------------- wiring
 
+// An album as an archive (library/archive.js), to add to another library:
+// the browser version's to the desktop app's, say.
+async function exportAlbum(id) {
+  const album = lib.album(id);
+  if (!album) return;
+  if (!album.photos.length) {
+    showNotice(`“${album.name}” has no photos to export.`);
+    startNoticeTimer();
+    return;
+  }
+  try {
+    showProgress(`Exporting “${album.name}”`, 0);
+    const blob = await lib.exportAlbum(id, { onProgress: (p) => showProgress(`Exporting “${album.name}”`, p) });
+    download(blob, `${album.name.replace(/[\\/:*?"<>|]+/g, '_') || 'Album'}${ARCHIVE_SUFFIX}`);
+  } catch (err) {
+    showError(err);
+  } finally {
+    hideProgress();
+  }
+}
+
+// An exported album: its photos join the library and the album is made
+// again (or joined, if one has its name).
+async function importAlbumArchive(file) {
+  await libReady;
+  try {
+    const { album, photos } = await lib.importAlbum(file, {
+      onProgress: (e, i, n) => {
+        if (e) showProgress(`Importing ${e.name} (${i + 1} of ${n})`, i / n);
+      },
+    });
+    state.album = album.id;
+    showNotice(`Imported the album “${album.name}”: ${photos.length} photo${photos.length === 1 ? '' : 's'}.`);
+    startNoticeTimer();
+  } catch (err) {
+    showError(err);
+  } finally {
+    hideProgress();
+    renderLibrary();
+  }
+}
+
 // Picked or dropped files are added to the library; Lytro Desktop edits
-// picked with a photo go with it (scan.js).
+// picked with a photo go with it (scan.js). Album archives are imported as
+// albums.
 async function openPicked(files) {
+  for (const f of files.filter((f) => /\.zip$/i.test(f.name))) await importAlbumArchive(f);
   const entries = groupPhotos(files.filter((f) => isLightFieldName(f.name)).map((f) => ({ path: f.name, file: f })));
   const added = await importPhotos(entries);
   if (added.length) openItem(added[0]);

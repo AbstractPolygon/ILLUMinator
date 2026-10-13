@@ -19,6 +19,7 @@
 // and photos whose folder has gone are dropped.
 
 import { groupPhotos, stem } from './scan.js';
+import { writeZip, readZip, ARCHIVE_FORMAT, ARCHIVE_VERSION } from './archive.js';
 
 export const LIBRARY_FORMAT = 'illuminator-library';
 export const LIBRARY_VERSION = 1;
@@ -269,6 +270,59 @@ export class Library {
     if (!a) return;
     a.photos = a.photos.filter((p) => !photoIds.includes(p));
     await this.save();
+  }
+
+  // ------------------------------------------------------------ archives
+
+  // An album as a zip (archive.js): its photos with their edits, Lytro
+  // Desktop edits and thumbnails. onProgress(fraction).
+  async exportAlbum(id, { onProgress = () => {} } = {}) {
+    const album = this.album(id);
+    if (!album) throw new Error('No such album');
+    const asBlob = async (f) => (f instanceof Blob ? f : new Blob([await f.arrayBuffer()]));
+    const files = [];
+    const photos = [];
+    for (const p of this.list(id)) {
+      const dir = `${PHOTOS}/${p.id}`;
+      const file = await this.file(p);
+      if (!file) continue;
+      files.push({ path: `${dir}/${p.file}`, data: await asBlob(file) });
+      const sidecar = await this.sidecar(p);
+      if (sidecar) files.push({ path: `${dir}/${p.sidecar}`, data: await asBlob(sidecar) });
+      const thumb = await this.thumbnail(p).catch(() => null);
+      if (thumb) files.push({ path: `${dir}/${p.thumb}`, data: await asBlob(thumb) });
+      const edits = await this.store.readText(`${dir}/${EDITS_FILE}`).catch(() => null);
+      if (edits) files.push({ path: `${dir}/${EDITS_FILE}`, data: edits });
+      photos.push({ folder: p.id, name: p.name, file: p.file, sidecar: sidecar ? p.sidecar : null, thumb: thumb ? p.thumb : null, edits: !!edits });
+    }
+    const index = { format: ARCHIVE_FORMAT, version: ARCHIVE_VERSION, name: album.name, exported: new Date().toISOString(), photos };
+    return writeZip([{ path: 'album.json', data: JSON.stringify(index, null, 2) }, ...files], { onProgress });
+  }
+
+  // Adds an exported album (a zip) to this library: its photos (one already
+  // here is not copied twice), their edits (unless the photo here has some)
+  // and the album, joined to one of the same name if there is one.
+  // onProgress as for add(). Returns { album, photos }.
+  async importAlbum(src, { onProgress = () => {} } = {}) {
+    const entries = await readZip(src);
+    const indexFile = entries.get('album.json');
+    if (!indexFile) throw new Error('Not an ILLUMinator album (album.json is missing)');
+    const index = JSON.parse(new TextDecoder().decode(await indexFile.arrayBuffer()));
+    if (index.format !== ARCHIVE_FORMAT) throw new Error('Not an ILLUMinator album');
+    const at = (folder, name) => (name ? entries.get(`${PHOTOS}/${folder}/${name}`) || null : null);
+    const items = (index.photos || [])
+      .map((p) => ({ meta: p, entry: { name: p.name, label: p.folder, file: at(p.folder, p.file), sidecar: at(p.folder, p.sidecar), thumb: at(p.folder, p.thumb) } }))
+      .filter((i) => i.entry.file);
+    const photos = await this.add(items.map((i) => i.entry), { onProgress });
+    for (let i = 0; i < photos.length; i++) {
+      const edits = items[i].meta.edits ? at(items[i].meta.folder, EDITS_FILE) : null;
+      if (!edits || (await this.loadEdits(photos[i]))) continue;
+      await this.store.writeText(`${PHOTOS}/${photos[i].id}/${EDITS_FILE}`, new TextDecoder().decode(await edits.arrayBuffer()));
+    }
+    const name = String(index.name || 'Imported album');
+    const album = this.albums.find((a) => a.name === name) || (await this.createAlbum(name));
+    await this.addToAlbum(album.id, photos.map((p) => p.id));
+    return { album, photos };
   }
 
   // Photos in an album (or all photos when id is null), newest first.

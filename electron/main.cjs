@@ -150,7 +150,7 @@ function registerIpc() {
     const res = await dialog.showOpenDialog(win, {
       title: 'Open light field photos',
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Lytro photos', extensions: ['lfr', 'lfp', 'raw', 'LFR', 'LFP', 'RAW'] }],
+      filters: [{ name: 'Lytro photos and album archives', extensions: ['lfr', 'lfp', 'raw', 'zip', 'LFR', 'LFP', 'RAW', 'ZIP'] }],
     });
     if (res.canceled) return [];
     res.filePaths.forEach(allow);
