@@ -1,0 +1,42 @@
+# Getting Started
+
+## Install
+
+**Desktop app.** Run it from source (Node.js 20 or newer):
+
+```
+git clone https://github.com/AbstractPolygon/ILLUMinator.git
+cd ILLUMinator
+npm install
+npm start
+```
+
+`npm run dist` builds an installer for your system (Windows, macOS, Linux).
+
+**Browser.** Serve the `app` folder and open it; nothing to install for the people who use it.
+
+```
+npm run web            # http://localhost:8080
+npm run build:web      # a static copy in dist/web, for any web server
+```
+
+ILLUMinator needs a browser with WebGL 2 for fast rendering (any current Chrome, Edge, Firefox or Safari). Without it, everything still works on the CPU, more slowly.
+
+## Open a photo
+
+- **Open…** in the top bar, or drag `.LFR` / `.LFP` files anywhere onto the window.
+- **Import from camera…** for photos still on the camera ([[Importing]]).
+- **Settings (gear) → Import Lytro Desktop library…** for your old Lytro Desktop library.
+
+Every photo you open is added to your library, so it is there next time ([[Library and Albums]]).
+
+## The window
+
+- **Left sidebar:** the library: *All photos*, your albums and the photos in the selected album. Choosing an album shows its photos as a grid of thumbnails in the middle; click a photo to open it.
+- **Middle:** the picture. Click to focus on that spot; drag to move the viewpoint. Below it, *Camera* / *Lenslets* switch between the picture and the raw microlens image, and the animation and zoom controls.
+- **Right sidebar:** the editing panels ([[Editing]]). Click a title to open or close it.
+- **Top bar, right:** About (ⓘ) and Settings (gear).
+
+## Your edits are saved
+
+Every change is saved with the photo as you make it; there is no Save button. Open the photo again and it looks as you left it. *Reset* buttons and double-clicking a slider put things back.
