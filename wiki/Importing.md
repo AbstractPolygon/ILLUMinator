@@ -16,11 +16,11 @@
 
 Every picture in it (and in all its subfolders) is added to the library, in a new album named after the folder. The same works for any folder of Lytro photos, such as a copy of a camera card.
 
-The edits you made in Lytro Desktop come along: when a picture is first opened, ILLUMinator applies them and says so in a note over the picture. Edits it does not support yet are listed in that note. Once you change something, ILLUMinator's own edits are saved and used from then on.
+The edits you made in Lytro Desktop come along: when a picture is first opened, ILLUMinator applies them and says so in a note over the picture. Edits it does not support yet are listed in that note. Once you change something, ILLUMinator saves the edits in its format and uses them from then on.
 
 What carries over from Lytro Desktop: focus, aperture, focus spread, tilt, viewpoint, perspective pivot, exposure, white balance, contrast, highlights, shadows, whites, blacks, saturation, vibrance, per-color saturation, sharpening (amount, radius, detail, edge masking), noise reduction, defringe, reduce flare, crop, straighten and orientation.
 
-Lytro Desktop's albums are kept in its own database and are not imported; the album named after the folder holds everything instead.
+Lytro Desktop keeps its albums in a database ILLUMinator does not read, so they are not imported; the album named after the folder holds everything instead.
 
 ## From files
 

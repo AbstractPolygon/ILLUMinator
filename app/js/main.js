@@ -15,7 +15,7 @@ import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, se
 // (the Frame rate setting).
 let KEY_FPS = DEFAULT_FPS;
 import { curveEditor } from './ui/curve-editor.js';
-import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
+import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, flipVerticalOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -1761,6 +1761,14 @@ $('flip-h').onclick = () => {
   if (!canRender()) return;
   $('orientation').value = flipOrientation(+$('orientation').value || 1);
   const flip = (c) => ({ ...c, x: 1 - c.x - c.w });
+  if (cropState.editing) cropState.rect = flip(cropState.rect);
+  else setCropValues(flip(cropValues()));
+  geometryChanged();
+};
+$('flip-v').onclick = () => {
+  if (!canRender()) return;
+  $('orientation').value = flipVerticalOrientation(+$('orientation').value || 1);
+  const flip = (c) => ({ ...c, y: 1 - c.y - c.h });
   if (cropState.editing) cropState.rect = flip(cropState.rect);
   else setCropValues(flip(cropValues()));
   geometryChanged();

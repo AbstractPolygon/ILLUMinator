@@ -69,3 +69,13 @@ test('shift and zoom move the picture before it is cropped', () => {
   // The middle of the picture moves right by 10% of the width, zoomed.
   nearPt(apply(g.matrix, 300, 200), [300 + 60 * 1.25, 200]);
 });
+
+test('flipping vertically mirrors top to bottom and undoes itself', async () => {
+  const { flipVerticalOrientation, flipOrientation, rotateOrientation } = await import('../app/js/core/geometry.js');
+  for (let code = 1; code <= 8; code++) {
+    assert.equal(flipVerticalOrientation(flipVerticalOrientation(code)), code);
+    // A vertical flip is a horizontal flip and a half turn.
+    assert.equal(flipVerticalOrientation(code), rotateOrientation(rotateOrientation(flipOrientation(code), 1), 1));
+  }
+  assert.equal(flipVerticalOrientation(1), 4);
+});

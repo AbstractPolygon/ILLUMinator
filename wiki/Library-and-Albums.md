@@ -2,7 +2,7 @@
 
 ## The library
 
-Every photo you open, drop or import is copied into the library, each in a folder of its own with its edits next to it. Your original files are never changed.
+Every photo you open, drop or import is copied into the library, each in a separate folder with its edits next to it. Your original files are never changed.
 
 - **Desktop app:** the library is a folder, `Pictures/ILLUMinator` by default. Change it in **Settings → Library location → Choose folder…**.
 - **Browser:** the library is kept in the browser's private storage for the site. If the browser cannot store files (some private windows), photos are kept until the page is closed, and the sidebar says so.

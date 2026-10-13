@@ -69,6 +69,11 @@ export function flipOrientation(code) {
   return orientationCode(!flip, -turns);
 }
 
+// Mirroring the shown picture top to bottom: left to right, then a half turn.
+export function flipVerticalOrientation(code) {
+  return rotateOrientation(rotateOrientation(flipOrientation(code), 1), 1);
+}
+
 // How much a w x h picture turned by `deg` must shrink so the turned
 // picture covers a frame of the same shape.
 export function straightenScale(w, h, deg) {
