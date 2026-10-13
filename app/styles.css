@@ -349,6 +349,8 @@ button.wide { display: block; width: 100%; }
 #about-dialog .credits h3 { margin: 4px 0 4px; font-size: 13px; }
 #about-dialog .credits h3.credit-extra { margin-top: 20px; }
 #about-dialog .about-copyright { margin-top: 6px; }
+#about-dialog .about-copyright a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
+#about-dialog .about-copyright a:hover { color: var(--text); text-decoration-color: var(--text); }
 #about-dialog .about-last { margin-bottom: 18px; }
 /* Same as the top bar: the logo left of the app name. */
 #about-dialog h2 { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: bold; letter-spacing: 0.02em; color: var(--text); }
