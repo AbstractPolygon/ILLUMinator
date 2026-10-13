@@ -23,6 +23,9 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     privateMetadata: picture ? picture.privateMetadata : null,
     stacks: picture ? picture.stacks : [],
     frameDepth: picture ? picture.frameDepth : null,
+    // Stable id for the photo: the sha1 of its raw data (recorded in the
+    // file), or of its table of contents for processed files.
+    photoId: picture ? picture.rawRef || (picture.container.sections.find((s) => s.type === 'LFM') || {}).sha1 || null : null,
     thumbnails: picture ? picture.thumbnails : [],
     readSection: picture ? picture.container.readSection : async () => null,
     cam: null,

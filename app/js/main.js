@@ -1,4 +1,5 @@
 import { VERSION } from './version.js';
+import { readEdits, writeEdits, editsStore } from './edits.js';
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail } from './core/lfp.js';
 import { openFiles, pickCameraFolder, isLightFieldName, download, native, NativeFile } from './platform.js';
@@ -142,7 +143,7 @@ async function openWith(args, transfer) {
     hideProgress();
     state.info = info;
     $('placeholder').hidden = true;
-    resetTemperature(info);
+    await restoreEdits(info);
     showAutoFringe();
     renderInfo();
     if (!info.hasRaw && !info.processed) throw new Error('The file contains no light field image.');
@@ -942,7 +943,10 @@ canvas.addEventListener('pointerdown', (event) => {
   canvas.onpointerup = () => {
     canvas.onpointermove = null;
     suppressClick = moved;
-    if (moved) invalidateAnimation();
+    if (moved) {
+      invalidateAnimation();
+      scheduleSave();
+    }
   };
 });
 
@@ -957,6 +961,7 @@ canvas.addEventListener('dblclick', () => {
 // frames. `final` is false while a slider is being dragged.
 function cameraChanged({ final }) {
   invalidateAnimation();
+  scheduleSave();
   updateSpreadOverlay();
   if (state.fullRes) setFullRes(false, { restore: false });
   if (!state.depthShown) {
@@ -1292,17 +1297,67 @@ function showFringeHues() {
 }
 
 // Temperature starts at the white balance the camera used for this photo.
-function resetTemperature(info) {
+// Temperature starts at the white balance the camera used for this photo
+// (`keep`: a saved value stays).
+function resetTemperature(info, { keep = false } = {}) {
   const cct = info && info.cam && info.cam.capture && info.cam.capture.cct;
   const k = Math.min(10000, Math.max(2000, Math.round((cct || 5500) / 50) * 50));
   const input = $('wb-temperature');
   input.dataset.default = k;
-  if (+input.value !== k) {
-    input.value = k;
-    applySettingsSoon();
-  }
+  if (!keep) input.value = k;
   showSliderValue(input);
 }
+
+// ---------------------------------------------------------------- edits
+
+// Every photo keeps its own edits (edits.js): restored when it opens, saved
+// shortly after each change. Photos without saved edits start from the
+// defaults.
+const DEFAULT_EDITS = readEdits(document);
+let saveTimer = null;
+
+function photoKey(info) {
+  if (info && info.photoId) return info.photoId;
+  const cur = state.current;
+  return cur ? `file:${cur.name}:${cur.file.size}` : null;
+}
+
+async function restoreEdits(info) {
+  clearTimeout(saveTimer);
+  state.editsKey = photoKey(info);
+  const saved = state.editsKey ? await editsStore.load(state.editsKey) : null;
+  state.restoring = true;
+  try {
+    const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
+    resetTemperature(info, { keep: !!saved });
+    state.camera = { ...view };
+    state.focusPoint = { ...focusPoint };
+    showFocusPoint();
+    for (const input of document.querySelectorAll('aside.controls input[type=range]')) showSliderValue(input);
+    showFNumber();
+    $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
+    $('anim-focus').hidden = $('anim').value !== 'focus';
+    await applySettings();
+  } finally {
+    state.restoring = false;
+  }
+}
+
+function scheduleSave() {
+  if (state.restoring || !state.editsKey || !canRender()) return;
+  clearTimeout(saveTimer);
+  const key = state.editsKey;
+  saveTimer = setTimeout(() => {
+    if (key !== state.editsKey) return;
+    editsStore.save(key, readEdits(document, {
+      photo: { id: key, name: state.current ? state.current.name : null },
+      view: state.camera,
+      focusPoint: state.focusPoint,
+    }));
+  }, 500);
+}
+
+for (const type of ['input', 'change']) $('controls').addEventListener(type, scheduleSave);
 
 const TONES = ['contrast', 'highlights', 'shadows', 'whites', 'blacks'];
 const HUE_SLIDERS = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'];
