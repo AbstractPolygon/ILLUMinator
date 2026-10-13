@@ -17,4 +17,4 @@ A stereo pair from two viewpoints across the lens.
 
 ## Export
 
-*Save PNG* saves the picture as shown; *Export video* saves the animation. See [[Exporting]].
+*Video size* sets how large exported videos are: 1080p (the default), 1440p or 4K, on the long side. *Save PNG* saves the picture as shown; *Export video* saves the animation, at the current *Resolution*, or with *Full resolution* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
