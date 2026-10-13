@@ -1,9 +1,12 @@
 import { VERSION } from './version.js';
 import { readEdits, writeEdits, editsStore } from './edits.js';
 import { Engine, toImageData } from './engine.js';
-import { blobReader, readThumbnail, openContainer } from './core/lfp.js';
+import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
-import { openFiles, pickCameraFolder, isLightFieldName, isSidecarName, findSidecar, download, native, NativeFile } from './platform.js';
+import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile } from './platform.js';
+import { Library } from './library/library.js';
+import { openStorage, memoryStorage } from './library/storage.js';
+import { groupPhotos } from './library/scan.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -32,8 +35,8 @@ const state = {
   fullResMode: false, // the Full resolution checkbox
   fullRes: false, // a full resolution still is shown (or rendering)
   depthShown: false,
-  library: [],
-  current: null,
+  album: null, // album shown in the sidebar (null: all photos)
+  current: null, // { photo, name, file, sidecar } of the open photo
   view: { busy: false, pending: false },
 };
 
@@ -59,58 +62,381 @@ function showError(err) {
 
 // ---------------------------------------------------------------- library
 
-function addToLibrary(entries) {
-  for (const e of entries) {
-    if (state.library.some((x) => x.name === e.name && x.size === e.size)) continue;
-    const item = { name: e.name, size: e.size, file: e.file, sidecar: e.sidecar || null, thumb: null };
-    state.library.push(item);
-    readThumbnail(blobReader(e.file)).then((t) => {
-      if (t && state.library.includes(item)) {
-        item.thumb = URL.createObjectURL(new Blob([t.bytes], { type: t.mime }));
-        renderLibrary();
-      }
+// The photo library (library/library.js): every photo opened, dropped or
+// imported is copied into it, in a folder of its own.
+let lib = null;
+let libReady = null;
+const thumbs = new Map(); // photo id -> object URL (null while loading)
+const PHOTO_DRAG = 'application/x-illuminator-photo';
+
+async function openLibrary() {
+  for (const url of thumbs.values()) if (url) URL.revokeObjectURL(url);
+  thumbs.clear();
+  const readSummary = (f) => readPhotoSummary(blobReader(f));
+  try {
+    lib = await new Library(await openStorage(), { readSummary }).load();
+  } catch (err) {
+    console.warn('Could not open the library; photos are kept for this session only', err);
+    lib = await new Library(memoryStorage(), { readSummary }).load();
+  }
+  if (state.album && !lib.album(state.album)) state.album = null;
+  renderLibrary();
+  return lib;
+}
+
+async function asBlob(f) {
+  if (!f || f instanceof Blob) return f;
+  return new Blob([await f.arrayBuffer()], { type: /\.png$/i.test(f.name) ? 'image/png' : 'image/jpeg' });
+}
+
+function thumbFor(photo) {
+  if (thumbs.has(photo.id)) return thumbs.get(photo.id);
+  thumbs.set(photo.id, null);
+  if (photo.thumb) {
+    lib.thumbnail(photo).then(asBlob).then((blob) => {
+      if (!blob || thumbs.get(photo.id) !== null) return;
+      thumbs.set(photo.id, URL.createObjectURL(blob));
+      renderLibrary();
     }).catch(() => {});
   }
-  renderLibrary();
+  return null;
 }
 
-// Removes a photo from the list (the file itself is untouched). Removing the
-// open photo clears the picture.
-function removeFromLibrary(item) {
-  state.library = state.library.filter((x) => x !== item);
-  if (item.thumb) URL.revokeObjectURL(item.thumb);
-  if (state.current === item) closePhoto();
-  renderLibrary();
+// A small picture of the photo as first shown, for photos whose file has no
+// thumbnail of its own (Lytro Desktop's raw.lfp).
+function saveThumbnail() {
+  state.wantThumb = false;
+  const photo = state.current && state.current.photo;
+  if (!photo || !lib || !canvas.width) return;
+  const s = Math.min(1, 320 / Math.max(canvas.width, canvas.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(canvas.width * s);
+  c.height = Math.round(canvas.height * s);
+  c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+  c.toBlob((blob) => {
+    if (!blob) return;
+    lib.saveThumbnail(photo, blob).then(() => {
+      const old = thumbs.get(photo.id);
+      if (old) URL.revokeObjectURL(old);
+      thumbs.set(photo.id, URL.createObjectURL(blob));
+      renderLibrary();
+    }).catch(() => {});
+  }, 'image/jpeg', 0.85);
 }
+
+const EMPTY_LIBRARY = 'Open .LFR / .LFP files, drop them here, or import from a camera or Lytro Desktop.';
 
 function renderLibrary() {
-  const list = $('library-list');
-  list.replaceChildren(...state.library.map((item) => {
+  renderAlbums();
+  const album = lib && state.album ? lib.album(state.album) : null;
+  const photos = lib ? lib.list(state.album) : [];
+  $('photos-title').textContent = album ? album.name : 'All photos';
+  const current = state.current && state.current.photo;
+  $('library-list').replaceChildren(...photos.map((photo) => {
     const li = document.createElement('li');
-    li.className = item === state.current ? 'current' : '';
-    const img = item.thumb ? Object.assign(document.createElement('img'), { src: item.thumb, alt: '' }) : Object.assign(document.createElement('div'), { className: 'noimg' });
-    const name = document.createElement('span');
-    name.textContent = item.name;
-    const remove = Object.assign(document.createElement('button'), { className: 'remove', type: 'button', textContent: '×', title: 'Remove from list' });
-    remove.setAttribute('aria-label', `Remove ${item.name} from list`);
-    remove.onclick = (e) => {
-      e.stopPropagation();
-      removeFromLibrary(item);
+    li.className = photo === current ? 'current' : '';
+    li.draggable = true;
+    li.ondragstart = (e) => {
+      e.dataTransfer.setData(PHOTO_DRAG, photo.id);
+      e.dataTransfer.effectAllowed = 'copy';
     };
-    li.append(img, name, remove);
-    li.onclick = () => openItem(item);
+    const url = thumbFor(photo);
+    const img = url ? Object.assign(document.createElement('img'), { src: url, alt: '' }) : Object.assign(document.createElement('div'), { className: 'noimg' });
+    const name = document.createElement('span');
+    name.textContent = photo.name;
+    const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Albums, delete' });
+    more.setAttribute('aria-label', `Actions for ${photo.name}`);
+    more.setAttribute('aria-haspopup', 'menu');
+    more.onclick = (e) => {
+      e.stopPropagation();
+      photoMenu(photo, more);
+    };
+    li.append(img, name, more);
+    li.onclick = () => openItem(photo);
     return li;
   }));
-  $('library-empty').hidden = state.library.length > 0;
+  const empty = $('library-empty');
+  empty.hidden = photos.length > 0;
+  if (album) empty.textContent = 'No photos in this album yet. Drag photos onto the album, or use ••• on a photo.';
+  else if (lib && !lib.persistent) empty.textContent = `${EMPTY_LIBRARY} This browser cannot store a library, so photos are kept until the page is closed.`;
+  else empty.textContent = EMPTY_LIBRARY;
+}
+
+function renderAlbums() {
+  const list = $('album-list');
+  if (!lib) {
+    list.replaceChildren();
+    return;
+  }
+  const rows = [{ id: null, name: 'All photos', count: lib.photos.length }, ...lib.albums.map((a) => ({ id: a.id, name: a.name, count: a.photos.length }))];
+  list.replaceChildren(...rows.map((row) => {
+    const li = document.createElement('li');
+    li.classList.toggle('current', state.album === row.id);
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'album' });
+    const name = Object.assign(document.createElement('span'), { className: 'name', textContent: row.name });
+    const count = Object.assign(document.createElement('span'), { className: 'count', textContent: row.count });
+    b.append(name, count);
+    b.onclick = () => {
+      state.album = row.id;
+      renderLibrary();
+    };
+    li.append(b);
+    if (row.id) {
+      const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Rename, delete' });
+      more.setAttribute('aria-label', `Actions for album ${row.name}`);
+      more.setAttribute('aria-haspopup', 'menu');
+      more.onclick = () => albumMenu(row.id, li, more);
+      li.append(more);
+      // Photos dragged from the list are added to the album.
+      li.ondragover = (e) => {
+        if (![...e.dataTransfer.types].includes(PHOTO_DRAG)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        li.classList.add('drop');
+      };
+      li.ondragleave = () => li.classList.remove('drop');
+      li.ondrop = async (e) => {
+        const id = e.dataTransfer.getData(PHOTO_DRAG);
+        li.classList.remove('drop');
+        if (!id) return;
+        e.preventDefault();
+        e.stopPropagation();
+        await lib.addToAlbum(row.id, [id]);
+        renderLibrary();
+      };
+    }
+    return li;
+  }));
+}
+
+// An inline text field in place of `li`'s contents (new album, rename).
+function editName(li, value, onDone) {
+  const input = Object.assign(document.createElement('input'), { type: 'text', value, maxLength: 80 });
+  input.setAttribute('aria-label', 'Album name');
+  li.replaceChildren(input);
+  let done = false;
+  const finish = (ok) => {
+    if (done) return;
+    done = true;
+    onDone(ok ? input.value.trim() : '');
+  };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') {
+      e.stopPropagation();
+      finish(false);
+    }
+  };
+  input.onblur = () => finish(true);
+  input.focus();
+  input.select();
+}
+
+function newAlbum(photoIds = []) {
+  if (!lib) return;
+  const li = document.createElement('li');
+  $('album-list').append(li);
+  editName(li, '', async (name) => {
+    if (name) {
+      const album = await lib.createAlbum(name);
+      if (photoIds.length) await lib.addToAlbum(album.id, photoIds);
+      else state.album = album.id;
+    }
+    renderLibrary();
+  });
+}
+
+$('album-new').onclick = () => newAlbum();
+
+// ------------------------------------------------ menus
+
+let menuEl = null;
+let menuButton = null;
+
+function closeMenu() {
+  if (!menuEl) return;
+  menuEl.remove();
+  menuEl = null;
+  if (menuButton) menuButton.setAttribute('aria-expanded', 'false');
+  menuButton = null;
+}
+
+function placeMenu(anchor) {
+  const r = anchor.getBoundingClientRect();
+  const m = menuEl;
+  const left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8));
+  let top = r.bottom + 4;
+  if (top + m.offsetHeight > innerHeight - 8) top = Math.max(8, r.top - m.offsetHeight - 4);
+  m.style.left = `${left}px`;
+  m.style.top = `${top}px`;
+}
+
+// items: { label, action, checked?, danger? } | { heading } | '-'. An action
+// that returns true keeps the menu open.
+function showMenu(anchor, items) {
+  closeMenu();
+  const m = document.createElement('div');
+  m.className = 'menu';
+  m.setAttribute('role', 'menu');
+  menuEl = m;
+  menuButton = anchor;
+  anchor.setAttribute('aria-expanded', 'true');
+  fillMenu(items);
+  document.body.append(m);
+  placeMenu(anchor);
+  const first = m.querySelector('button');
+  if (first) first.focus();
+}
+
+function fillMenu(items) {
+  menuEl.replaceChildren(...items.map((it) => {
+    if (it === '-') return document.createElement('hr');
+    if (it.heading) return Object.assign(document.createElement('p'), { className: 'menu-heading', textContent: it.heading });
+    const b = Object.assign(document.createElement('button'), { type: 'button' });
+    b.setAttribute('role', it.checked === undefined ? 'menuitem' : 'menuitemcheckbox');
+    if (it.checked !== undefined) b.setAttribute('aria-checked', String(it.checked));
+    if (it.danger) b.classList.add('danger');
+    if (it.checked !== undefined) b.append(Object.assign(document.createElement('span'), { className: 'tick', textContent: it.checked ? '✓' : '' }));
+    b.append(document.createTextNode(it.label));
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      if ((await it.action()) !== true) closeMenu();
+    };
+    return b;
+  }));
+}
+
+// Replaces the menu with a question and two buttons.
+function confirmInMenu(text, label, onYes) {
+  const p = Object.assign(document.createElement('p'), { textContent: text });
+  const row = Object.assign(document.createElement('div'), { className: 'menu-row' });
+  const no = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Cancel' });
+  const yes = Object.assign(document.createElement('button'), { type: 'button', textContent: label, className: 'danger' });
+  no.onclick = closeMenu;
+  yes.onclick = async () => {
+    closeMenu();
+    await onYes();
+  };
+  row.append(no, yes);
+  menuEl.replaceChildren(p, row);
+  placeMenu(menuButton);
+  yes.focus();
+  return true;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (menuEl && !menuEl.contains(e.target) && e.target !== menuButton) closeMenu();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (menuEl && e.key === 'Escape') {
+    e.stopPropagation();
+    const b = menuButton;
+    closeMenu();
+    if (b) b.focus();
+  }
+}, true);
+window.addEventListener('resize', closeMenu);
+
+function photoMenu(photo, button) {
+  const items = [];
+  items.push({ heading: 'Albums' });
+  for (const a of lib.albums) {
+    const inside = a.photos.includes(photo.id);
+    items.push({
+      label: a.name,
+      checked: inside,
+      action: async () => {
+        if (inside) await lib.removeFromAlbum(a.id, [photo.id]);
+        else await lib.addToAlbum(a.id, [photo.id]);
+        renderLibrary();
+      },
+    });
+  }
+  items.push({ label: 'New album…', action: () => newAlbum([photo.id]) });
+  items.push('-');
+  const where = lib.store.kind === 'folder'
+    ? 'Its folder (the photo and its edits) is moved to the trash.'
+    : 'The photo and its edits are deleted from this browser’s storage.';
+  items.push({
+    label: lib.persistent ? 'Delete from library…' : 'Remove from list',
+    danger: true,
+    action: () => {
+      const remove = async () => {
+        await lib.remove([photo.id]);
+        const url = thumbs.get(photo.id);
+        if (url) URL.revokeObjectURL(url);
+        thumbs.delete(photo.id);
+        if (state.current && state.current.photo === photo) closePhoto();
+        renderLibrary();
+      };
+      if (!lib.persistent) return remove();
+      return confirmInMenu(`Delete ${photo.name} from the library? ${where}`, 'Delete', remove);
+    },
+  });
+  showMenu(button, items);
+}
+
+function albumMenu(id, li, button) {
+  const album = lib.album(id);
+  if (!album) return;
+  showMenu(button, [
+    {
+      label: 'Rename…',
+      action: () => editName(li, album.name, async (name) => {
+        if (name) await lib.renameAlbum(id, name);
+        renderLibrary();
+      }),
+    },
+    {
+      label: 'Delete album…',
+      danger: true,
+      action: () => confirmInMenu(`Delete the album “${album.name}”? Its photos stay in the library.`, 'Delete', async () => {
+        await lib.deleteAlbum(id);
+        if (state.album === id) state.album = null;
+        renderLibrary();
+      }),
+    },
+  ]);
+}
+
+// Copies photos (scan.js entries) into the library, adding them to the
+// album being shown. Returns the library photos.
+async function importPhotos(entries, { album = state.album } = {}) {
+  await libReady;
+  if (!entries.length) return [];
+  let added = [];
+  try {
+    added = await lib.add(entries, {
+      onProgress: (e, i, n) => {
+        if (e) showProgress(n > 1 ? `Adding ${e.name} to the library (${i + 1} of ${n})` : `Adding ${e.name} to the library`, i / n);
+      },
+    });
+    if (album && lib.album(album)) await lib.addToAlbum(album, added.map((p) => p.id));
+  } catch (err) {
+    showError(err);
+  } finally {
+    hideProgress();
+    renderLibrary();
+  }
+  return added;
 }
 
 // ---------------------------------------------------------------- opening
 
-async function openItem(item) {
-  state.current = item;
+async function openItem(photo) {
+  closeMenu();
+  const file = await lib.file(photo).catch(() => null);
+  if (!file) {
+    showError(new Error(`${photo.name} is missing from the library folder.`));
+    return;
+  }
+  const sidecar = await lib.sidecar(photo).catch(() => null);
+  state.current = { photo, name: photo.name, file, sidecar };
+  state.wantThumb = !photo.thumb;
   renderLibrary();
-  const bytes = await item.file.arrayBuffer();
+  const bytes = await file.arrayBuffer();
   await openWith({ bytes }, [bytes]);
+  if (state.info && state.current && state.current.photo === photo) lib.setPhotoId(photo, state.info.photoId).catch(() => {});
 }
 
 function resetView() {
@@ -173,6 +499,7 @@ function draw(img) {
   else ctx.drawImage(img, 0, 0);
   canvas.classList.remove('hidden');
   scheduleHistogram();
+  if (state.wantThumb && state.mode === 'camera') saveThumbnail();
 }
 
 // ---------------------------------------------------------------- histogram
@@ -1005,17 +1332,49 @@ $('spread-show').onchange = updateSpreadOverlay;
 
 // Settings window (gear at the right of the top bar).
 async function showLibraryLocation() {
-  $('library-path').classList.toggle('mono', !!native);
-  if (native) {
+  await libReady;
+  const kind = lib.store.kind;
+  $('library-path').classList.toggle('mono', kind === 'folder');
+  $('library-choose').hidden = kind !== 'folder';
+  if (kind === 'folder') {
     $('library-path').textContent = await native.libraryDir();
-    $('library-note').textContent = 'Each photo is kept in its own folder in the library, with its edits next to it.';
-    $('library-choose').hidden = false;
-  } else {
+    $('library-note').textContent = 'Each photo is kept in its own folder in the library, with its edits next to it. Albums are listed in library.json.';
+  } else if (kind === 'browser') {
     $('library-path').textContent = 'This browser’s storage';
     $('library-note').textContent = 'In a browser the library is stored privately by the browser. Use the desktop app to keep it in a folder of your choice.';
-    $('library-choose').hidden = true;
+  } else {
+    $('library-path').textContent = 'Not available';
+    $('library-note').textContent = 'This browser cannot store a library here, so photos are kept until the page is closed. Use the desktop app or another browser to keep a library.';
   }
 }
+
+// A Lytro Desktop library (or any folder of photos), into a new album.
+async function importFolder() {
+  const picked = await pickFolder('Import a Lytro Desktop library or a folder of photos').catch((err) => {
+    showError(err);
+    return null;
+  });
+  if (!picked) return;
+  const entries = groupPhotos(picked.files);
+  if ($('settings-dialog').open) $('settings-dialog').close();
+  if (!entries.length) {
+    showNotice(`No Lytro photos found in ${picked.name}.`);
+    startNoticeTimer();
+    return;
+  }
+  await libReady;
+  const albumName = picked.name.replace(/\.lytrolibrary$/i, '');
+  const album = lib.albums.find((a) => a.name === albumName) || (await lib.createAlbum(albumName));
+  const added = await importPhotos(entries, { album: album.id });
+  state.album = album.id;
+  renderLibrary();
+  const withEdits = entries.filter((e) => e.sidecar).length;
+  showNotice(`Added ${added.length} photo${added.length === 1 ? '' : 's'} from ${picked.name} to the album “${album.name}”.`,
+    withEdits ? `${withEdits === 1 ? 'One carries' : `${withEdits} carry`} Lytro Desktop edits, applied when ${withEdits === 1 ? 'it is' : 'each is'} first opened.` : '');
+  startNoticeTimer();
+}
+
+$('import-folder').onclick = importFolder;
 
 $('settings-btn').onclick = async () => {
   await showLibraryLocation();
@@ -1034,7 +1393,11 @@ $('about-dialog').addEventListener('close', () => $('about-btn').setAttribute('a
 $('library-choose').onclick = async () => {
   if (!native) return;
   const dir = await native.chooseLibraryDir();
-  if (dir) await showLibraryLocation();
+  if (!dir) return;
+  closePhoto();
+  state.album = null;
+  libReady = openLibrary();
+  await showLibraryLocation();
 };
 
 // ---------------------------------------------------------------- white balance eyedropper
@@ -1164,9 +1527,9 @@ async function importFromCameraFolder() {
   showCameraDialog({
     files,
     thumb: (f) => readThumbnail(blobReader(f.file)),
-    onImport: (picked) => {
-      addToLibrary(picked);
-      if (picked.length) openItem(state.library.find((x) => x.name === picked[0].name));
+    onImport: async (picked) => {
+      const added = await importPhotos(groupPhotos(picked.map((f) => ({ path: f.path, file: f.file }))));
+      if (added.length) openItem(added[0]);
     },
   });
 }
@@ -1177,7 +1540,6 @@ async function importFromConnectedCamera() {
   const cameras = await native.listCameras();
   const select = $('camera-select');
   $('camera-dest').hidden = false;
-  $('camera-dest-path').textContent = await native.importDir();
   if (!cameras.length) {
     $('camera-select-row').hidden = true;
     $('camera-dialog-source').textContent = 'No Lytro camera found. Connect it with its USB cable and switch it on: it appears as a drive with a DCIM folder. ' +
@@ -1195,29 +1557,33 @@ async function importFromConnectedCamera() {
       thumb: (f) => native.cameraThumbnail(cam.id, f.id),
       onImport: async (picked) => {
         if (!picked.length) return;
-        const stop = native.onImportProgress((p) => showProgress(`Importing ${p.file} (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
-        try {
-          const files = await native.importFromCamera(cam.id, picked.map((f) => f.id), $('camera-dest-path').textContent);
-          const entries = files.map((f) => ({ name: f.name, size: f.size, file: new NativeFile(f) }));
-          addToLibrary(entries);
-          if (entries.length) openItem(state.library.find((x) => x.name === entries[0].name));
-        } catch (err) {
-          showError(err);
-        } finally {
-          stop();
-          hideProgress();
+        // A camera drive is read directly; a camera reached over adb is
+        // copied to the library's staging folder first.
+        let entries;
+        if (cam.kind === 'drive') {
+          entries = picked.map((f) => ({ path: `${f.folder}/${f.name}`, file: new NativeFile({ path: f.id, name: f.name, size: f.size }) }));
+        } else {
+          const stop = native.onImportProgress((p) => showProgress(`Copying ${p.file} from the camera (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
+          try {
+            const files = await native.importFromCamera(cam.id, picked.map((f) => f.id));
+            entries = files.map((f) => ({ path: f.name, file: new NativeFile(f) }));
+          } catch (err) {
+            showError(err);
+            return;
+          } finally {
+            stop();
+            hideProgress();
+          }
         }
+        const added = await importPhotos(groupPhotos(entries));
+        if (cam.kind !== 'drive') lib.store.remove('.incoming').catch(() => {});
+        if (added.length) openItem(added[0]);
       },
     });
   };
   select.onchange = show;
   show();
 }
-
-$('camera-dest-btn').onclick = async () => {
-  const dir = await native.chooseImportDir();
-  if (dir) $('camera-dest-path').textContent = dir;
-};
 
 function importFromCamera() {
   return native ? importFromConnectedCamera() : importFromCameraFolder();
@@ -1231,29 +1597,19 @@ $('camera-select-all').onclick = () => {
 
 // ---------------------------------------------------------------- wiring
 
-// Lytro Desktop edits picked together with a photo belong to it: a
-// stack.view.lfp picked with a single photo (and then not listed itself),
-// or an exported IMG_0001.lfp picked with IMG_0001.lfr.
-const stem = (name) => name.replace(/\.[^.]+$/, '').toLowerCase();
-
+// Picked or dropped files are added to the library; Lytro Desktop edits
+// picked with a photo go with it (scan.js).
 async function openPicked(files) {
-  let lf = files.filter((f) => isLightFieldName(f.name));
-  const sidecars = lf.filter((f) => isSidecarName(f.name));
-  const photos = lf.filter((f) => !isSidecarName(f.name));
-  let viewFile = null;
-  if (sidecars.length === 1 && photos.length === 1) {
-    viewFile = sidecars[0];
-    lf = photos;
-  }
-  const sidecarFor = (f) => viewFile || (/\.lfr$/i.test(f.name) && lf.find((g) => /\.lfp$/i.test(g.name) && stem(g.name) === stem(f.name))) || null;
-  addToLibrary(lf.map((f) => ({ name: f.name, size: f.size, file: f, sidecar: sidecarFor(f) })));
-  if (lf.length) openItem(state.library.find((x) => x.name === lf[0].name));
+  const entries = groupPhotos(files.filter((f) => isLightFieldName(f.name)).map((f) => ({ path: f.name, file: f })));
+  const added = await importPhotos(entries);
+  if (added.length) openItem(added[0]);
 }
 
 $('open-btn').onclick = async () => openPicked(await openFiles());
 $('camera-btn').onclick = importFromCamera;
 $('sample-btn').onclick = () => {
   state.current = null;
+  state.wantThumb = false;
   renderLibrary();
   openWith({ synthetic: { width: 3864, height: 2684 } });
 };
@@ -1400,7 +1756,11 @@ function photoKey(info) {
 async function restoreEdits(info) {
   clearTimeout(saveTimer);
   state.editsKey = photoKey(info);
-  let saved = state.editsKey ? await editsStore.load(state.editsKey) : null;
+  const photo = state.current && state.current.photo;
+  // Library photos keep their edits in their folder; earlier versions kept
+  // them in the app's storage, which is still read for those photos.
+  let saved = photo ? await lib.loadEdits(photo) : null;
+  if (!saved && state.editsKey) saved = await editsStore.load(state.editsKey);
   if (!saved) saved = await lytroEdits(info, state.current);
   state.restoring = true;
   try {
@@ -1478,13 +1838,16 @@ function scheduleSave() {
   if (state.restoring || !state.editsKey || !canRender()) return;
   clearTimeout(saveTimer);
   const key = state.editsKey;
+  const photo = state.current && state.current.photo;
   saveTimer = setTimeout(() => {
     if (key !== state.editsKey) return;
-    editsStore.save(key, readEdits(document, {
+    const edits = readEdits(document, {
       photo: { id: key, name: state.current ? state.current.name : null },
       view: state.camera,
       focusPoint: state.focusPoint,
-    }));
+    });
+    if (photo) lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
+    else editsStore.save(key, edits);
   }, 500);
 }
 
@@ -1605,13 +1968,13 @@ document.addEventListener('drop', (e) => {
 
 canvas.classList.add('hidden');
 setMode('camera');
+libReady = openLibrary();
 $('version').textContent = VERSION;
 
 // Desktop app: show the photos already imported, and announce cameras as
 // they are plugged in.
 if (native) {
   document.body.classList.add('native');
-  native.listLibrary().then((files) => addToLibrary(files.map((f) => ({ name: f.name, size: f.size, file: new NativeFile(f) })))).catch(() => {});
   native.onCamerasChanged((cams) => {
     const count = cams.reduce((n, c) => n + c.files.length, 0);
     $('camera-status').textContent = cams.length ? `Lytro camera connected · ${count} photo${count === 1 ? '' : 's'}` : '';

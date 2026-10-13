@@ -108,15 +108,6 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
 }
 #library-list li { position: relative; }
 #library-list li:hover { background: #22262c; }
-#library-list .remove {
-  position: absolute; top: 4px; right: 4px;
-  padding: 0 7px; line-height: 20px; font-size: 15px;
-  background: rgba(18, 20, 23, 0.85); color: var(--muted);
-  opacity: 0; transition: opacity 0.12s;
-}
-#library-list .remove:hover { color: var(--text); border-color: #4a515c; }
-#library-list li:hover .remove, #library-list .remove:focus-visible { opacity: 1; }
-@media (hover: none) { #library-list .remove { opacity: 1; } }
 #library-list li.current { border-color: var(--accent); }
 #library-list img, #library-list .noimg { width: 64px; height: 44px; object-fit: cover; border-radius: 4px; background: #2a2e35; flex: none; }
 #library-list span { font-size: 12.5px; word-break: break-all; }
@@ -352,3 +343,55 @@ label:has(select) { margin-bottom: 10px; }
 /* Name and version share a baseline (the logo is centered beside them). */
 .app-name { display: inline-block; line-height: 1; }
 .app-name .version { vertical-align: baseline; }
+
+/* Library sidebar: albums above the photo list. */
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.92em; }
+.albums { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.albums li { display: flex; align-items: center; border-radius: 5px; border: 1px solid transparent; }
+.albums li:hover { background: #22262c; }
+.albums li.current { background: #262b33; }
+.albums li.drop { border-color: var(--accent); }
+.albums .album {
+  flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline;
+  background: none; border: 0; padding: 4px 6px; text-align: left; font-size: 12.5px;
+}
+.albums .album .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.albums .album .count { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.albums input { flex: 1; min-width: 0; margin: 2px; padding: 3px 5px; font-size: 12.5px; background: #0f1114; border: 1px solid var(--accent); border-radius: 4px; }
+.more {
+  flex: none; padding: 0 6px; line-height: 20px; font-size: 14px; letter-spacing: 1px;
+  background: none; border: 0; color: var(--muted); opacity: 0; transition: opacity 0.12s;
+}
+.more:hover { color: var(--text); }
+li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .more { opacity: 1; } }
+.link-button { background: none; border: 0; padding: 4px 6px; color: var(--muted); font-size: 12.5px; text-align: left; }
+.link-button:hover { color: var(--text); }
+#library-list .more { position: absolute; top: 4px; right: 4px; background: rgba(18, 20, 23, 0.85); border-radius: 4px; }
+#library-list li[draggable="true"] { -webkit-user-drag: element; }
+
+/* Pop-up menus (photo and album actions). */
+.menu {
+  position: fixed; z-index: 50; min-width: 180px; max-width: 280px; padding: 4px;
+  background: #1b1e23; border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.menu button {
+  background: none; border: 0; border-radius: 5px; padding: 5px 8px; text-align: left; font-size: 12.5px;
+  display: flex; gap: 8px; align-items: center;
+}
+.menu button:hover, .menu button:focus-visible { background: #2a2f37; outline: none; }
+.menu button .tick { width: 12px; flex: none; color: var(--accent); }
+.menu button.danger { color: #ff8a80; }
+.menu .menu-heading { margin: 4px 8px 2px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 3px 4px; width: auto; }
+.menu p { margin: 4px 8px; font-size: 12.5px; line-height: 1.45; }
+.menu .menu-row { display: flex; gap: 6px; justify-content: flex-end; padding: 4px; }
+.menu .menu-row button { border: 1px solid var(--line); }
+.menu .menu-row button.danger { border-color: #8a3a35; }
+.albums li { position: relative; }
+.albums .album { padding-right: 8px; }
+.albums .more { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
+.albums li:hover .more ~ * , .albums li:hover .album:has(+ .more) .count { visibility: hidden; }
+.library #photos-title { margin-top: 16px; }

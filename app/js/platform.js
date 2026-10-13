@@ -34,6 +34,7 @@ function pickWithInput(input) {
   return new Promise((resolve) => {
     input.value = '';
     input.onchange = () => resolve([...input.files]);
+    input.oncancel = () => resolve([]);
     input.click();
   });
 }
@@ -43,12 +44,16 @@ export async function openFiles() {
   return pickWithInput(document.getElementById('file-input'));
 }
 
-async function walkDirectory(handle, prefix, out) {
+const PHOTO_FILE = /\.(lfr|lfp)$/i;
+const FOLDER_FILE = /\.(lfr|lfp|raw|jpe?g|png)$/i;
+
+async function walkDirectory(handle, prefix, out, wanted = PHOTO_FILE) {
   for await (const entry of handle.values()) {
+    if (entry.name.startsWith('.')) continue;
     const path = prefix + entry.name;
     if (entry.kind === 'directory') {
-      await walkDirectory(entry, path + '/', out);
-    } else if (/\.(lfr|lfp)$/i.test(entry.name)) {
+      await walkDirectory(entry, path + '/', out, wanted);
+    } else if (wanted.test(entry.name)) {
       const file = await entry.getFile();
       out.push({ name: entry.name, path, size: file.size, file });
     }
@@ -74,6 +79,34 @@ export async function pickCameraFolder() {
   return {
     source: files.length ? files[0].webkitRelativePath.split('/')[0] : '',
     files: files.filter((f) => /\.(lfr|lfp)$/i.test(f.name)).map((f) => ({ name: f.name, path: f.webkitRelativePath, size: f.size, file: f })),
+  };
+}
+
+// Asks for a folder (a Lytro Desktop library, a copy of a camera card) and
+// lists the photos and thumbnails in it and all its subfolders:
+// { name, files: [{ path, file }] } with paths relative to the folder, or
+// null when cancelled.
+export async function pickFolder(title) {
+  if (native) {
+    const r = await native.pickFolder(title);
+    return r ? { name: r.name, files: r.files.map((f) => ({ path: f.rel, file: new NativeFile(f) })) } : null;
+  }
+  if (window.showDirectoryPicker) {
+    try {
+      const dir = await window.showDirectoryPicker({ id: 'lytro-library', mode: 'read' });
+      const out = [];
+      await walkDirectory(dir, '', out, FOLDER_FILE);
+      return { name: dir.name, files: out.map((e) => ({ path: e.path, file: e.file })) };
+    } catch (err) {
+      if (err && err.name === 'AbortError') return null;
+    }
+  }
+  const files = await pickWithInput(document.getElementById('dir-input'));
+  if (!files.length) return null;
+  const strip = (p) => p.split('/').slice(1).join('/');
+  return {
+    name: files[0].webkitRelativePath.split('/')[0],
+    files: files.filter((f) => FOLDER_FILE.test(f.name)).map((f) => ({ path: strip(f.webkitRelativePath), file: f })),
   };
 }
 

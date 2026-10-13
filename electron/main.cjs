@@ -17,10 +17,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 // The renderer may only read files the user chose (dialogs), files on a
-// detected camera and files in the import folder.
+// detected camera and files in the library.
 const allowed = new Set();
 let cameras = [];
-let importDir = null;
 let settings = { libraryDir: null };
 let win = null;
 
@@ -31,7 +30,6 @@ function allow(file) {
 function checkAllowed(file) {
   const p = path.resolve(file);
   if (allowed.has(p)) return p;
-  if (importDir && p.startsWith(path.resolve(importDir) + path.sep)) return p;
   if (p.startsWith(path.resolve(libraryDir()) + path.sep)) return p;
   throw new Error('This file was not opened in ILLUMinator.');
 }
@@ -59,9 +57,33 @@ function libraryDir() {
   return settings.libraryDir || path.join(app.getPath('pictures'), 'ILLUMinator');
 }
 
-// Photos imported from the camera go into the library.
-function defaultImportDir() {
-  return path.join(libraryDir(), 'Photos');
+// A path inside the library from one the app gives ('Photos/IMG_0001/...').
+function inLibrary(rel) {
+  const root = path.resolve(libraryDir());
+  const p = path.resolve(root, ...String(rel || '').split('/').filter(Boolean));
+  if (p !== root && !p.startsWith(root + path.sep)) throw new Error('Outside the library');
+  return p;
+}
+
+const notFound = (err) => err && (err.code === 'ENOENT' || err.code === 'ENOTDIR');
+
+// Every light field file and thumbnail under a folder, with paths relative
+// to it. Used to import a Lytro Desktop library or a camera folder.
+async function walk(root, rel = '', out = [], depth = 0) {
+  if (depth > 12 || out.length > 20000) return out;
+  let entries = [];
+  try {
+    entries = await fsp.readdir(path.join(root, rel), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) await walk(root, r, out, depth + 1);
+    else if (/\.(lfr|lfp|raw|jpe?g|png)$/i.test(e.name)) out.push(r);
+  }
+  return out;
 }
 
 async function describe(file) {
@@ -201,8 +223,6 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('import-dir', async () => importDir || defaultImportDir());
-
   ipcMain.handle('library-dir', async () => libraryDir());
 
   ipcMain.handle('choose-library-dir', async () => {
@@ -213,42 +233,102 @@ function registerIpc() {
     });
     if (res.canceled || !res.filePaths.length) return null;
     settings.libraryDir = res.filePaths[0];
-    importDir = null;
     await saveSettings();
     return libraryDir();
   });
 
-  ipcMain.handle('choose-import-dir', async () => {
-    const res = await dialog.showOpenDialog(win, {
-      title: 'Import photos to',
-      defaultPath: importDir || defaultImportDir(),
-      properties: ['openDirectory', 'createDirectory'],
-    });
-    if (res.canceled || !res.filePaths.length) return null;
-    importDir = res.filePaths[0];
-    return importDir;
-  });
-
-  ipcMain.handle('import-from-camera', async (e, cameraId, fileIds, destDir) => {
+  // Copies photos off a camera reached over adb into the library's staging
+  // folder; the app then adds them to the library (and empties it).
+  ipcMain.handle('import-from-camera', async (e, cameraId, fileIds) => {
     const c = findCamera(cameraId);
-    importDir = destDir || importDir || defaultImportDir();
-    const paths = await camera.importFiles(c, fileIds, importDir, (p) => e.sender.send('import-progress', p));
+    const paths = await camera.importFiles(c, fileIds, inLibrary('.incoming'), (p) => e.sender.send('import-progress', p));
     paths.forEach(allow);
     return Promise.all(paths.map(describe));
   });
 
-  // Photos already in the import folder (the library).
-  ipcMain.handle('list-library', async () => {
-    const dir = importDir || defaultImportDir();
-    let names = [];
+  // The library folder (relative paths, see inLibrary).
+  ipcMain.handle('lib-list', async (_e, rel) => {
     try {
-      names = await fsp.readdir(dir);
-    } catch {
-      return [];
+      const entries = await fsp.readdir(inLibrary(rel), { withFileTypes: true });
+      return Promise.all(entries.filter((e) => !e.name.startsWith('.')).map(async (e) => ({
+        name: e.name,
+        dir: e.isDirectory(),
+        size: e.isDirectory() ? 0 : (await fsp.stat(path.join(inLibrary(rel), e.name))).size,
+      })));
+    } catch (err) {
+      if (notFound(err)) return [];
+      throw err;
     }
-    const files = names.filter((n) => camera.LIGHT_FIELD.test(n)).sort().map((n) => path.join(dir, n));
-    files.forEach(allow);
-    return Promise.all(files.map(describe));
+  });
+
+  ipcMain.handle('lib-read-text', async (_e, rel) => {
+    try {
+      return await fsp.readFile(inLibrary(rel), 'utf8');
+    } catch (err) {
+      if (notFound(err)) return null;
+      throw err;
+    }
+  });
+
+  // Written to a temporary file first, so a crash never leaves half a file.
+  ipcMain.handle('lib-write', async (_e, rel, data) => {
+    const p = inLibrary(rel);
+    await fsp.mkdir(path.dirname(p), { recursive: true });
+    const tmp = `${p}.part`;
+    await fsp.writeFile(tmp, typeof data === 'string' ? data : Buffer.from(data));
+    await fsp.rename(tmp, p);
+  });
+
+  ipcMain.handle('lib-copy-in', async (_e, src, rel) => {
+    const from = checkAllowed(src);
+    const p = inLibrary(rel);
+    await fsp.mkdir(path.dirname(p), { recursive: true });
+    await fsp.copyFile(from, `${p}.part`);
+    await fsp.rename(`${p}.part`, p);
+  });
+
+  ipcMain.handle('lib-stat', async (_e, rel) => {
+    try {
+      return await describe(inLibrary(rel));
+    } catch (err) {
+      if (notFound(err)) return null;
+      throw err;
+    }
+  });
+
+  ipcMain.handle('lib-move', async (_e, from, to) => {
+    const dest = inLibrary(to);
+    await fsp.mkdir(path.dirname(dest), { recursive: true });
+    await fsp.rename(inLibrary(from), dest);
+  });
+
+  // Removed photos go to the system trash where there is one.
+  ipcMain.handle('lib-remove', async (_e, rel) => {
+    const p = inLibrary(rel);
+    if (p === path.resolve(libraryDir())) throw new Error('Will not remove the library itself');
+    try {
+      await shell.trashItem(p);
+    } catch {
+      await fsp.rm(p, { recursive: true, force: true });
+    }
+  });
+
+  // Picks a folder and lists the photos in it (all subfolders included).
+  ipcMain.handle('pick-folder', async (_e, title) => {
+    const res = await dialog.showOpenDialog(win, { title: title || 'Choose a folder', properties: ['openDirectory'] });
+    if (res.canceled || !res.filePaths.length) return null;
+    const root = res.filePaths[0];
+    const files = [];
+    for (const rel of await walk(root)) {
+      const abs = path.join(root, ...rel.split('/'));
+      allow(abs);
+      try {
+        files.push({ rel, ...(await describe(abs)) });
+      } catch {
+        // Vanished while scanning.
+      }
+    }
+    return { root, name: path.basename(root), files };
   });
 
   ipcMain.handle('save-file', async (_e, name, bytes) => {

@@ -336,10 +336,14 @@ export async function readLightFieldPicture(reader) {
   return { container, toc, frame, metadata, privateMetadata, rawRef, thumbnails, stacks, frameDepth, compressed };
 }
 
-// Returns { mime, bytes } for the first decodable thumbnail, or null.
-// Only the thumbnail section is read, so this is cheap even over USB.
-export async function readThumbnail(reader) {
-  const container = await openContainer(reader);
+// Stable id for a photo: the sha1 of its raw data (recorded in the file),
+// or of its table of contents for processed files.
+export function photoIdOf(container) {
+  const frame = findFrame(container.toc);
+  return (frame && frame.imageRef) || (container.sections.find((s) => s.type === 'LFM') || {}).sha1 || null;
+}
+
+async function firstThumbnail(container) {
   for (const t of findThumbnailRefs(container.toc)) {
     const bytes = await container.readSection(t.ref);
     if (!bytes) continue;
@@ -347,6 +351,18 @@ export async function readThumbnail(reader) {
     if (mime) return { mime, bytes, width: t.width, height: t.height };
   }
   return null;
+}
+
+// Returns { mime, bytes } for the first decodable thumbnail, or null.
+// Only the thumbnail section is read, so this is cheap even over USB.
+export async function readThumbnail(reader) {
+  return firstThumbnail(await openContainer(reader));
+}
+
+// The photo's id and thumbnail, reading only small sections.
+export async function readPhotoSummary(reader) {
+  const container = await openContainer(reader);
+  return { photoId: photoIdOf(container), thumbnail: await firstThumbnail(container) };
 }
 
 // --- writing (used by the synthetic sample generator and tests) ---

@@ -45,9 +45,12 @@
 
   <main>
     <aside class="library">
-      <h2>Photos</h2>
+      <h2>Library</h2>
+      <ul id="album-list" class="albums"></ul>
+      <button id="album-new" type="button" class="link-button">+ New album</button>
+      <h2 id="photos-title">All photos</h2>
       <ul id="library-list"></ul>
-      <p id="library-empty" class="hint">Open .LFR / .LFP files, drop them here, or import from a camera.</p>
+      <p id="library-empty" class="hint"></p>
     </aside>
 
     <section class="stage">
@@ -357,6 +360,13 @@
           <button type="button" id="library-choose">Choose folder…</button>
         </div>
       </section>
+      <section class="setting">
+        <h3>Import</h3>
+        <p class="hint">Adds every photo in a folder and its subfolders to the library, with the edits Lytro Desktop saved for them. Pick your Lytro Desktop library (usually <span class="mono">Pictures/Lytro Desktop/Libraries/Lytro Library.lytrolibrary</span>) or a copy of a camera card. The photos go into a new album named after the folder.</p>
+        <div class="row">
+          <button type="button" id="import-folder">Import Lytro Desktop library…</button>
+        </div>
+      </section>
       <menu>
         <span class="spacer"></span>
         <button value="close" class="primary">Done</button>
@@ -391,10 +401,7 @@
       <h2>Import from camera</h2>
       <p id="camera-dialog-source" class="hint"></p>
       <label id="camera-select-row" hidden>Camera <select id="camera-select"></select></label>
-      <p id="camera-dest" class="row" hidden>
-        <span class="hint">Import to <span id="camera-dest-path"></span></span>
-        <button type="button" id="camera-dest-btn">Change…</button>
-      </p>
+      <p id="camera-dest" class="hint" hidden>Photos are copied into your library (see Settings).</p>
       <div id="camera-grid" class="camera-grid"></div>
       <menu>
         <button type="button" id="camera-select-all">Select all</button>

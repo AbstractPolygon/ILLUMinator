@@ -1,6 +1,6 @@
 // High level decoding shared by the worker and the command line tool.
 
-import { bufferReader, isLfp, readLightFieldPicture, LfpError } from './lfp.js';
+import { bufferReader, isLfp, readLightFieldPicture, photoIdOf, LfpError } from './lfp.js';
 import { cameraInfo, guessRawLayout, packedSize, unpackRaw, removeHotPixels } from './raw.js';
 import { findRecipe } from './recipe.js';
 import { gridFromCamera, calibrateGrid, measureGrid, normalizeGrid } from './lenslet.js';
@@ -24,9 +24,7 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     privateMetadata: picture ? picture.privateMetadata : null,
     stacks: picture ? picture.stacks : [],
     frameDepth: picture ? picture.frameDepth : null,
-    // Stable id for the photo: the sha1 of its raw data (recorded in the
-    // file), or of its table of contents for processed files.
-    photoId: picture ? picture.rawRef || (picture.container.sections.find((s) => s.type === 'LFM') || {}).sha1 || null : null,
+    photoId: picture ? photoIdOf(picture.container) : null,
     thumbnails: picture ? picture.thumbnails : [],
     // Lytro Desktop edits saved in the file, if any (recipe.js).
     recipe: picture ? findRecipe(picture.toc) : null,
