@@ -193,6 +193,11 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
 
+// The viewpoint for masks that follow it (see resolveMasks).
+function viewOf(u = 0, v = 0) {
+  return { u, v, r: apertureRadius() };
+}
+
 // Blur pixels per unit of focus difference per unit of `dof` in the view.
 function viewPxPerUnit() {
   return 14 * state.settings.detail;
@@ -323,12 +328,12 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
     const f = list[i];
     if (state.gpu) {
       const tex = f.aperture > 0 ? state.gpu.refocusTo(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks } }, { id, type: 'frame', index: i });
+      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) } }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
     const rgb = f.aperture > 0 ? refocusRGB(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, bokeh), { focus: f.alpha, overrides: f.masks });
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, bokeh), { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) });
     await tick();
   }
   return { done: true };
@@ -427,12 +432,12 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
     if (state.jobs.refocus !== job) return { cancelled: true };
     if (state.gpu) {
       const tex = state.gpu.refocusTo(alphas[i], opts);
-      await presentGpu(id, tex, outW, outH, { alpha: alphas[i], dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
+      await presentGpu(id, tex, outW, outH, { alpha: alphas[i], dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: alphas[i], view: viewOf(u, v) } }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
     const rgb = refocusRGB(alphas[i], opts);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh), { focus: alphas[i] });
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh), { focus: alphas[i], view: viewOf(u, v) });
     await tick();
   }
   return { done: true };
@@ -464,12 +469,12 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
-    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, pxPerUnit: 14 * scale }, { id, type: 'result' });
+    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, pxPerUnit: 14 * scale, masks: { focus: alpha, view: viewOf(u, v) } }, { id, type: 'result' });
     return undefined;
   }
   if (dof > 0) progress('Applying depth of field', 1);
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
-  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha });
+  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, view: viewOf(u, v) });
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
@@ -487,7 +492,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     } else {
       tex = await singleView(id, u, v);
     }
-    await presentGpu(id, tex, state.sampler.outW, state.sampler.outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'result' });
+    await presentGpu(id, tex, state.sampler.outW, state.sampler.outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: alpha, view: viewOf(u, v) } }, { id, type: 'result' });
     return undefined;
   }
   let rgb;
@@ -498,7 +503,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     rgb = await singleView(id, u, v);
   }
   rgb = await withDepthOfField(id, rgb, state.sampler.outW, state.sampler.outH, alpha, dof, 1, bokeh);
-  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, { focus: alpha });
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, { focus: alpha, view: viewOf(u, v) });
   post({ id, type: 'result', width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }

@@ -3702,6 +3702,19 @@ function livingFilter(name) {
       return [depth(f + 0.2, 1.8, 0.6, false, { exposure: 0.35, contrast: -0.5, saturation: -0.45, temperature: -0.15 })];
     case 'dreamy': // what is not in focus glows a little
       return [depth(f - 0.2, f + 0.2, 0.25, true, { exposure: 0.4, contrast: -0.4, saturation: -0.2, temperature: 0.15 })];
+    case 'noir': // hard black and white, the subject lit a little brighter
+      return [
+        { ...defaultMask('depth'), near: -3, far: 3, feather: 0.2, fx: fx({ saturation: -1, contrast: 0.55, exposure: -0.15 }) },
+        depth(f - 0.2, f + 0.2, 0.2, false, { exposure: 0.35 }),
+      ];
+    case 'melancholy': // everything but the subject goes muted and blue
+      return [depth(f - 0.25, f + 0.25, 0.25, true, { saturation: -0.6, temperature: -0.5, exposure: -0.2, contrast: -0.15 })];
+    case 'carnival': // the background turns bright and festive
+      return [depth(f - 0.2, f + 0.2, 0.2, true, { saturation: 0.85, temperature: 0.25, tint: 0.2, contrast: 0.2 })];
+    case 'pinhole': // a deep vignette that shifts with the viewpoint
+      return [{ ...defaultMask('radial'), x: 0.5, y: 0.5, w: 0.48, h: 0.48, feather: 0.85, invert: true, followView: true, fx: fx({ exposure: -1.8, saturation: -0.25 }) }];
+    case 'golden': // warm, glowing light on the far background
+      return [depth(f + 0.15, 1.8, 0.5, false, { temperature: 0.6, exposure: 0.2, saturation: 0.2, contrast: -0.15 })];
     default:
       return [];
   }

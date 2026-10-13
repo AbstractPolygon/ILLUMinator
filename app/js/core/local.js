@@ -14,7 +14,8 @@
 // ...shape, fx: { exposure (EV), contrast, saturation, temperature, tint
 // (each -1..1) } }. A depth mask with `follow` set moves with the focus:
 // near and far shift by how far the focus is from `anchor`, the focus the
-// mask was made at.
+// mask was made at. A radial mask with `followView` set moves a little
+// with the viewpoint, like the edge of a lens seen from off center.
 
 export const MAX_MASKS = 4;
 export const MASK_KINDS = ['radial', 'linear', 'depth'];
@@ -51,7 +52,7 @@ export function parseMasks(text) {
 // an animation's values for this frame: strength, shape or effect) applied,
 // effects scaled by the strength, and depth masks that follow the focus
 // moved to `focus`.
-export function resolveMasks(masks, { focus = null, overrides = null } = {}) {
+export function resolveMasks(masks, { focus = null, overrides = null, view = null } = {}) {
   return (masks || []).map((m) => {
     const out = { ...m, fx: { ...m.fx } };
     for (const [a, v] of Object.entries((overrides && overrides[m.id]) || {})) {
@@ -61,6 +62,10 @@ export function resolveMasks(masks, { focus = null, overrides = null } = {}) {
     }
     const s = Math.min(1, Math.max(0, out.strength ?? 1));
     for (const k of Object.keys(out.fx)) out.fx[k] *= s;
+    if (out.kind === 'radial' && out.followView && view && view.r > 0) {
+      out.x += 0.12 * (view.u / view.r);
+      out.y += 0.12 * (view.v / view.r);
+    }
     if (out.kind === 'depth' && out.follow && Number.isFinite(focus)) {
       const shift = focus - (out.anchor || 0);
       out.near += shift;
