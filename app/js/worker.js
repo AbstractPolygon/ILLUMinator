@@ -8,7 +8,7 @@ import {
   colorMatrix, autoExposure, toneMap, sensorToOutput, viewSizes,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { estimateDepth, focusAtPoint, smoothDepth } from './core/depth.js';
+import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, luminance, brightnessFloor, DEPTH_SEARCH } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
@@ -406,15 +406,20 @@ async function ensureRefocusViews(id) {
     const listeners = new Set();
     const build = (async () => {
       const samples = apertureSamples(apertureRadius(), 7);
+      // On the GPU the views stay in GPU memory: refocusing, depth and
+      // focus measuring all work there.
+      if (state.gpu) {
+        state.gpu.buildViews(samples, state.settings.detail);
+        for (const l of listeners) post({ id: l, type: 'progress', stage: 'Preparing refocus', progress: 1 });
+        await tick();
+        return state.sampler === sampler ? state.gpu.views : null;
+      }
       const views = [];
-      // On the GPU all views render at once into GPU memory (for refocusing
-      // there); copies are read back for depth estimation on the CPU.
-      const readGpuView = state.gpu ? state.gpu.buildViews(samples, state.settings.detail) : null;
       for (let i = 0; i < samples.length; i++) {
         if (state.sampler !== sampler) return null;
         const { u, v } = samples[i];
         // Stored as 16 bit to keep ~37 full views affordable in memory.
-        const rgb = readGpuView ? readGpuView(i) : equalize(render(u, v));
+        const rgb = equalize(render(u, v));
         const q = new Uint16Array(rgb.length);
         for (let k = 0; k < rgb.length; k++) q[k] = Math.min(65535, rgb[k] * VIEW_SCALE + 0.5);
         views.push({ u, v, rgb: q, gain: 1 / VIEW_SCALE, detail: state.settings.detail });
@@ -653,10 +658,18 @@ async function ensureDepth(id) {
     // Normal quality: the plain cost volume, about twice as fast; high adds
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
-    state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
-      ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
-      onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
-    });
+    if (state.gpu) {
+      post({ id, type: 'progress', stage: 'Measuring depth', progress: 0 });
+      const center = luminance(centerView());
+      const guide = depthGuide(center);
+      const measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor: brightnessFloor(center), guide });
+      state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast });
+    } else {
+      state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
+        ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
+        onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
+      });
+    }
     applyDepthSmoothing();
   }
   return true;
@@ -674,7 +687,8 @@ function applyDepthSmoothing() {
   if (!raw) return;
   const { outW, outH } = state.sampler;
   const guide = equalize(Float32Array.from(centerView()));
-  state.depth = { ...raw, alpha: smoothDepth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence }) };
+  const smooth = state.gpu ? state.gpu.smoothDepth.bind(state.gpu) : smoothDepth;
+  state.depth = { ...raw, alpha: smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence }) };
   state.depthSmoothingApplied = amount;
   state.gen++;
   if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
@@ -794,16 +808,33 @@ async function focusAt({ id, x, y, u = 0, v = 0 }) {
   requireRaw();
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
-  const views = state.refocusViews;
   const d = state.settings.detail;
+  const measure = (px, py, opts) => {
+    if (!state.gpu) return focusAtPoint(state.refocusViews, outW, outH, px, py, opts);
+    // On the GPU only the views around the point are read back: the window,
+    // plus the largest shift a trial depth makes, plus the detail filter.
+    const reach = Math.ceil(Math.max(Math.abs(opts.min), Math.abs(opts.max)) * apertureRadius() * d);
+    const m = opts.radius + reach + 6;
+    const x0 = Math.max(0, Math.round(px) - m);
+    const y0 = Math.max(0, Math.round(py) - m);
+    const x1 = Math.min(outW, Math.round(px) + m + 1);
+    const y1 = Math.min(outH, Math.round(py) + m + 1);
+    if (!(x1 > x0 && y1 > y0)) return { alpha: 0, confidence: 0 };
+    if (state.focusFloorOf !== state.center) {
+      state.focusFloor = brightnessFloor(luminance(centerView()));
+      state.focusFloorOf = state.center;
+    }
+    const views = state.gpu.readViewsRect(x0, y0, x1 - x0, y1 - y0);
+    return focusAtPoint(views, x1 - x0, y1 - y0, px - x0, py - y0, { ...opts, floor: state.focusFloor });
+  };
   // Grow the window until it contains enough texture to judge by.
   let est = null;
   for (const radius of [5, 10, 20]) {
     const opts = { radius, min: -1.6, max: 1.6 };
-    est = focusAtPoint(views, outW, outH, x, y, opts);
+    est = measure(x, y, opts);
     // A viewpoint away from the center sees a point at depth alpha displaced
     // by -alpha * (u, v): measure again at the matching centered position.
-    if (u || v) est = focusAtPoint(views, outW, outH, x - est.alpha * u * d, y - est.alpha * v * d, opts);
+    if (u || v) est = measure(x - est.alpha * u * d, y - est.alpha * v * d, opts);
     if (est.confidence >= 0.15) return { alpha: est.alpha, confidence: est.confidence };
   }
   if (!(await ensureDepth(id))) return { cancelled: true };

@@ -858,6 +858,221 @@ void main() {
   outColor = vec4(vY * w, w, 0.0, 0.0);
 }`;
 
+// ---------------------------------------------------------------- depth
+// The depth measurement of core/depth.js (estimateDepth) on the GPU: views'
+// fine detail, their spread at each trial depth, cost aggregation and the
+// best depth per pixel. The finishing steps (filling in, outlier removal)
+// stay on the CPU, on one small read back.
+
+const DEPTH_STEPS_MAX = 64;
+
+// Luminance of view `uLayer`.
+const DEPTH_LUM = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray uViews;
+uniform int uLayer;
+out vec4 outColor;
+void main() {
+  vec3 c = texelFetch(uViews, ivec3(ivec2(gl_FragCoord.xy), uLayer), 0).rgb;
+  outColor = vec4(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0, 0.0, 0.0);
+}`;
+
+// Mean over a (2 uRadius + 1) window along uDir, counting only pixels inside
+// the picture (two passes make core/depth.js's boxSum). Boxes rgb; alpha is
+// passed through.
+const BOX_MEAN = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform ivec2 uDir;
+uniform int uRadius;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  vec3 s = vec3(0.0);
+  float n = 0.0;
+  for (int k = -16; k <= 16; k++) {
+    if (k < -uRadius || k > uRadius) continue;
+    ivec2 q = p + uDir * k;
+    if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
+    s += texelFetch(uSrc, q, 0).rgb;
+    n += 1.0;
+  }
+  outColor = vec4(s / n, texelFetch(uSrc, p, 0).a);
+}`;
+
+// Fine detail: luminance minus its local mean.
+const DEPTH_DETAIL = `#version 300 es
+precision highp float;
+uniform sampler2D uLum;
+uniform sampler2D uLocal;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  outColor = vec4(texelFetch(uLum, p, 0).r - texelFetch(uLocal, p, 0).r, 0.0, 0.0, 0.0);
+}`;
+
+// Spread of the views' detail, shifted for trial depth uAlpha, relative to
+// local brightness; with occlusion the best half of the aperture where it
+// is clearly better. Output: (cost, guide * cost) for the guided filter.
+const DEPTH_VARIANCE = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray uDetail;
+uniform sampler2D uLevel;
+uniform sampler2D uGuide;
+uniform int uCount;
+uniform vec4 uView[${MAX_VIEWS}]; // u * detail, v * detail
+uniform float uAlpha;
+uniform float uFloor;
+uniform int uOcclusion;
+out vec4 outColor;
+
+float detailAt(ivec2 q, int k) {
+  return texelFetch(uDetail, ivec3(q, k), 0).r;
+}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uLevel, 0);
+  // 0: every view; 1-4: views with u <= 0, u >= 0, v <= 0, v >= 0.
+  float s[5];
+  float q[5];
+  float c[5];
+  for (int h = 0; h < 5; h++) {
+    s[h] = 0.0;
+    q[h] = 0.0;
+    c[h] = 0.0;
+  }
+  for (int k = 0; k < ${MAX_VIEWS}; k++) {
+    if (k >= uCount) break;
+    vec2 sh = uAlpha * uView[k].xy;
+    vec2 fl = floor(sh);
+    vec2 a = sh - fl;
+    ivec2 b = p + ivec2(fl);
+    if (b.x < 0 || b.y < 0 || b.x >= size.x - 1 || b.y >= size.y - 1) continue;
+    float v = mix(
+      mix(detailAt(b, k), detailAt(b + ivec2(1, 0), k), a.x),
+      mix(detailAt(b + ivec2(0, 1), k), detailAt(b + ivec2(1, 1), k), a.x),
+      a.y);
+    s[0] += v; q[0] += v * v; c[0] += 1.0;
+    if (uOcclusion == 1) {
+      if (uView[k].x <= 0.0) { s[1] += v; q[1] += v * v; c[1] += 1.0; }
+      if (uView[k].x >= 0.0) { s[2] += v; q[2] += v * v; c[2] += 1.0; }
+      if (uView[k].y <= 0.0) { s[3] += v; q[3] += v * v; c[3] += 1.0; }
+      if (uView[k].y >= 0.0) { s[4] += v; q[4] += v * v; c[4] += 1.0; }
+    }
+  }
+  float level = texelFetch(uLevel, p, 0).r;
+  float norm = level * level + uFloor;
+  float var[5];
+  for (int h = 0; h < 5; h++) {
+    float n = c[h] > 0.0 ? c[h] : 1.0;
+    float m = s[h] / n;
+    var[h] = max(0.0, q[h] / n - m * m) / norm;
+  }
+  float cost = var[0];
+  if (uOcclusion == 1) cost = min(var[0], 1.6 * min(min(var[1], var[2]), min(var[3], var[4])));
+  outColor = vec4(cost, texelFetch(uGuide, p, 0).r * cost, 0.0, 0.0);
+}`;
+
+// Guided filter coefficients from the boxed (cost, guide * cost); the
+// boxed guide statistics (mean, mean square) are in uGuideMeans.
+const DEPTH_GUIDED_AB = `#version 300 es
+precision highp float;
+uniform sampler2D uMeans;
+uniform sampler2D uGuideMeans;
+uniform float uEps;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 m = texelFetch(uMeans, p, 0).rg;
+  vec2 g = texelFetch(uGuideMeans, p, 0).rg;
+  float a = (m.y - g.x * m.x) / (g.y - g.x * g.x + uEps);
+  outColor = vec4(a, m.x - a * g.x, 0.0, m.x);
+}`;
+
+const DEPTH_GUIDED_OUT = `#version 300 es
+precision highp float;
+uniform sampler2D uAB;
+uniform sampler2D uGuide;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 ab = texelFetch(uAB, p, 0);
+  outColor = vec4(max(ab.r * texelFetch(uGuide, p, 0).r + ab.g, 0.5 * ab.a), 0.0, 0.0, 0.0);
+}`;
+
+// Best trial depth per pixel (with a parabola through its neighbours),
+// its cost and the mean cost: (alpha, cost, mean cost).
+const DEPTH_BEST = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray uCost;
+uniform int uSteps;
+uniform float uMin;
+uniform float uStep;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float best = 0.0;
+  int bi = 0;
+  float sum = 0.0;
+  for (int k = 0; k < ${DEPTH_STEPS_MAX}; k++) {
+    if (k >= uSteps) break;
+    float c = texelFetch(uCost, ivec3(p, k), 0).r;
+    sum += c;
+    if (k == 0 || c < best) {
+      best = c;
+      bi = k;
+    }
+  }
+  float offset = 0.0;
+  if (bi > 0 && bi < uSteps - 1) {
+    float a = -texelFetch(uCost, ivec3(p, bi - 1), 0).r;
+    float b = -best;
+    float c = -texelFetch(uCost, ivec3(p, bi + 1), 0).r;
+    float d = a - 2.0 * b + c;
+    if (d < 0.0) offset = clamp(0.5 * (a - c) / d, -0.5, 0.5);
+  }
+  outColor = vec4(uMin + (float(bi) + offset) * uStep, best, sum / float(uSteps), 0.0);
+}`;
+
+// Edge-aware depth smoothing (core/depth.js smoothDepth), one 5 x 5 pass.
+const DEPTH_SMOOTH = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;   // r: depth
+uniform sampler2D uGuide; // r: sqrt luminance, g: confidence
+uniform float uKRange;
+uniform int uUseConf;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  float gi = texelFetch(uGuide, p, 0).r;
+  float sum = 0.0;
+  float wsum = 0.0;
+  for (int dy = -2; dy <= 2; dy++) {
+    for (int dx = -2; dx <= 2; dx++) {
+      ivec2 q = p + ivec2(dx, dy);
+      if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
+      vec2 g = texelFetch(uGuide, q, 0).rg;
+      float d = g.r - gi;
+      float w = exp(-0.5 / (1.2 * 1.2) * float(dx * dx + dy * dy) + uKRange * d * d);
+      if (uUseConf == 1) w *= 0.15 + g.g;
+      sum += texelFetch(uSrc, q, 0).r * w;
+      wsum += w;
+    }
+  }
+  outColor = vec4(wsum > 0.0 ? sum / wsum : texelFetch(uSrc, p, 0).r, 0.0, 0.0, 0.0);
+}`;
+
 function compile(gl, type, src) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
@@ -939,6 +1154,14 @@ export class GpuRenderer {
       lens: program(gl, LENS_PASS),
       box: program(gl, BOX_PASS),
       copy: program(gl, COPY_PASS),
+      depthLum: program(gl, DEPTH_LUM),
+      boxMean: program(gl, BOX_MEAN),
+      depthDetail: program(gl, DEPTH_DETAIL),
+      depthVariance: program(gl, DEPTH_VARIANCE),
+      depthGuidedAB: program(gl, DEPTH_GUIDED_AB),
+      depthGuidedOut: program(gl, DEPTH_GUIDED_OUT),
+      depthBest: program(gl, DEPTH_BEST),
+      depthSmooth: program(gl, DEPTH_SMOOTH),
       bright: program(gl, BRIGHTNESS_PASS),
       view: program(gl, VIEW_PASS),
       refocus: program(gl, REFOCUS_PASS),
@@ -1152,6 +1375,26 @@ export class GpuRenderer {
     };
   }
 
+  // The views' pixels in a rectangle (for measuring focus at a point), as
+  // views for core/depth.js: [{ u, v, rgb, gain, detail }].
+  readViewsRect(x0, y0, w, h) {
+    const gl = this.gl;
+    const { outW, outH } = this.sampler;
+    const { tex, samples, detail } = this.views;
+    const buf = new Float32Array(w * h * 4);
+    return samples.map(({ u, v }, k) => {
+      this.target(tex, outW, outH, k);
+      gl.readPixels(x0, y0, w, h, gl.RGBA, gl.FLOAT, buf);
+      const rgb = new Float32Array(w * h * 3);
+      for (let i = 0; i < w * h; i++) {
+        rgb[3 * i] = buf[4 * i];
+        rgb[3 * i + 1] = buf[4 * i + 1];
+        rgb[3 * i + 2] = buf[4 * i + 2];
+      }
+      return { u, v, rgb, gain: 1, detail };
+    });
+  }
+
   // Refocused picture at `alpha` through an aperture centered on (u0, v0)
   // with Gaussian radius `sigma` (Infinity = the whole aperture).
   refocus(alpha, opts) {
@@ -1322,6 +1565,237 @@ export class GpuRenderer {
     }
     this.depthRange = [lo, hi];
     this.depthSize = [w, h];
+  }
+
+  // Float texture array (one channel) for depth work, reused by size.
+  layers(w, h, n, name) {
+    const key = `${w}x${h}x${n}:${name}:layers`;
+    let t = this.pool.get(key);
+    if (!t) {
+      const gl = this.gl;
+      gl.activeTexture(gl.TEXTURE0 + SPARE_UNIT);
+      t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.R32F, w, h, n);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this.pool.set(key, t);
+    }
+    return t;
+  }
+
+  // Full float scratch texture (depth work needs the precision).
+  scratch32(w, h, name) {
+    const key = `${w}x${h}:${name}:32`;
+    let t = this.pool.get(key);
+    if (!t) {
+      t = this.texture(w, h);
+      this.pool.set(key, t);
+    }
+    return t;
+  }
+
+  // Frees the depth work textures (they are large; depth is measured once
+  // per photo and detail setting).
+  releaseDepthWork() {
+    for (const [key, t] of this.pool) {
+      if (key.includes(':depth')) {
+        this.gl.deleteTexture(t);
+        this.pool.delete(key);
+      }
+    }
+  }
+
+  // Box mean of radius r (see BOX_MEAN) from `src` into `dst` (or a layer).
+  boxMean(src, w, h, r, dst, layer) {
+    const gl = this.gl;
+    const P = this.programs.boxMean;
+    const tmp = this.scratch32(w, h, 'depthBoxTmp');
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    gl.uniform1i(P.u.uRadius, r);
+    this.target(tmp, w, h);
+    this.bindTex(1, src);
+    gl.uniform2i(P.u.uDir, 1, 0);
+    this.draw();
+    this.target(dst, w, h, layer);
+    this.bindTex(1, tmp);
+    gl.uniform2i(P.u.uDir, 0, 1);
+    this.draw();
+  }
+
+  // Uploads w x h values (1 to 4 per pixel) as a full float texture.
+  uploadFloat(values, w, h, name, perPixel = 1) {
+    const gl = this.gl;
+    const rgba = new Float32Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) for (let c = 0; c < perPixel; c++) rgba[4 * i + c] = values[perPixel * i + c];
+    const t = this.scratch32(w, h, name);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, rgba);
+    return t;
+  }
+
+  // Reads channels of a full float texture back: [Float32Array] per channel.
+  readChannels(tex, w, h, count) {
+    const gl = this.gl;
+    this.target(tex, w, h);
+    const buf = new Float32Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, buf);
+    const out = Array.from({ length: count }, () => new Float32Array(w * h));
+    for (let i = 0; i < w * h; i++) for (let c = 0; c < count; c++) out[c][i] = buf[4 * i + c];
+    return out;
+  }
+
+  // The depth measurement of core/depth.js on the views from buildViews():
+  // returns { alpha, cost, meanCost } for finishDepth(). `guide` (0..1 per
+  // pixel) and `floor` come from the center view (depthGuide,
+  // brightnessFloor).
+  measureDepth({ min, max, steps, window, occlusion, guided, floor, guide }) {
+    const gl = this.gl;
+    const P = this.programs;
+    const { outW: w, outH: h } = this.sampler;
+    const { tex: views, samples, detail } = this.views;
+    const count = samples.length;
+    steps = Math.min(steps, DEPTH_STEPS_MAX);
+
+    // Each view's fine detail, and the center view's local brightness.
+    const detailTex = this.layers(w, h, count, 'depthDetail');
+    const lum = this.scratch32(w, h, 'depthLum');
+    const local = this.scratch32(w, h, 'depthLocal');
+    const level = this.scratch32(w, h, 'depthLevel');
+    const mid = Math.floor(count / 2);
+    for (let k = 0; k < count; k++) {
+      this.target(lum, w, h);
+      gl.useProgram(P.depthLum.p);
+      gl.uniform1i(P.depthLum.u.uViews, 2);
+      this.bindTex(2, views, gl.TEXTURE_2D_ARRAY);
+      gl.uniform1i(P.depthLum.u.uLayer, k);
+      this.draw();
+      this.boxMean(lum, w, h, 4, k === mid ? level : local);
+      this.target(detailTex, w, h, k);
+      gl.useProgram(P.depthDetail.p);
+      gl.uniform1i(P.depthDetail.u.uLum, 1);
+      this.bindTex(1, lum);
+      gl.uniform1i(P.depthDetail.u.uLocal, 3);
+      this.bindTex(3, k === mid ? level : local);
+      this.draw();
+    }
+
+    // Guide and its local statistics for the guided filter.
+    const r = window + 1;
+    const guideTex = this.uploadFloat(guide, w, h, 'depthGuide');
+    let guideMeans = null;
+    if (guided) {
+      const g2 = new Float32Array(w * h * 2);
+      for (let i = 0; i < w * h; i++) {
+        g2[2 * i] = guide[i];
+        g2[2 * i + 1] = guide[i] * guide[i];
+      }
+      guideMeans = this.scratch32(w, h, 'depthGuideMeans');
+      this.boxMean(this.uploadFloat(g2, w, h, 'depthGuide2', 2), w, h, r, guideMeans);
+    }
+
+    const shifts = new Float32Array(MAX_VIEWS * 4);
+    samples.forEach(({ u, v }, k) => {
+      shifts[4 * k] = u * detail;
+      shifts[4 * k + 1] = v * detail;
+    });
+    const costTex = this.layers(w, h, steps, 'depthCost');
+    const variance = this.scratch32(w, h, 'depthVariance');
+    const means = this.scratch32(w, h, 'depthMeans');
+    const ab = this.scratch32(w, h, 'depthAB');
+    const abMeans = this.scratch32(w, h, 'depthABMeans');
+    for (let k = 0; k < steps; k++) {
+      const alpha = min + ((max - min) * k) / (steps - 1);
+      let Q = P.depthVariance;
+      this.target(variance, w, h);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uDetail, 2);
+      this.bindTex(2, detailTex, gl.TEXTURE_2D_ARRAY);
+      gl.uniform1i(Q.u.uLevel, 1);
+      this.bindTex(1, level);
+      gl.uniform1i(Q.u.uGuide, 3);
+      this.bindTex(3, guideTex);
+      gl.uniform1i(Q.u.uCount, count);
+      gl.uniform4fv(Q.u.uView, shifts);
+      gl.uniform1f(Q.u.uAlpha, alpha);
+      gl.uniform1f(Q.u.uFloor, floor);
+      gl.uniform1i(Q.u.uOcclusion, occlusion ? 1 : 0);
+      this.draw();
+      if (!guided) {
+        this.boxMean(variance, w, h, window, costTex, k);
+        continue;
+      }
+      this.boxMean(variance, w, h, r, means);
+      Q = P.depthGuidedAB;
+      this.target(ab, w, h);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uMeans, 1);
+      this.bindTex(1, means);
+      gl.uniform1i(Q.u.uGuideMeans, 3);
+      this.bindTex(3, guideMeans);
+      gl.uniform1f(Q.u.uEps, 1e-3);
+      this.draw();
+      this.boxMean(ab, w, h, r, abMeans);
+      Q = P.depthGuidedOut;
+      this.target(costTex, w, h, k);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uAB, 1);
+      this.bindTex(1, abMeans);
+      gl.uniform1i(Q.u.uGuide, 3);
+      this.bindTex(3, guideTex);
+      this.draw();
+    }
+
+    const best = this.scratch32(w, h, 'depthBest');
+    const Q = P.depthBest;
+    this.target(best, w, h);
+    gl.useProgram(Q.p);
+    gl.uniform1i(Q.u.uCost, 2);
+    this.bindTex(2, costTex, gl.TEXTURE_2D_ARRAY);
+    gl.uniform1i(Q.u.uSteps, steps);
+    gl.uniform1f(Q.u.uMin, min);
+    gl.uniform1f(Q.u.uStep, (max - min) / (steps - 1));
+    this.draw();
+    const [alpha, cost, meanCost] = this.readChannels(best, w, h, 3);
+    this.releaseDepthWork();
+    return { alpha, cost, meanCost };
+  }
+
+  // Edge-aware depth smoothing (core/depth.js smoothDepth) on the GPU.
+  // `guide`: linear RGB (w x h); returns a new Float32Array.
+  smoothDepth(alpha, w, h, guide, { amount = 0.3, confidence = null } = {}) {
+    const passes = Math.round(amount * 8);
+    if (passes <= 0) return alpha;
+    const gl = this.gl;
+    const g = new Float32Array(w * h * 2);
+    let mean = 0;
+    for (let i = 0; i < w * h; i++) {
+      const y = Math.sqrt(Math.max(0, 0.2126 * guide[3 * i] + 0.7152 * guide[3 * i + 1] + 0.0722 * guide[3 * i + 2]));
+      g[2 * i] = y;
+      g[2 * i + 1] = confidence ? confidence[i] : 0;
+      mean += y;
+    }
+    mean = Math.max(1e-6, mean / (w * h));
+    const guideTex = this.uploadFloat(g, w, h, 'depthSmoothGuide', 2);
+    let src = this.uploadFloat(alpha, w, h, 'depthSmoothA');
+    let dst = this.scratch32(w, h, 'depthSmoothB');
+    const P = this.programs.depthSmooth;
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    gl.uniform1i(P.u.uGuide, 3);
+    gl.uniform1f(P.u.uKRange, -0.5 / (0.08 * mean) ** 2);
+    gl.uniform1i(P.u.uUseConf, confidence ? 1 : 0);
+    for (let pass = 0; pass < passes; pass++) {
+      this.target(dst, w, h);
+      this.bindTex(1, src);
+      this.bindTex(3, guideTex);
+      this.draw();
+      [src, dst] = [dst, src];
+    }
+    const [out] = this.readChannels(src, w, h, 1);
+    this.releaseDepthWork();
+    return out;
   }
 
   // Synthetic depth of field with bokeh. `strength`: blur radius in pixels

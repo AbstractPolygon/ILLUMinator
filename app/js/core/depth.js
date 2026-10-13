@@ -6,7 +6,7 @@
 // brings that pixel into focus, which the high quality renderer uses to keep
 // every depth sharp.
 
-function luminance(rgb, n) {
+export function luminance(rgb, n = rgb.length / 3) {
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) out[i] = 0.2126 * rgb[3 * i] + 0.7152 * rgb[3 * i + 1] + 0.0722 * rgb[3 * i + 2];
   return out;
@@ -127,7 +127,7 @@ function detailOf(lum, w, h) {
 
 // (15% of the picture's mean brightness)^2: the smallest brightness the
 // depth measures normalize by.
-function brightnessFloor(lum) {
+export function brightnessFloor(lum) {
   let s = 0;
   for (let i = 0; i < lum.length; i++) s += lum[i];
   const mean = s / Math.max(1, lum.length);
@@ -246,12 +246,29 @@ function removeOutliers(alpha, confidence, w, h, threshold = 0.45) {
   return out;
 }
 
+// The trial depths and cost window of the depth measurement.
+export const DEPTH_SEARCH = { min: -1.6, max: 1.6, steps: 33, window: 3 };
+
+// The photo's brightness (square root, 0..1) from the center view's
+// luminance: guides the edge-aware steps.
+export function depthGuide(center) {
+  const n = center.length;
+  const guide = new Float32Array(n);
+  let gmax = 1e-9;
+  for (let i = 0; i < n; i++) {
+    guide[i] = Math.sqrt(Math.max(0, center[i]));
+    if (guide[i] > gmax) gmax = guide[i];
+  }
+  for (let i = 0; i < n; i++) guide[i] /= gmax;
+  return guide;
+}
+
 // views: [{ u, v, rgb, gain, detail }] as used by refocus().
 // Returns { alpha: Float32Array (per pixel), confidence: Float32Array }.
 // Options: occlusion (best half of the aperture at depth edges), guided
 // (edge-aware cost aggregation) and refine (edge-aware weighted median),
 // all on by default.
-export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, steps = 33, window = 3, onProgress, ...opts } = {}) {
+export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, steps = DEPTH_SEARCH.steps, window = DEPTH_SEARCH.window, onProgress, ...opts } = {}) {
   const { occlusion = true, guided = true, refine = true } = opts;
   const n = width * height;
   const alphas = Array.from({ length: steps }, (_, i) => min + ((max - min) * i) / (steps - 1));
@@ -260,14 +277,7 @@ export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, ste
   const minLevel = brightnessFloor(center);
   const level = detailOf(center, width, height).local;
   const lums = raw.map((l) => detailOf(l, width, height).detail);
-  // The photo's brightness (square root, 0..1) guides the edge-aware steps.
-  const guide = new Float32Array(n);
-  let gmax = 1e-9;
-  for (let i = 0; i < n; i++) {
-    guide[i] = Math.sqrt(Math.max(0, center[i]));
-    if (guide[i] > gmax) gmax = guide[i];
-  }
-  for (let i = 0; i < n; i++) guide[i] /= gmax;
+  const guide = depthGuide(center);
   // Higher score = better agreement.
   const scores = alphas.map((a, k) => {
     if (onProgress) onProgress(k / steps);
@@ -300,10 +310,20 @@ export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, ste
     alpha[i] = alphas[best] + offset * step;
     confidence[i] = -scores[best][i];
   }
+  if (onProgress) onProgress(1);
+  return finishDepth({ alpha, cost: confidence, meanCost }, width, height, guide, { refine, min, max });
+}
+
+// The finishing steps of the depth measurement, from the best trial depth
+// per pixel (`alpha`), its cost and the mean cost over the trial depths
+// (measured here or on the GPU): confidence, filling in, outlier removal.
+export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max } = {}) {
+  const n = width * height;
+  const confidence = Float32Array.from(cost);
   // A pronounced minimum is trustworthy; in blank regions every depth looks
   // alike apart from sensor noise. The median cost stands in for the noise
   // floor, so only differences well above it count.
-  const floor = [...meanCost].sort((a, b) => a - b)[n >> 1];
+  const floor = Float32Array.from(meanCost).sort()[n >> 1];
   for (let i = 0; i < n; i++) {
     const gain = Math.max(0, meanCost[i] - confidence[i]);
     confidence[i] = (gain / (meanCost[i] + floor)) ** 2;
@@ -314,7 +334,6 @@ export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, ste
     const c = Math.min(1, confidence[i] * 4);
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
-  if (onProgress) onProgress(1);
   const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height);
   const result = refine ? weightedMedian(cleaned, guide, width, height) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
   return { alpha: result, confidence, range: [min, max] };
@@ -323,11 +342,13 @@ export function estimateDepth(views, width, height, { min = -1.6, max = 1.6, ste
 // Focus value that makes the neighborhood of (x, y) sharpest, measured
 // directly in a small window around the point (more faithful to the exact
 // spot than the smoothed depth map). Returns { alpha, confidence }.
-export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2, step = 0.025, radius = 5 } = {}) {
+// `floor`: brightnessFloor() of the whole center view, when `views` hold
+// only part of the picture.
+export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2, step = 0.025, radius = 5, floor = null } = {}) {
   const n = width * height;
   const raw = views.map((v) => luminance(v.rgb, n).map((l) => l * v.gain));
   const center = raw[Math.floor(raw.length / 2)];
-  const floor = brightnessFloor(center);
+  floor ??= brightnessFloor(center);
   const level = detailOf(center, width, height).local;
   const lums = raw.map((l) => detailOf(l, width, height).detail);
   const cx = Math.round(x);
