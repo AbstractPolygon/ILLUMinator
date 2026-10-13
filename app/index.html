@@ -63,7 +63,7 @@
             <button id="thumb-smaller" type="button" class="icon-only" title="Smaller thumbnails (−)" aria-label="Smaller thumbnails">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
-            <input id="thumb-size" type="range" min="100" max="420" step="10" value="180" aria-label="Thumbnail size">
+            <input id="thumb-size" title="Size of the photo thumbnails" type="range" min="100" max="420" step="10" value="180" aria-label="Thumbnail size">
             <button id="thumb-bigger" type="button" class="icon-only" title="Bigger thumbnails (+)" aria-label="Bigger thumbnails">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
             </button>
@@ -112,7 +112,7 @@
           <button id="play-btn" class="icon-btn" type="button" title="Play (space)" aria-label="Play"></button>
           <button id="loop-btn" class="icon-btn" type="button" title="Loop: play over and over" aria-label="Loop" aria-pressed="true"></button>
         </div>
-        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Animation position">
+        <input id="scrub" title="Drag to move through the animation" type="range" min="0" max="0" value="0" aria-label="Animation position">
         <span id="frame-label" class="hint"></span>
         <label id="anim-length-row" class="anim-length" title="Length of the animation in frames">Length
           <input id="anim-length" type="number" min="2" max="2881" step="1" value="97" aria-label="Animation length in frames"> frames
@@ -193,7 +193,7 @@
           <span class="spacer"></span>
           <button id="crop-btn" type="button" aria-pressed="false" title="Drag the corners or edges of the frame on the picture (Enter to finish, Esc to cancel)">Crop</button>
         </div>
-        <label>Straighten <output for="straighten" data-for="straighten">0.0°</output>
+        <label title="Rotates the picture to level the horizon">Straighten <output for="straighten" data-for="straighten">0.0°</output>
           <input id="straighten" type="range" min="-45" max="45" step="0.1" value="0" data-default="0">
         </label>
         <label>Aspect ratio
@@ -242,7 +242,7 @@
             <span id="lut-name" class="lut-name">None</span>
             <button id="lut-remove" type="button" class="icon-only" title="Remove the LUT" aria-label="Remove the LUT" hidden></button>
           </div>
-          <label class="lut-amount">Amount <output data-for="lut-amount" for="lut-amount">100%</output>
+          <label title="How strongly the LUT applies" class="lut-amount">Amount <output data-for="lut-amount" for="lut-amount">100%</output>
             <input id="lut-amount" type="range" min="0" max="100" step="1" value="100" data-default="100">
           </label>
           <input id="lut-file" type="file" accept=".cube" hidden>
@@ -256,47 +256,47 @@
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.7 5.6 18.4 3.3a1 1 0 0 0-1.4 0l-3.1 3.1-1.9-1.9-1.4 1.4 1.4 1.4-8.3 8.3V20h4.4l8.3-8.3 1.4 1.4 1.4-1.4-1.9-1.9 3.1-3.1a1 1 0 0 0 0-1.4zM7.6 18H6v-1.6l8.1-8.1 1.6 1.6z"/></svg>
             </button>
           </div>
-          <label>Temperature <output for="wb-temperature" data-for="wb-temperature">5500 K</output>
+          <label title="Warmer (higher) or cooler (lower) colors">Temperature <output for="wb-temperature" data-for="wb-temperature">5500 K</output>
             <input id="wb-temperature" type="range" min="2000" max="10000" step="50" value="5500" data-default="5500">
           </label>
-          <label>Tint <output for="wb-tint" data-for="wb-tint">0</output>
+          <label title="Shifts colors toward magenta or green">Tint <output for="wb-tint" data-for="wb-tint">0</output>
             <input id="wb-tint" type="range" min="-150" max="150" step="1" value="0" data-default="0">
           </label>
         </details>
         <details class="subpanel">
           <summary><h3>Tone</h3></summary>
-          <label>Exposure <output for="ev" data-for="ev">0.00 EV</output>
+          <label title="Brightens or darkens the whole picture, in stops">Exposure <output for="ev" data-for="ev">0.00 EV</output>
             <input id="ev" type="range" min="-3" max="3" step="0.05" value="0" data-default="0">
           </label>
-          <label>Contrast <output for="tone-contrast" data-for="tone-contrast">0</output>
+          <label title="Difference between light and dark areas">Contrast <output for="tone-contrast" data-for="tone-contrast">0</output>
             <input id="tone-contrast" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Highlights <output for="tone-highlights" data-for="tone-highlights">0</output>
+          <label title="Brightness of the bright areas">Highlights <output for="tone-highlights" data-for="tone-highlights">0</output>
             <input id="tone-highlights" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Shadows <output for="tone-shadows" data-for="tone-shadows">0</output>
+          <label title="Brightness of the dark areas">Shadows <output for="tone-shadows" data-for="tone-shadows">0</output>
             <input id="tone-shadows" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Whites <output for="tone-whites" data-for="tone-whites">0</output>
+          <label title="Where the brightest tones end (the white point)">Whites <output for="tone-whites" data-for="tone-whites">0</output>
             <input id="tone-whites" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Blacks <output for="tone-blacks" data-for="tone-blacks">0</output>
+          <label title="Where the darkest tones end (the black point)">Blacks <output for="tone-blacks" data-for="tone-blacks">0</output>
             <input id="tone-blacks" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
         </details>
         <details class="subpanel">
           <summary><h3>Tone Curve</h3></summary>
           <canvas id="curve-canvas" class="curve-canvas" width="240" height="240" role="img" aria-label="Tone curve" title="Click to add a point, drag to move it, double-click to remove it"></canvas>
-          <label>Highlights <output data-for="curve-highlights" for="curve-highlights">0</output>
+          <label title="Raises or lowers the curve in the brightest quarter">Highlights <output data-for="curve-highlights" for="curve-highlights">0</output>
             <input id="curve-highlights" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Lights <output data-for="curve-lights" for="curve-lights">0</output>
+          <label title="Raises or lowers the curve in the light midtones">Lights <output data-for="curve-lights" for="curve-lights">0</output>
             <input id="curve-lights" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Darks <output data-for="curve-darks" for="curve-darks">0</output>
+          <label title="Raises or lowers the curve in the dark midtones">Darks <output data-for="curve-darks" for="curve-darks">0</output>
             <input id="curve-darks" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Shadows <output data-for="curve-shadows" for="curve-shadows">0</output>
+          <label title="Raises or lowers the curve in the darkest quarter">Shadows <output data-for="curve-shadows" for="curve-shadows">0</output>
             <input id="curve-shadows" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
           <button id="curve-reset" type="button" class="wide">Reset curve</button>
@@ -304,28 +304,28 @@
         </details>
         <details class="subpanel">
           <summary><h3>Color</h3></summary>
-          <label>Saturation <output for="saturation" data-for="saturation">0</output>
+          <label title="Strength of every color">Saturation <output for="saturation" data-for="saturation">0</output>
             <input id="saturation" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Vibrance <output for="vibrance" data-for="vibrance">0</output>
+          <label title="Strength of the muted colors, sparing skin tones and strong colors">Vibrance <output for="vibrance" data-for="vibrance">0</output>
             <input id="vibrance" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Red <output for="hue-red" data-for="hue-red">0</output>
+          <label title="Saturation of reds">Red <output for="hue-red" data-for="hue-red">0</output>
             <input id="hue-red" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Yellow <output for="hue-yellow" data-for="hue-yellow">0</output>
+          <label title="Saturation of yellows">Yellow <output for="hue-yellow" data-for="hue-yellow">0</output>
             <input id="hue-yellow" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Green <output for="hue-green" data-for="hue-green">0</output>
+          <label title="Saturation of greens">Green <output for="hue-green" data-for="hue-green">0</output>
             <input id="hue-green" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Cyan <output for="hue-cyan" data-for="hue-cyan">0</output>
+          <label title="Saturation of cyans">Cyan <output for="hue-cyan" data-for="hue-cyan">0</output>
             <input id="hue-cyan" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Blue <output for="hue-blue" data-for="hue-blue">0</output>
+          <label title="Saturation of blues">Blue <output for="hue-blue" data-for="hue-blue">0</output>
             <input id="hue-blue" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Magenta <output for="hue-magenta" data-for="hue-magenta">0</output>
+          <label title="Saturation of magentas">Magenta <output for="hue-magenta" data-for="hue-magenta">0</output>
             <input id="hue-magenta" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
         </details>
@@ -396,33 +396,33 @@
             <input id="mx-strength" type="range" min="0" max="100" step="1" value="100" data-default="100">
           </label>
           <div id="mask-shape-radial" class="mask-shape">
-            <label>Center X <output data-for="mr-x" for="mr-x">50</output>
+            <label title="Horizontal position of the mask">Center X <output data-for="mr-x" for="mr-x">50</output>
               <input id="mr-x" type="range" min="0" max="100" step="1" value="50" data-default="50">
             </label>
-            <label>Center Y <output data-for="mr-y" for="mr-y">50</output>
+            <label title="Vertical position of the mask">Center Y <output data-for="mr-y" for="mr-y">50</output>
               <input id="mr-y" type="range" min="0" max="100" step="1" value="50" data-default="50">
             </label>
-            <label>Width <output data-for="mr-w" for="mr-w">25</output>
+            <label title="Width of the mask">Width <output data-for="mr-w" for="mr-w">25</output>
               <input id="mr-w" type="range" min="2" max="100" step="1" value="25" data-default="25">
             </label>
-            <label>Height <output data-for="mr-h" for="mr-h">25</output>
+            <label title="Height of the mask">Height <output data-for="mr-h" for="mr-h">25</output>
               <input id="mr-h" type="range" min="2" max="100" step="1" value="25" data-default="25">
             </label>
-            <label>Feather <output data-for="mr-feather" for="mr-feather">50</output>
+            <label title="How softly the effect fades at the edge">Feather <output data-for="mr-feather" for="mr-feather">50</output>
               <input id="mr-feather" type="range" min="0" max="100" step="1" value="50" data-default="50">
             </label>
           </div>
           <div id="mask-shape-linear" class="mask-shape" hidden>
-            <label>Center X <output data-for="ml-x" for="ml-x">50</output>
+            <label title="Horizontal position of the gradient">Center X <output data-for="ml-x" for="ml-x">50</output>
               <input id="ml-x" type="range" min="0" max="100" step="1" value="50" data-default="50">
             </label>
-            <label>Center Y <output data-for="ml-y" for="ml-y">50</output>
+            <label title="Vertical position of the gradient">Center Y <output data-for="ml-y" for="ml-y">50</output>
               <input id="ml-y" type="range" min="0" max="100" step="1" value="50" data-default="50">
             </label>
-            <label>Angle <output data-for="ml-angle" for="ml-angle">90</output>
+            <label title="Direction of the gradient">Angle <output data-for="ml-angle" for="ml-angle">90</output>
               <input id="ml-angle" type="range" min="-180" max="180" step="1" value="90" data-default="90">
             </label>
-            <label>Fade <output data-for="ml-width" for="ml-width">30</output>
+            <label title="How far the gradient fades">Fade <output data-for="ml-width" for="ml-width">30</output>
               <input id="ml-width" type="range" min="2" max="100" step="1" value="30" data-default="30">
             </label>
           </div>
@@ -430,28 +430,28 @@
             <label title="Depth where the effect starts (negative is nearer than the camera&#8217;s focus)">Near <output data-for="md-near" for="md-near">-30</output>
               <input id="md-near" type="range" min="-160" max="160" step="1" value="-30" data-default="-30">
             </label>
-            <label>Far <output data-for="md-far" for="md-far">30</output>
+            <label title="Depth where the effect ends">Far <output data-for="md-far" for="md-far">30</output>
               <input id="md-far" type="range" min="-160" max="160" step="1" value="30" data-default="30">
             </label>
-            <label>Feather <output data-for="md-feather" for="md-feather">20</output>
+            <label title="How softly the effect fades beyond near and far">Feather <output data-for="md-feather" for="md-feather">20</output>
               <input id="md-feather" type="range" min="1" max="100" step="1" value="20" data-default="20">
             </label>
             <label class="check" title="Near and far move with the focus, keeping their distance from it (also when the focus is animated)"><input id="mask-follow" type="checkbox"> Follow focus</label>
           </div>
           <h3 class="mask-fx-title">Effect</h3>
-            <label>Exposure <output data-for="mx-exposure" for="mx-exposure">0</output>
+            <label title="Brightens or darkens what the mask covers">Exposure <output data-for="mx-exposure" for="mx-exposure">0</output>
               <input id="mx-exposure" type="range" min="-200" max="200" step="5" value="0" data-default="0">
             </label>
-            <label>Contrast <output data-for="mx-contrast" for="mx-contrast">0</output>
+            <label title="Contrast of what the mask covers">Contrast <output data-for="mx-contrast" for="mx-contrast">0</output>
               <input id="mx-contrast" type="range" min="-100" max="100" step="1" value="0" data-default="0">
             </label>
-            <label>Saturation <output data-for="mx-saturation" for="mx-saturation">0</output>
+            <label title="Color strength of what the mask covers">Saturation <output data-for="mx-saturation" for="mx-saturation">0</output>
               <input id="mx-saturation" type="range" min="-100" max="100" step="1" value="0" data-default="0">
             </label>
-            <label>Temperature <output data-for="mx-temperature" for="mx-temperature">0</output>
+            <label title="Warms or cools what the mask covers">Temperature <output data-for="mx-temperature" for="mx-temperature">0</output>
               <input id="mx-temperature" type="range" min="-100" max="100" step="1" value="0" data-default="0">
             </label>
-            <label>Tint <output data-for="mx-tint" for="mx-tint">0</output>
+            <label title="Shifts what the mask covers toward magenta or green">Tint <output data-for="mx-tint" for="mx-tint">0</output>
               <input id="mx-tint" type="range" min="-100" max="100" step="1" value="0" data-default="0">
             </label>
             <label title="Softens what the mask covers">Blur <output data-for="mx-blur" for="mx-blur">0</output>
@@ -472,14 +472,14 @@
         <summary><h2>Camera</h2></summary>
         <details class="subpanel">
           <summary><h3>Depth</h3></summary>
-          <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
+          <label title="Lens opening: a wider aperture (lower f-number) blurs more away from the focus">Aperture <output id="fstop-label" for="fstop">f/22</output>
             <input id="fstop" type="range" min="0" max="11" step="1" value="0">
           </label>
-          <label>Depth <output data-for="dof-depth" for="dof-depth">0</output>
+          <label title="How quickly things blur away from the focus">Depth <output data-for="dof-depth" for="dof-depth">0</output>
             <input id="dof-depth" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
           <input id="focus" type="hidden" value="0">
-          <label>Smoothing <output for="depth-smooth" data-for="depth-smooth">30</output>
+          <label title="Smooths the depth map, following the picture’s edges">Smoothing <output for="depth-smooth" data-for="depth-smooth">30</output>
             <input id="depth-smooth" type="range" min="0" max="100" step="5" value="30" data-default="30">
           </label>
           <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
@@ -488,7 +488,7 @@
         <details class="subpanel">
           <summary><h3>Focus Spread</h3></summary>
           <label>Focus Point <output id="focus-point">Center</output></label>
-          <label>Spread <output data-for="spread" for="spread">0</output>
+          <label title="Range of depth kept sharp on each side of the focus">Spread <output data-for="spread" for="spread">0</output>
             <input id="spread" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
           <label title="Softens the edges of the sharp range: blur builds up gradually instead of starting at once">Smoothing <output data-for="spread-smooth" for="spread-smooth">0</output>
@@ -499,10 +499,10 @@
         <details class="subpanel">
           <summary><h3>Tilt</h3></summary>
           <label class="check"><input id="tilt-on" type="checkbox"> Enabled</label>
-          <label>Tilt <output data-for="tilt" for="tilt">0</output>
+          <label title="How far the plane of focus tilts">Tilt <output data-for="tilt" for="tilt">0</output>
             <input id="tilt" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Rotation <output data-for="tilt-rotation" for="tilt-rotation">0°</output>
+          <label title="Direction the plane of focus tilts">Rotation <output data-for="tilt-rotation" for="tilt-rotation">0°</output>
             <input id="tilt-rotation" type="range" min="-90" max="90" step="1" value="0" data-default="0">
           </label>
         </details>
@@ -510,7 +510,7 @@
           <summary><h3>Perspective</h3></summary>
           <label title="Drag on the picture to move the viewpoint">Viewpoint <output id="viewpoint">Center</output></label>
           <label class="check" title="Choose the depth that stays still when the viewpoint moves; otherwise it is the focus plane (or, with the aperture closed, the camera's own focus)"><input id="pivot-on" type="checkbox"> Custom pivot</label>
-          <label>Pivot depth <output data-for="pivot" for="pivot">0</output>
+          <label title="The depth that stays still when the viewpoint moves">Pivot depth <output data-for="pivot" for="pivot">0</output>
             <input id="pivot" type="range" min="-100" max="100" step="1" value="0" data-default="0" disabled>
           </label>
         </details>
@@ -524,7 +524,7 @@
               <option value="hexagon">Hexagon</option>
             </select>
           </label>
-          <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+          <label title="How brightly highlights glow into bokeh">Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
         </details>
       </details>
 
@@ -532,13 +532,13 @@
         <summary><h2>Details</h2></summary>
         <details class="subpanel">
           <summary><h3>Sharpening</h3></summary>
-          <label>Amount <output for="sharp-amount" data-for="sharp-amount">0</output>
+          <label title="Strength of sharpening">Amount <output for="sharp-amount" data-for="sharp-amount">0</output>
             <input id="sharp-amount" type="range" min="0" max="150" step="1" value="0" data-default="0">
           </label>
-          <label>Radius <output for="sharp-radius" data-for="sharp-radius">1.0</output>
+          <label title="Size of the details sharpened">Radius <output for="sharp-radius" data-for="sharp-radius">1.0</output>
             <input id="sharp-radius" type="range" min="0.5" max="3" step="0.1" value="1" data-default="1">
           </label>
-          <label>Detail <output for="sharp-detail" data-for="sharp-detail">25</output>
+          <label title="How much fine texture is sharpened">Detail <output for="sharp-detail" data-for="sharp-detail">25</output>
             <input id="sharp-detail" type="range" min="0" max="100" step="1" value="25" data-default="25">
           </label>
           <label title="Sharpen only edges: 0 sharpens everything, 100 only the strongest edges">Masking <output for="sharp-masking" data-for="sharp-masking">0</output>
@@ -548,13 +548,13 @@
         <details class="subpanel">
           <summary><h3>Noise Reduction</h3></summary>
           <label class="check"><input id="mv-on" type="checkbox"> Multi-view</label>
-          <label>Blend <output for="mv-blend" data-for="mv-blend">100</output>
+          <label title="How much the other views are blended in to reduce noise">Blend <output for="mv-blend" data-for="mv-blend">100</output>
             <input id="mv-blend" type="range" min="0" max="100" step="1" value="100" data-default="100" disabled>
           </label>
-          <label>Luminance <output for="nr-luminance" data-for="nr-luminance">0</output>
+          <label title="Smooths grain in brightness">Luminance <output for="nr-luminance" data-for="nr-luminance">0</output>
             <input id="nr-luminance" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Color <output for="nr-color" data-for="nr-color">0</output>
+          <label title="Removes color speckles">Color <output for="nr-color" data-for="nr-color">0</output>
             <input id="nr-color" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
         </details>
@@ -570,24 +570,24 @@
             <label class="check"><input id="fringe-auto" type="checkbox" disabled> Auto</label>
           </div>
           <fieldset id="fringe-controls" class="plain" disabled>
-          <label>Radius <output id="fringe-radius-label" for="fringe-radius">2 px</output>
+          <label title="How far from edges fringes are looked for">Radius <output id="fringe-radius-label" for="fringe-radius">2 px</output>
             <input id="fringe-radius" type="range" min="1" max="6" step="1" value="2">
           </label>
-          <label>Threshold <input id="fringe-threshold" type="range" min="0.05" max="0.8" step="0.05" value="0.25"></label>
-          <label>Purple amount <input id="fringe-purple" type="range" min="0" max="1" step="0.05" value="0"></label>
-          <label>Purple hue <output id="fringe-purple-hue-label" for="fringe-purple-hue">300°</output>
+          <label title="How strong an edge must be to be defringed">Threshold <input id="fringe-threshold" type="range" min="0.05" max="0.8" step="0.05" value="0.25"></label>
+          <label title="Removes purple fringes">Purple amount <input id="fringe-purple" type="range" min="0" max="1" step="0.05" value="0"></label>
+          <label title="Which purple to remove">Purple hue <output id="fringe-purple-hue-label" for="fringe-purple-hue">300°</output>
             <input id="fringe-purple-hue" type="range" min="240" max="340" step="5" value="300">
           </label>
-          <label>Green amount <input id="fringe-green" type="range" min="0" max="1" step="0.05" value="0"></label>
-          <label>Green hue <output id="fringe-green-hue-label" for="fringe-green-hue">100°</output>
+          <label title="Removes green fringes">Green amount <input id="fringe-green" type="range" min="0" max="1" step="0.05" value="0"></label>
+          <label title="Which green to remove">Green hue <output id="fringe-green-hue-label" for="fringe-green-hue">100°</output>
             <input id="fringe-green-hue" type="range" min="50" max="160" step="5" value="100">
           </label>
-          <label>Red amount <input id="fringe-red" type="range" min="0" max="1" step="0.05" value="0"></label>
-          <label>Red hue <output id="fringe-red-hue-label" for="fringe-red-hue">0°</output>
+          <label title="Removes red fringes">Red amount <input id="fringe-red" type="range" min="0" max="1" step="0.05" value="0"></label>
+          <label title="Which red to remove">Red hue <output id="fringe-red-hue-label" for="fringe-red-hue">0°</output>
             <input id="fringe-red-hue" type="range" min="-30" max="60" step="5" value="0">
           </label>
-          <label>Blue amount <input id="fringe-blue" type="range" min="0" max="1" step="0.05" value="0"></label>
-          <label>Blue hue <output id="fringe-blue-hue-label" for="fringe-blue-hue">220°</output>
+          <label title="Removes blue fringes">Blue amount <input id="fringe-blue" type="range" min="0" max="1" step="0.05" value="0"></label>
+          <label title="Which blue to remove">Blue hue <output id="fringe-blue-hue-label" for="fringe-blue-hue">220°</output>
             <input id="fringe-blue-hue" type="range" min="180" max="260" step="5" value="220">
           </label>
           </fieldset>
@@ -607,7 +607,7 @@
         <details class="subpanel">
           <summary><h3>Flare</h3></summary>
           <label class="check" title="Removes the haze lens flare lays over the picture"><input id="flare-on" type="checkbox"> Reduce flare</label>
-          <label>Amount <output data-for="flare-amount" for="flare-amount">70</output>
+          <label title="How much of the flare haze is removed">Amount <output data-for="flare-amount" for="flare-amount">70</output>
             <input id="flare-amount" type="range" min="0" max="100" step="1" value="70" data-default="70" disabled>
           </label>
         </details>
@@ -651,22 +651,22 @@
               <option value="diagonal">Diagonal</option>
             </select>
           </label>
-          <label>Amount <input id="amount" type="range" min="0.1" max="1" step="0.05" value="0.85"></label>
+          <label title="How far the viewpoint moves along the path">Amount <input id="amount" type="range" min="0.1" max="1" step="0.05" value="0.85"></label>
           <input id="frames" type="hidden" value="48">
         </div>
         <div id="anim-focus" hidden>
-          <label>Near <input id="near" type="range" min="-1.6" max="0" step="0.05" value="-0.6"></label>
-          <label>Far <input id="far" type="range" min="0" max="1.6" step="0.05" value="0.6"></label>
-          <label>Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
+          <label title="Nearest focus of the sweep">Near <input id="near" type="range" min="-1.6" max="0" step="0.05" value="-0.6"></label>
+          <label title="Farthest focus of the sweep">Far <input id="far" type="range" min="0" max="1.6" step="0.05" value="0.6"></label>
+          <label title="Number of frames in the sweep">Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
         </div>
         <div id="anim-keyframes" hidden>
           <label title="Zooms in on the picture (pan and zoom)">Zoom <output data-for="frame-zoom" for="frame-zoom">100%</output>
             <input id="frame-zoom" type="range" min="100" max="300" step="5" value="100" data-default="100">
           </label>
-          <label>Pan X <output data-for="frame-pan-x" for="frame-pan-x">0</output>
+          <label title="Moves the zoomed picture left or right">Pan X <output data-for="frame-pan-x" for="frame-pan-x">0</output>
             <input id="frame-pan-x" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
-          <label>Pan Y <output data-for="frame-pan-y" for="frame-pan-y">0</output>
+          <label title="Moves the zoomed picture up or down">Pan Y <output data-for="frame-pan-y" for="frame-pan-y">0</output>
             <input id="frame-pan-y" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
           <input id="anim-keys" type="hidden" value="[]" data-text>
@@ -738,8 +738,8 @@
       <details class="panel" data-panel="lenslets" hidden>
         <summary><h2>Microlens grid</h2></summary>
         <p id="grid-info" class="hint"></p>
-        <label>X <input id="lens-x" type="range" min="0" max="1" step="0.001" value="0.5"></label>
-        <label>Y <input id="lens-y" type="range" min="0" max="1" step="0.001" value="0.5"></label>
+        <label title="Horizontal position on the sensor">X <input id="lens-x" type="range" min="0" max="1" step="0.001" value="0.5"></label>
+        <label title="Vertical position on the sensor">Y <input id="lens-y" type="range" min="0" max="1" step="0.001" value="0.5"></label>
         <div class="row">
           <button id="grid-auto">Recalibrate</button>
           <button id="grid-meta">Use metadata</button>

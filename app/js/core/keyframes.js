@@ -28,10 +28,14 @@ export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'pa
 // Besides those, 'mask:<id>:<attr>': a setting of local adjustment <id>
 // (its strength, a shape setting or an effect; see core/local.js).
 export const isMaskTrack = (k) => /^mask:[\w-]+:[a-z]+$/.test(k);
+// And 'set:<control id>': a Process or Optics slider (its value as the
+// slider shows it).
+export const isSettingTrack = (k) => /^set:[\w-]+$/.test(k);
+const isExtraTrack = (k) => isMaskTrack(k) || isSettingTrack(k);
 
 // Every track the animation has.
 export function trackNames(anim) {
-  return [...TRACKS, ...Object.keys(anim.tracks).filter(isMaskTrack)];
+  return [...TRACKS, ...Object.keys(anim.tracks).filter(isExtraTrack)];
 }
 export const FPS = 24;
 export const DEFAULT_LENGTH = 4;
@@ -65,7 +69,7 @@ export function parseAnimation(text) {
     a.tracks.panX = keys.map((key) => ({ ...key, v: key.v[0] }));
     a.tracks.panY = keys.map((key) => ({ ...key, v: key.v[1] }));
   }
-  const names = [...TRACKS, ...Object.keys((a.tracks && typeof a.tracks === 'object' && a.tracks) || {}).filter(isMaskTrack)];
+  const names = [...TRACKS, ...Object.keys((a.tracks && typeof a.tracks === 'object' && a.tracks) || {}).filter(isExtraTrack)];
   for (const k of names) {
     const list = a.tracks && Array.isArray(a.tracks[k]) ? a.tracks[k] : [];
     out.tracks[k] = list

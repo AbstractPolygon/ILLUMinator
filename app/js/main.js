@@ -11,7 +11,7 @@ import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
 import { parseCube, encodeLut, decodeLut } from './core/lut.js';
 import { ARCHIVE_SUFFIX } from './library/archive.js';
-import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack } from './core/keyframes.js';
+import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack, isSettingTrack } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
 // (the Frame rate setting).
@@ -2358,12 +2358,20 @@ function trackGroups(mode = $('anim').value) {
     if (!subs.length) return;
     groups.push({ id, name, sections: true, tracks: subs.filter((g) => !g.off).flatMap((g) => g.tracks) }, ...subs.map((g) => ({ ...g, parent: id })));
   };
+  // A setting's track shows (and counts) while its slider can be used.
+  const settingSection = (panel) => section(panel.id, panel.name, panel.subs.map((sub) => ({
+    id: sub.id, name: sub.name, tracks: sub.tracks.filter((k) => !settingControl(k).matches(':disabled')),
+  })).filter((sub) => sub.tracks.length));
+  const [processPanel, opticsPanel] = settingPanels();
+  // In the sidebar's order.
   if (mode === 'keyframes') {
+    settingSection(processPanel);
+    // `off`: a disabled adjustment, whose keyframes the editor hides.
+    section('local', 'Local Adjustments', getMasks().map((m, i) => ({ id: m.id, name: m.name || maskLabel(m, i), off: !m.on, tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) })));
     section('camera', 'Camera', CAMERA_SECTIONS
       .filter((sec) => !sec.when || sec.when())
       .map((sec) => ({ id: sec.id, name: sec.name, tracks: sec.tracks.filter((k) => k !== 'pivot' || $('pivot-on').checked) })));
-    // `off`: a disabled adjustment, whose keyframes the editor hides.
-    section('local', 'Local Adjustments', getMasks().map((m, i) => ({ id: m.id, name: m.name || maskLabel(m, i), off: !m.on, tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) })));
+    settingSection(opticsPanel);
   }
   section('animation', 'Animation', ANIMATION_SECTIONS.filter((sec) => sec.mode === mode).map((sec) => ({ id: sec.id, name: sec.name, tracks: sec.tracks })));
   for (const g of groups) for (const k of g.tracks) if (!anim.tracks[k]) anim.tracks[k] = [];
@@ -2456,6 +2464,37 @@ function setupKeyButtons() {
     label.append(nav);
   }
 }
+// Process and Optics sliders can be keyframed too ('set:<id>' tracks), by
+// panel and section as the sidebar has them. Read from the sidebar once.
+const SETTING_PANELS = ['Process', 'Optics'];
+let settingPanelList = null;
+function settingPanels() {
+  if (settingPanelList) return settingPanelList;
+  settingPanelList = SETTING_PANELS.map((title) => {
+    const panel = [...document.querySelectorAll('details.panel')].find((d) => {
+      const h = d.querySelector(':scope > summary h2');
+      return h && h.textContent.trim() === title;
+    });
+    const subs = panel ? [...panel.querySelectorAll(':scope > details.subpanel')].map((sub) => {
+      const name = sub.querySelector(':scope > summary h3').textContent.trim();
+      return {
+        id: `set-${name.toLowerCase().replace(/[^a-z]+/g, '-')}`,
+        name,
+        tracks: [...sub.querySelectorAll('input[type=range]')].filter((el) => el.closest('label')).map((el) => `set:${el.id}`),
+      };
+    }).filter((sub) => sub.tracks.length) : [];
+    return { id: title.toLowerCase(), name: title, subs };
+  });
+  return settingPanelList;
+}
+const settingControl = (k) => $(k.slice(4));
+// A setting track's name: its slider's label.
+function settingName(k) {
+  const label = settingControl(k).closest('label');
+  return label.firstChild.textContent.trim();
+}
+for (const panel of settingPanels()) for (const sub of panel.subs) for (const k of sub.tracks) KEY_CONTROLS[k.slice(4)] = [k];
+
 setupKeyButtons();
 
 // The keyframe times of a sidebar setting's tracks, in order.
@@ -2544,12 +2583,13 @@ function toggleGroup(id) {
 }
 
 function trackName(k) {
+  if (isSettingTrack(k)) return settingName(k);
   return isMaskTrack(k) ? MASK_ATTR_NAMES[parseMaskTrack(k).attr] || k : TRACK_NAMES[k];
 }
 
 // With the group's name, for tooltips.
 function trackTitle(k) {
-  if (!isMaskTrack(k)) return TRACK_NAMES[k];
+  if (!isMaskTrack(k) && !isSettingTrack(k)) return TRACK_NAMES[k];
   const g = trackGroups().find((x) => !x.sections && x.tracks.includes(k));
   return `${g ? g.name : 'Mask'} ${trackName(k).toLowerCase()}`;
 }
@@ -2636,6 +2676,7 @@ function combineMotion(a, b) {
 }
 
 function currentValue(k) {
+  if (isSettingTrack(k)) return +settingControl(k).value;
   if (isMaskTrack(k)) {
     const { id, attr } = parseMaskTrack(k);
     const m = getMasks().find((x) => x.id === id);
@@ -2669,6 +2710,14 @@ const TRACK_SLIDERS = { spread: 'spread', spreadSmooth: 'spread-smooth', tilt: '
 // Shows a keyframe's value in the controls (and the picture).
 // Sets the control behind track k to v.
 function applyValue(k, v) {
+  if (isSettingTrack(k)) {
+    const el = settingControl(k);
+    el.value = v;
+    showSliderValue(el);
+    // Sent to the worker once the values are all set (see settingsShown).
+    settingsDirty = true;
+    return;
+  }
   if (isMaskTrack(k)) {
     const { id, attr } = parseMaskTrack(k);
     const masks = getMasks();
@@ -2712,8 +2761,17 @@ function applyValue(k, v) {
   }
 }
 
+// Process and Optics values shown from keyframes go to the worker in one go.
+let settingsDirty = false;
+function settingsShown() {
+  if (!settingsDirty) return;
+  settingsDirty = false;
+  applySettingsSoon();
+}
+
 function showValue(k, v) {
   applyValue(k, v);
+  settingsShown();
   // Showing a keyframe is not a change to record.
   autoKeyBase = currentValues();
   if (state.showingFrames) backToCamera();
@@ -2731,6 +2789,7 @@ function previewAt(t) {
   }
   autoKeyBase = currentValues();
   if (!any) return;
+  settingsShown();
   if (state.showingFrames) backToCamera();
   cameraChanged({ final: false });
 }
@@ -3379,6 +3438,9 @@ function keyframeFrames() {
   const path = [];
   const frames = [];
   const maskTracks = tracks().filter((k) => isMaskTrack(k) && anim.tracks[k].length);
+  // Keyframed Process and Optics sliders: each frame carries its color
+  // settings.
+  const colorKeyed = tracks().some((k) => isSettingTrack(k) && anim.tracks[k].length);
   for (const v of sample(anim, KEY_FPS)) {
     // Local adjustment settings this frame: { id: { attr: value } }.
     let masks = null;
@@ -3391,7 +3453,8 @@ function keyframeFrames() {
     const lens = apertureFor(v.aperture ?? live.aperture);
     const depth = v.depth ?? live.depth;
     const view = v.view ?? [state.camera.u, state.camera.v];
-    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50), masks, pivot: v.pivot ?? null, bokeh: bokehParams(v) });
+    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50), masks, pivot: v.pivot ?? null, bokeh: bokehParams(v),
+      color: colorKeyed ? colorSettings((id) => v[`set:${id}`] ?? +$(id).value) : null });
     const z = v.zoom ?? +$('frame-zoom').value / 100;
     const panX = v.panX ?? +$('frame-pan-x').value / 100;
     const panY = v.panY ?? +$('frame-pan-y').value / 100;
@@ -3481,6 +3544,7 @@ function channelRange(ch) {
 
 // The limits each channel's value is kept within.
 function channelLimits(ch) {
+  if (isSettingTrack(ch.k)) return [+settingControl(ch.k).min, +settingControl(ch.k).max];
   if (isMaskTrack(ch.k)) return MASK_LIMITS[parseMaskTrack(ch.k).attr] || [-1, 1];
   const r = (state.info && state.info.radius) || 4.5;
   switch (ch.k) {
@@ -4325,7 +4389,7 @@ async function fullResFrames(n) {
   const req = animationRequest();
   const a = req.args;
   const list = req.type === 'frames'
-    ? a.path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? a.alpha, aperture: f.aperture ?? a.aperture, dof: f.dof ?? a.dof, bokeh: f.bokeh ?? a.bokeh, masks: f.masks || null }))
+    ? a.path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? a.alpha, aperture: f.aperture ?? a.aperture, dof: f.dof ?? a.dof, bokeh: f.bokeh ?? a.bokeh, masks: f.masks || null, color: f.color || null }))
     : a.alphas.map((alpha) => ({ u: a.u, v: a.v, alpha, aperture: a.aperture, dof: a.dof, bokeh: a.bokeh }));
   const scale = +$('still-scale').value;
   const passes = +$('still-passes').value;
@@ -4675,6 +4739,11 @@ function animationSettingsChanged() {
 }
 for (const id of ['anim', 'path', 'frames', 'steps']) $(id).onchange = animationSettingsChanged;
 // Amount, Near and Far can be keyframed (Auto key records them).
+// Auto key for Process and Optics sliders.
+$('controls').addEventListener('change', (e) => {
+  const k = KEY_CONTROLS[e.target.id] && KEY_CONTROLS[e.target.id][0];
+  if (k && isSettingTrack(k)) autoKey();
+});
 for (const id of ['amount', 'near', 'far']) {
   $(id).onchange = () => {
     autoKey();
@@ -4702,18 +4771,37 @@ $('anim-on').onchange = () => {
   if (state.lastImage) draw(state.lastImage);
 };
 
+// The settings the color pass applies (Process and Optics), each slider
+// read through `val(id)`: its value, or an animation frame's keyframed one.
+function colorSettings(val = (id) => +$(id).value) {
+  return {
+    lutAmount: val('lut-amount') / 100,
+    ev: val('ev'),
+    saturation: 1 + val('saturation') / 100,
+    autoWb: $('awb').checked,
+    wb: { kelvin: val('wb-temperature'), tint: val('wb-tint') },
+    tone: Object.fromEntries(TONES.map((k) => [k, val(`tone-${k}`) / 100])),
+    curve: { points: parsePoints($('curve-points').value), regions: CURVE_REGIONS.map((k) => val(`curve-${k}`) / 100) },
+    useCcm: $('ccm-mode').value !== 'none',
+    ccm: $('ccm-mode').value === 'custom' ? Array.from({ length: 9 }, (_, i) => +$(`ccm-${i}`).value || 0) : null,
+    color: { vibrance: val('vibrance') / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, val(`hue-${k}`) / 100])) },
+    flare: { on: $('flare-on').checked, amount: val('flare-amount') / 100 },
+    lens: { distortion: val('lens-distortion'), vignetting: val('lens-vignetting'), midpoint: val('lens-midpoint') },
+    defringe: {
+      on: $('fringe-on').checked,
+      auto: $('fringe-auto').checked,
+      radius: val('fringe-radius'),
+      threshold: val('fringe-threshold'),
+      // [amount, hue] for purple, green, red and blue fringes.
+      colors: FRINGES.map((key) => [val(`fringe-${key}`), (val(`fringe-${key}-hue`) + 360) % 360]),
+    },
+  };
+}
+
 async function applySettings() {
   await sendLut();
   const settings = {
-    lutAmount: $('lut-amount').value / 100,
-    ev: +$('ev').value,
-    saturation: 1 + $('saturation').value / 100,
-    autoWb: $('awb').checked,
-    wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
-    tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
-    curve: { points: parsePoints($('curve-points').value), regions: curveRegions() },
-    useCcm: $('ccm-mode').value !== 'none',
-    ccm: $('ccm-mode').value === 'custom' ? Array.from({ length: 9 }, (_, i) => +$(`ccm-${i}`).value || 0) : null,
+    ...colorSettings(),
     mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
     depthSmoothing: $('depth-smooth').value / 100,
     depthQuality: $('depth-hq').checked ? 'high' : 'normal',
@@ -4725,19 +4813,8 @@ async function applySettings() {
       luminance: +$('nr-luminance').value,
       color: +$('nr-color').value,
     },
-    color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
-    flare: { on: $('flare-on').checked, amount: $('flare-amount').value / 100 },
     local: localSettings(),
-    lens: { distortion: +$('lens-distortion').value, vignetting: +$('lens-vignetting').value, midpoint: +$('lens-midpoint').value },
-    defringe: {
-      on: $('fringe-on').checked,
-      auto: $('fringe-auto').checked,
-      radius: +$('fringe-radius').value,
-      threshold: +$('fringe-threshold').value,
-      // [amount, hue] for purple, green, red and blue fringes.
-      colors: FRINGES.map((key) => [+$(`fringe-${key}`).value, (+$(`fringe-${key}-hue`).value + 360) % 360]),
-    },
   };
   $('fringe-controls').disabled = !settings.defringe.on;
   $('fringe-auto').disabled = !settings.defringe.on;
@@ -4751,6 +4828,8 @@ async function applySettings() {
   $('mv-blend').disabled = !settings.mvDenoise.on;
   $('fringe-radius-label').textContent = `${settings.defringe.radius} px`;
   showFringeHues();
+  // Which sliders can be used decides which of their tracks show.
+  renderTimeline();
   if (!canRender()) return;
   // Progress shows when a setting needs work first (a depth mask measures depth).
   const info = await engine.request('settings', { settings }, { onProgress: showProgress });
@@ -5010,15 +5089,33 @@ for (const id of ['awb', 'mv-on', 'detail', 'fringe-on', 'fringe-auto', 'fringe-
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 
+// A focused button or checkbox would also act on Space (on key up): not
+// when Space just played or paused.
+let spacePlayed = false;
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' && spacePlayed) {
+    spacePlayed = false;
+    e.preventDefault();
+  }
+}, true);
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.picking) {
     setPicking(false);
     return;
   }
+  // Space plays and pauses from anywhere, also right after using a slider,
+  // button or checkbox; only fields that take typing keep it.
+  if (e.code === 'Space' && !e.repeat && state.mode === 'camera' && state.info && $('anim-on').checked
+    && !e.target.matches('textarea, select, [contenteditable], input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=button])')) {
+    e.preventDefault();
+    setPlaying(!state.playing);
+    spacePlayed = true;
+    return;
+  }
   if (e.target.matches('input, select, textarea')) return;
   if (e.code === 'Space') {
     e.preventDefault();
-    if (state.mode === 'camera' && state.info) setPlaying(!state.playing);
   } else if (state.grid && (e.key === '+' || e.key === '=')) {
     setThumbSize(+$('thumb-size').value * 1.25);
   } else if (state.grid && (e.key === '-' || e.key === '_')) {

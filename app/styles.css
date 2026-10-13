@@ -210,9 +210,9 @@ label output { float: right; color: var(--muted); font-variant-numeric: tabular-
    editor's: hollow when the setting is not animated, filled when it is, blue
    with a keyframe at the playhead; an arrow shows when there is a keyframe
    that way. */
-/* Only settings that can be keyframed leave room for the column; other
-   sliders keep the full width. */
-label:has(> .key-nav) { position: relative; padding-right: 38px; }
+/* Only settings showing keyframe controls leave room for the column;
+   other sliders keep the full width. */
+label:has(> .key-nav:not([hidden])) { position: relative; padding-right: 38px; }
 .key-nav { position: absolute; right: 0; top: -1px; display: flex; align-items: center; height: 18px; }
 .key-nav button {
   width: 12px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted);

@@ -144,6 +144,34 @@ function updateColor() {
 
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
+// The color pass for an animation frame whose Process and Optics settings
+// are keyframed: `color` (main.js colorSettings) over the photo's settings.
+// Returns what toPixels and finishGpu read (the photo's own: `state`).
+function colorState(color) {
+  if (!color) return state;
+  const s = { ...state.settings, ...color };
+  // Auto defringe keeps the colors it found; radius and threshold animate.
+  if (s.defringe && s.defringe.auto && state.settings.defringe) s.defringe = { ...s.defringe, colors: state.settings.defringe.colors };
+  const asShot = asShotKelvin();
+  const m = state.centerMeans;
+  const auto = s.autoWb ? m.map((v) => m[1] / v) : [1, 1, 1];
+  const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const look = makeLook(s);
+  if (state.pp) {
+    const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
+    return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0 };
+  }
+  const gains = auto.map((g, i) => g * manual[i]);
+  const matrix = colorMatrix(state.lf.cam, s).map((v, i) => v * gains[i % 3]);
+  // The veil is measured once (with Reduce flare on); its amount animates.
+  const veil = s.flare && s.flare.on ? state.veil : null;
+  const veilAmount = veil ? s.flare.amount : 0;
+  const center = centerView();
+  const { outW, outH } = state.sampler;
+  const baseExposure = autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
+  return { settings: s, look, lens: lensParams(s.lens), matrix, baseExposure, veil, veilAmount };
+}
+
 // Local adjustments for a w x h picture (core/local.js), or null. `ctx`:
 // { focus, overrides } of this picture (see resolveMasks).
 function localFor(w, h, ctx) {
@@ -153,19 +181,20 @@ function localFor(w, h, ctx) {
 }
 
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
-function toPixels(rgb, w, h, ctx) {
+// `cs`: the color pass to use (colorState), the photo's by default.
+function toPixels(rgb, w, h, ctx, cs = state) {
   rgb = applyDetail(rgb, w, h, state.detail);
-  rgb = subtractVeil(rgb, w, h, state.veil, state.veilAmount);
-  rgb = applyLens(rgb, w, h, state.lens);
-  const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
-  const f = state.settings.defringe;
+  rgb = subtractVeil(rgb, w, h, cs.veil, cs.veilAmount);
+  rgb = applyLens(rgb, w, h, cs.lens);
+  const exposure = cs.baseExposure * Math.pow(2, cs.settings.ev);
+  const f = cs.settings.defringe;
   const local = localFor(w, h, ctx);
   // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
   if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
-  const grade = state.lut ? { lut: state.lut, amount: state.settings.lutAmount ?? 1 } : null;
-  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look, local, grade);
+  const grade = state.lut ? { lut: state.lut, amount: cs.settings.lutAmount ?? 1 } : null;
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade);
   // Defringing judges hue in output colors, so apply the color matrix first.
-  const m = state.matrix;
+  const m = cs.matrix;
   const srgb = new Float32Array(rgb.length);
   for (let i = 0; i < rgb.length; i += 3) {
     const r = rgb[i];
@@ -175,7 +204,7 @@ function toPixels(rgb, w, h, ctx) {
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, state.look, local, grade);
+  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade);
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -183,7 +212,7 @@ function toPixels(rgb, w, h, ctx) {
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
 // unit of `dof`, for this image's size. `keep`: keep the picture as it is
 // before the color pass, so color changes can redraw it (see view()).
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false }, message) {
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, color = null }, message) {
   const gpu = state.gpu;
   if (dof > 0 && (await ensureDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
@@ -203,7 +232,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
-  finishGpu(tex, w, h, packed, message);
+  finishGpu(tex, w, h, packed, message, colorState(color));
 }
 
 // Local adjustments resolved for a picture, packed for the GPU, or null.
@@ -213,15 +242,15 @@ function packedMasks(ctx) {
 }
 
 // The color pass: color, defringing, local adjustments and tone mapping.
-function finishGpu(tex, w, h, packed, message) {
+function finishGpu(tex, w, h, packed, message, cs = state) {
   const bitmap = state.gpu.present(tex, w, h, {
-    matrix: state.matrix,
-    exposure: state.baseExposure * Math.pow(2, state.settings.ev),
-    fringe: state.settings.defringe,
-    look: state.look,
-    veilAmount: state.veil ? state.veilAmount : 0,
-    lens: state.lens,
-    lutAmount: state.lut ? state.settings.lutAmount ?? 1 : 0,
+    matrix: cs.matrix,
+    exposure: cs.baseExposure * Math.pow(2, cs.settings.ev),
+    fringe: cs.settings.defringe,
+    look: cs.look,
+    veilAmount: cs.veil ? cs.veilAmount : 0,
+    lens: cs.lens,
+    lutAmount: state.lut ? cs.settings.lutAmount ?? 1 : 0,
     local: packed,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
@@ -237,8 +266,8 @@ function viewPxPerUnit() {
   return 14 * state.settings.detail;
 }
 
-function frameMessage(id, index, rgb, ctx) {
-  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, ctx);
+function frameMessage(id, index, rgb, ctx, cs = state) {
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, ctx, cs);
   post({ id, type: 'frame', index, width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
 }
 
@@ -357,7 +386,7 @@ async function open({ id, bytes, synthetic }) {
 // and blur, or with any of them per frame ({ u, v, alpha, aperture, dof },
 // for keyframed animations).
 async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }) {
-  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh: f.bokeh ?? bokeh, masks: f.masks || null }));
+  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh: f.bokeh ?? bokeh, masks: f.masks || null, color: f.color || null }));
   if (state.pp) return processedFrames({ id, job, kind: 'frames', list });
   requireRaw();
   state.jobs.frames = job;
@@ -368,12 +397,12 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
     const f = list[i];
     if (state.gpu) {
       const tex = f.aperture > 0 ? state.gpu.refocusTo(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh: f.bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) } }, { id, type: 'frame', index: i });
+      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh: f.bokeh, color: f.color, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) } }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
     const rgb = f.aperture > 0 ? refocusRGB(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, f.bokeh), { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) });
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, f.bokeh), { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) }, colorState(f.color));
     await tick();
   }
   return { done: true };
@@ -493,7 +522,7 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
 // (each lens uses the depth under it); otherwise the picture is refocused at
 // `alpha` with detail where it is in focus and smooth blur elsewhere.
 // `masks`: an animation frame's local adjustment settings (see resolveMasks).
-async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null }) {
+async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null, color = null }) {
   requireRaw();
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
@@ -516,7 +545,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     });
     if (tex) {
       if (state.jobs.superres !== job) return { cancelled: true };
-      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
+      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
       return undefined;
     }
   }
@@ -529,12 +558,12 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
-    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
+    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
     return undefined;
   }
   if (dof > 0) progress('Applying depth of field', 1);
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
-  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) });
+  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) }, colorState(color));
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
@@ -973,7 +1002,7 @@ function processedBlur({ aperture = 0, dof = 0 }) {
 function processedPixels(params) {
   const pp = state.pp;
   const rgb = pp.render({ ...params, blur: processedBlur(params) });
-  return toPixels(rgb, pp.width, pp.height);
+  return toPixels(rgb, pp.width, pp.height, undefined, colorState(params.color));
 }
 
 async function processedView({ id, ...params }) {
