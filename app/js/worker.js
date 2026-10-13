@@ -94,7 +94,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 function toPixels(rgb, w, h) {
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
-  if (!f || (!(f.purple > 0) && !(f.green > 0))) return toneMap(rgb, state.matrix, exposure);
+  if (!f || !f.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
   const srgb = new Float32Array(rgb.length);
@@ -107,6 +107,34 @@ function toPixels(rgb, w, h) {
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
   return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure);
+}
+
+// GPU path: finishes a picture held in a GPU texture (synthetic depth of
+// field and bokeh, then color, defringing and tone mapping) and posts it as
+// an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
+// unit of `dof`, for this image's size.
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit }, message) {
+  const gpu = state.gpu;
+  if (dof > 0 && (await ensureDepth(id))) {
+    tex = gpu.depthOfField(tex, w, h, {
+      focus: alpha,
+      strength: dof * pxPerUnit,
+      shape: bokeh.shape,
+      highlights: bokeh.highlights,
+      clip: state.dev.clip,
+    });
+  }
+  const bitmap = gpu.present(tex, w, h, {
+    matrix: state.matrix,
+    exposure: state.baseExposure * Math.pow(2, state.settings.ev),
+    fringe: state.settings.defringe,
+  });
+  post({ ...message, width: w, height: h, bitmap }, [bitmap]);
+}
+
+// Blur pixels per unit of focus difference per unit of `dof` in the view.
+function viewPxPerUnit() {
+  return 14 * state.settings.detail;
 }
 
 function frameMessage(id, index, rgb) {
@@ -189,6 +217,12 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
   for (let i = 0; i < path.length; i++) {
     if (state.jobs.frames !== job) return { cancelled: true };
     const { u, v } = path[i];
+    if (state.gpu) {
+      const tex = aperture > 0 ? state.gpu.refocusTo(alpha, apertureOptions({ u, v, aperture })) : state.gpu.renderViewTex(u, v);
+      await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
+      await tick();
+      continue;
+    }
     const rgb = aperture > 0
       ? refocusRGB(alpha, apertureOptions({ u, v, aperture }))
       : equalize(render(u, v));
@@ -270,6 +304,12 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
   const opts = apertureOptions({ u, v, aperture });
   for (let i = 0; i < alphas.length; i++) {
     if (state.jobs.refocus !== job) return { cancelled: true };
+    if (state.gpu) {
+      const tex = state.gpu.refocusTo(alphas[i], opts);
+      await presentGpu(id, tex, outW, outH, { alpha: alphas[i], dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
+      await tick();
+      continue;
+    }
     const rgb = refocusRGB(alphas[i], opts);
     frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh));
     await tick();
@@ -298,8 +338,14 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
     scale, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
     onProgress: (p) => progress('Rendering full resolution', p),
+    gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });
   if (state.jobs.superres !== job) return { cancelled: true };
+  if (state.gpu) {
+    const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
+    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, pxPerUnit: 14 * scale }, { id, type: 'result' });
+    return undefined;
+  }
   if (dof > 0) progress('Applying depth of field', 1);
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
   const pixels = toPixels(rgb, sr.width, sr.height);
@@ -311,6 +357,17 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // is closed, otherwise refocused at `alpha` through an aperture around (u, v).
 async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
   requireRaw();
+  if (state.gpu) {
+    let tex;
+    if (aperture > 0) {
+      if (!(await ensureRefocusViews(id))) return { cancelled: true };
+      tex = state.gpu.refocusTo(alpha, apertureOptions({ u, v, aperture }));
+    } else {
+      tex = state.gpu.renderViewTex(u, v);
+    }
+    await presentGpu(id, tex, state.sampler.outW, state.sampler.outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'result' });
+    return undefined;
+  }
   let rgb;
   if (aperture > 0) {
     if (!(await ensureRefocusViews(id))) return { cancelled: true };
@@ -403,6 +460,7 @@ async function ensureDepth(id) {
     state.depth = estimateDepth(state.refocusViews, outW, outH, {
       onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
     });
+    if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
   }
   return true;
 }

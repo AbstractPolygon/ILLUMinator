@@ -1,7 +1,7 @@
-// Defringing, in the spirit of Lightroom's tool: purple and green color
+// Defringing, in the spirit of Lightroom's tool: purple, green, red and blue color
 // fringes appear along high-contrast edges (lens chromatic aberration, and
 // here also light field sampling). Pixels near such edges whose hue falls in
-// the chosen purple or green range lose that color; everything else is left
+// one of the chosen hue ranges lose that color; everything else is left
 // alone.
 
 const HUE_WIDTH = 35; // degrees either side of the chosen hue
@@ -19,9 +19,10 @@ function hueOf(r, g, b) {
 }
 
 // rgb: linear sRGB (w x h), modified copy returned.
-// options: { purple, purpleHue, green, greenHue } amounts 0..1, hues in degrees.
-export function defringe(rgb, w, h, { purple = 0, purpleHue = 300, green = 0, greenHue = 100 } = {}) {
-  if (!(purple > 0) && !(green > 0)) return rgb;
+// fringe: [[amount 0..1, hue in degrees], ...] e.g. purple, green, red, blue.
+export function defringe(rgb, w, h, fringe = []) {
+  const ranges = fringe.filter(([amount]) => amount > 0);
+  if (!ranges.length) return rgb;
   const n = w * h;
   const lum = new Float32Array(n);
   for (let i = 0; i < n; i++) lum[i] = 0.2126 * rgb[3 * i] + 0.7152 * rgb[3 * i + 1] + 0.0722 * rgb[3 * i + 2];
@@ -59,12 +60,12 @@ export function defringe(rgb, w, h, { purple = 0, purpleHue = 300, green = 0, gr
       const r = rgb[3 * p];
       const g = rgb[3 * p + 1];
       const b = rgb[3 * p + 2];
-      // Hue judged on gamma-encoded values, closer to how it looks.
-      const hue = hueOf(Math.sqrt(r), Math.sqrt(g), Math.sqrt(b));
+      // Hue judged on gamma-encoded values, closer to how it looks. (The
+      // color matrix can leave small negative values: clamp them.)
+      const hue = hueOf(Math.sqrt(Math.max(0, r)), Math.sqrt(Math.max(0, g)), Math.sqrt(Math.max(0, b)));
       if (hue < 0) continue;
       let k = 0;
-      for (const [amount, center] of [[purple, purpleHue], [green, greenHue]]) {
-        if (!(amount > 0)) continue;
+      for (const [amount, center] of ranges) {
         const dh = Math.abs(((hue - center + 540) % 360) - 180);
         k = Math.max(k, amount * Math.max(0, 1 - dh / HUE_WIDTH));
       }

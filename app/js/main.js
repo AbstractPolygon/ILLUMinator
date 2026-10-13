@@ -254,12 +254,16 @@ function showFNumber() {
 }
 
 // Camera settings shared by the live view, animations and full resolution.
+// Blur strength multiplies the simulated blur: a light field camera's own
+// aperture is small, so true-to-the-optics blur is often subtle.
 function cameraParams() {
+  const lens = apertureFor(fNumber());
   return {
     u: state.camera.u,
     v: state.camera.v,
     alpha: +$('focus').value,
-    ...apertureFor(fNumber()),
+    aperture: lens.aperture,
+    dof: lens.dof * +$('blur').value,
     bokeh: { shape: $('bokeh').value === 'natural' ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value },
   };
 }
@@ -281,7 +285,7 @@ async function renderCamera() {
   try {
     const msg = await engine.request('view', cameraParams(), { onProgress: showProgress });
     hideProgress();
-    if (msg && msg.pixels && showsCamera()) draw(toImageData(msg));
+    if (msg && (msg.pixels || msg.bitmap) && showsCamera()) draw(toImageData(msg));
   } catch (err) {
     showError(err);
   } finally {
@@ -379,7 +383,7 @@ function ensureAnimation() {
     onFrame: async (msg) => {
       hideProgress();
       if (state.animKey !== key) return;
-      state.frames[msg.index] = await createImageBitmap(toImageData(msg));
+      state.frames[msg.index] = msg.bitmap || (await createImageBitmap(toImageData(msg)));
       if (state.showingFrames && (msg.index === state.index || !state.frames[state.index])) {
         state.index = msg.index;
         showFrame(msg.index);
@@ -479,7 +483,7 @@ async function renderStill() {
     const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale }, { onProgress: showProgress });
     const msg = await promise;
     // Ignore a result that arrives after full resolution was switched off.
-    if (msg && msg.pixels && state.fullRes) {
+    if (msg && (msg.pixels || msg.bitmap) && state.fullRes) {
       state.still = toImageData(msg);
       draw(state.still);
       $('frame-label').textContent = `${msg.width}×${msg.height}`;
@@ -583,7 +587,7 @@ function setMode(mode) {
   const raw = !!(state.info && state.info.hasRaw);
   for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
   const camera = mode === 'camera';
-  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'highlights']) $(id).disabled = !raw || !camera;
+  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'blur', 'highlights']) $(id).disabled = !raw || !camera;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -890,9 +894,10 @@ function cameraChanged({ final }) {
   }
 }
 
-for (const id of ['focus', 'fstop', 'bokeh', 'highlights']) {
+for (const id of ['focus', 'fstop', 'bokeh', 'blur', 'highlights']) {
   $(id).oninput = () => {
     showFNumber();
+    $('blur-label').textContent = `${$('blur').value}×`;
     cameraChanged({ final: false });
   };
   $(id).onchange = () => cameraChanged({ final: true });
@@ -1058,15 +1063,10 @@ async function applySettings() {
     useCcm: $('ccm').checked,
     autoWb: $('awb').checked,
     detail: +$('detail').value,
-    defringe: {
-      purple: +$('fringe-purple').value,
-      purpleHue: +$('fringe-purple-hue').value,
-      green: +$('fringe-green').value,
-      greenHue: +$('fringe-green-hue').value,
-    },
+    // [amount, hue] for purple, green, red and blue fringes.
+    defringe: FRINGES.map((key) => [+$(`fringe-${key}`).value, (+$(`fringe-${key}-hue`).value + 360) % 360]),
   };
-  $('fringe-purple-hue-label').textContent = `${settings.defringe.purpleHue}°`;
-  $('fringe-green-hue-label').textContent = `${settings.defringe.greenHue}°`;
+  showFringeHues();
   if (!state.info || !state.info.hasRaw) return;
   const info = await engine.request('settings', { settings });
   if (info) state.info = { ...state.info, ...info };
@@ -1075,8 +1075,14 @@ async function applySettings() {
   if (state.showingFrames) backToCamera();
   refresh();
 }
-for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail', 'fringe-purple', 'fringe-purple-hue', 'fringe-green', 'fringe-green-hue']) $(id).onchange = applySettings;
-for (const id of ['fringe-purple-hue', 'fringe-green-hue']) $(id).oninput = () => { $(`${id}-label`).textContent = `${$(id).value}°`; };
+const FRINGES = ['purple', 'green', 'red', 'blue'];
+
+function showFringeHues() {
+  for (const key of FRINGES) $(`fringe-${key}-hue-label`).textContent = `${(+$(`fringe-${key}-hue`).value + 360) % 360}°`;
+}
+
+for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea')) return;

@@ -68,7 +68,7 @@ function forEachLensPixel(g, cam, radius, fn, onProgress, lensStride = 1) {
 // From the picture itself use a single tile: the scene averages out over
 // ~200k lenses, but per-tile normalization would also flatten the scene.
 // From a white image use several tiles so main lens vignetting is corrected.
-export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1 } = {}) {
+export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1, lensStride } = {}) {
   const rMax = g.pitch * 0.5;
   const tiles = tilesX * tilesY;
   const size = tiles * BINS * BINS * 3;
@@ -85,7 +85,7 @@ export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1
     const k = (((ty * tilesX + tx) * BINS + bv) * BINS + bu) * 3 + ch;
     sum[k] += Math.max(0, source[i] - dev.black[ch]) * dev.scale[ch];
     cnt[k]++;
-  }, null, tiles > 1 ? 1 : 2);
+  }, null, lensStride ?? (tiles > 1 ? 1 : 2));
   const mean = new Float32Array(size);
   for (let k = 0; k < size; k++) mean[k] = cnt[k] ? sum[k] / cnt[k] : 0;
   // Reference per channel: the lens center bin of the middle tile.
@@ -198,65 +198,80 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     }
   }
 
-  const accY = new Float32Array(W * H);
-  const wsum = new Float32Array(W * H);
   const rUse = g.pitch * aperture;
-  const inv2s2 = 1 / (2 * sigma * sigma);
   const reach = Math.ceil(1.5 * sigma);
-  const taps = 2 * reach + 1;
-  const wx = new Float32Array(taps);
-  const wy = new Float32Array(taps);
-  const binScale = vg.bins / (2 * vg.rMax);
-  const binsSq = vg.bins * vg.bins;
-  let lastLens = NaN;
-  let tw = null;
-  let lensAlpha = alpha;
+  let accY;
+  let wsum;
+  if (options.gpuSplat) {
+    // The same accumulation on the GPU: one point per raw pixel.
+    ({ accY, wsum } = options.gpuSplat({
+      W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
+      xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth,
+    }));
+  } else {
+    ({ accY, wsum } = splatOnCpu());
+  }
 
-  forEachLensPixel(g, cam, rUse, (i, x, y, u, v, lensX, lensY) => {
-    if (lensX + lensY * 1e6 !== lastLens) {
-      lastLens = lensX + lensY * 1e6;
-      tw = tileWeights(vg, x, y);
-      if (allInFocus && depth) {
-        lensAlpha = sampleBilinear(depth, bw, bh, ((lensX - xMin) / unit) * detail, ((lensY - yMin) / unit) * detail);
+  function splatOnCpu() {
+    const accY = new Float32Array(W * H);
+    const wsum = new Float32Array(W * H);
+    const inv2s2 = 1 / (2 * sigma * sigma);
+    const taps = 2 * reach + 1;
+    const wx = new Float32Array(taps);
+    const wy = new Float32Array(taps);
+    const binScale = vg.bins / (2 * vg.rMax);
+    const binsSq = vg.bins * vg.bins;
+    let lastLens = NaN;
+    let tw = null;
+    let lensAlpha = alpha;
+
+    forEachLensPixel(g, cam, rUse, (i, x, y, u, v, lensX, lensY) => {
+      if (lensX + lensY * 1e6 !== lastLens) {
+        lastLens = lensX + lensY * 1e6;
+        tw = tileWeights(vg, x, y);
+        if (allInFocus && depth) {
+          lensAlpha = sampleBilinear(depth, bw, bh, ((lensX - xMin) / unit) * detail, ((lensY - yMin) / unit) * detail);
+        }
       }
-    }
-    const ch = dev.cfa[y & 1][x & 1];
-    const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
-    let gain = 0;
-    for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
-    // Saturated pixels carry no reliable brightness; the standard render
-    // (with clipped highlights rendered white) fills in there.
-    if (!(gain > 0) || raw[i] >= dev.saturated[ch] || isDefect(raw, width, i)) return;
-    const du = u - u0;
-    const dv = v - v0;
-    const conf = (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
-    if (conf < 1e-3) return;
-    const ox = ((lensX - xMin) / unit - lensAlpha * du) * scale;
-    const oy = ((lensY - yMin) / unit - lensAlpha * dv) * scale;
-    const px = Math.round(ox);
-    const py = Math.round(oy);
-    if (px < reach || py < reach || px >= W - reach || py >= H - reach) return;
-    // Brightness estimate from this one color sample and the local color.
-    const lp = py * W + px;
-    const c = up[3 * lp + ch];
-    if (!(c > 1e-5)) return;
-    const value = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
-    const yEst = value * Math.min(8, upY[lp] / c);
-    for (let k = 0; k < taps; k++) {
-      const ex = px - reach + k - ox;
-      const ey = py - reach + k - oy;
-      wx[k] = Math.exp(-ex * ex * inv2s2);
-      wy[k] = Math.exp(-ey * ey * inv2s2) * conf;
-    }
-    for (let j = 0; j < taps; j++) {
-      let o = (py - reach + j) * W + px - reach;
-      for (let k = 0; k < taps; k++, o++) {
-        const w = wx[k] * wy[j];
-        accY[o] += yEst * w;
-        wsum[o] += w;
+      const ch = dev.cfa[y & 1][x & 1];
+      const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
+      let gain = 0;
+      for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
+      // Saturated pixels carry no reliable brightness; the standard render
+      // (with clipped highlights rendered white) fills in there.
+      if (!(gain > 0) || raw[i] >= dev.saturated[ch] || isDefect(raw, width, i)) return;
+      const du = u - u0;
+      const dv = v - v0;
+      const conf = (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
+      if (conf < 1e-3) return;
+      const ox = ((lensX - xMin) / unit - lensAlpha * du) * scale;
+      const oy = ((lensY - yMin) / unit - lensAlpha * dv) * scale;
+      const px = Math.round(ox);
+      const py = Math.round(oy);
+      if (px < reach || py < reach || px >= W - reach || py >= H - reach) return;
+      // Brightness estimate from this one color sample and the local color.
+      const lp = py * W + px;
+      const c = up[3 * lp + ch];
+      if (!(c > 1e-5)) return;
+      const value = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
+      const yEst = value * Math.min(8, upY[lp] / c);
+      for (let k = 0; k < taps; k++) {
+        const ex = px - reach + k - ox;
+        const ey = py - reach + k - oy;
+        wx[k] = Math.exp(-ex * ex * inv2s2);
+        wy[k] = Math.exp(-ey * ey * inv2s2) * conf;
       }
-    }
-  }, onProgress);
+      for (let j = 0; j < taps; j++) {
+        let o = (py - reach + j) * W + px - reach;
+        for (let k = 0; k < taps; k++, o++) {
+          const w = wx[k] * wy[j];
+          accY[o] += yEst * w;
+          wsum[o] += w;
+        }
+      }
+    }, onProgress);
+    return { accY, wsum };
+  }
 
   // Normalize, falling back smoothly to the standard render where samples
   // are sparse; match overall brightness to it; keep detail where in focus.

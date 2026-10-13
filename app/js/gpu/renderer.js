@@ -195,6 +195,283 @@ void main() {
   outColor = vec4(wsum > 0.0 ? sum / wsum : vec3(0.0), 1.0);
 }`;
 
+// Depth of field, step 1: per pixel, the blur radius (from the depth map)
+// and the color with clipped highlights given back some of their light.
+const DOF_PREP = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform highp sampler2D uDepth;
+uniform vec2 uDepthScale;   // depth map pixels per image pixel
+uniform float uFocus;
+uniform float uStrength;    // blur radius in pixels per unit of focus difference
+uniform float uClip;
+uniform float uHighlights;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 c = texelFetch(uSrc, p, 0).rgb;
+  ivec2 dsz = textureSize(uDepth, 0);
+  ivec2 dp = clamp(ivec2((vec2(p) + 0.5) * uDepthScale), ivec2(0), dsz - 1);
+  float d = texelFetch(uDepth, dp, 0).r - uFocus;
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float knee = 0.8 * uClip;
+  float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
+  c *= 1.0 + uHighlights * 12.0 * t * t;
+  // Signed radius: positive behind the focus plane, negative in front.
+  outColor = vec4(c, uStrength * d);
+}`;
+
+const MAX_TAPS = 512;
+
+// Depth of field, step 2: each pixel gathers light from neighbors whose own
+// blur reaches it, inside the aperture shape. Bright out-of-focus points thus
+// spread into discs or hexagons (bokeh). Points behind this pixel only reach
+// it within its own blur, so blurred background does not bleed over sharp
+// foreground edges.
+const DOF_GATHER = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uPrep;
+uniform int uTaps;
+uniform float uMaxR;
+uniform int uShape;   // 0 smooth, 1 circle, 2 hexagon
+uniform float uLod;   // mip level matching the spacing between taps
+out vec4 outColor;
+
+float shapeDist(vec2 o) {
+  if (uShape == 2) {
+    vec2 a = abs(o);
+    // Pointy-top regular hexagon with circumradius 1.
+    return max(a.x * 1.1547005, a.x * 0.5773503 + a.y);
+  }
+  return length(o);
+}
+
+float weightFor(float dist, float r) {
+  r = max(r, 0.5);
+  float inside = uShape == 0
+    ? exp(-2.0 * (dist / r) * (dist / r))
+    : clamp(r + 0.5 - dist, 0.0, 1.0);
+  return inside / (r * r);
+}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uPrep, 0);
+  vec4 c = texelFetch(uPrep, p, 0);
+  float rc = abs(c.a);
+  vec3 sum = c.rgb * weightFor(0.0, rc);
+  float wsum = weightFor(0.0, rc);
+  for (int i = 0; i < ${MAX_TAPS}; i++) {
+    if (i >= uTaps) break;
+    float rr = sqrt((float(i) + 0.5) / float(uTaps)) * uMaxR;
+    float th = float(i) * 2.39996323;
+    vec2 o = rr * vec2(cos(th), sin(th));
+    // Each tap stands for the area between taps: read the pre-averaged
+    // (mipmapped) image at that scale, so large blurs are smooth, not grainy.
+    vec2 qf = clamp(vec2(p) + o, vec2(0.0), vec2(size - 1));
+    vec4 s = textureLod(uPrep, (qf + 0.5) / vec2(size), uLod);
+    float rq = abs(s.a);
+    float dist = shapeDist(o);
+    // Behind this pixel: only within this pixel's own blur.
+    if (s.a > c.a + 0.5 && dist > rc + 0.5) continue;
+    float w = weightFor(dist, rq);
+    sum += s.rgb * w;
+    wsum += w;
+  }
+  outColor = vec4(sum / max(wsum, 1e-9), 1.0);
+}`;
+
+// Final step: color matrix, defringing, exposure and sRGB encoding, drawn
+// straight to the canvas (flipped: canvas rows run top to bottom).
+const PRESENT = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform mat3 uMatrix;
+uniform float uExposure;
+uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
+uniform int uFringeOn;
+out vec4 outColor;
+
+vec3 colorAt(ivec2 q) { return uMatrix * texelFetch(uSrc, q, 0).rgb; }
+
+float hueOf(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b));
+  float mn = min(c.r, min(c.g, c.b));
+  float d = mx - mn;
+  if (d <= 1e-6) return -1.0;
+  float h;
+  if (mx == c.r) h = mod((c.g - c.b) / d, 6.0);
+  else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+  else h = (c.r - c.g) / d + 4.0;
+  return mod(h * 60.0 + 360.0, 360.0);
+}
+
+float srgb(float v) {
+  v = clamp(v, 0.0, 1.0);
+  return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
+}
+
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(int(gl_FragCoord.x), size.y - 1 - int(gl_FragCoord.y));
+  vec3 c = colorAt(p);
+  if (uFringeOn == 1) {
+    float mx = 0.0;
+    float mn = 1e9;
+    for (int dy = -2; dy <= 2; dy++) {
+      for (int dx = -2; dx <= 2; dx++) {
+        ivec2 q = clamp(p + ivec2(dx, dy), ivec2(0), size - 1);
+        float y = dot(colorAt(q), vec3(0.2126, 0.7152, 0.0722));
+        mx = max(mx, y);
+        mn = min(mn, y);
+      }
+    }
+    float contrast = mx > 1e-6 ? (mx - mn) / mx : 0.0;
+    float edge = clamp((contrast - 0.25) / 0.35, 0.0, 1.0);
+    float hue = hueOf(sqrt(max(c, vec3(0.0))));
+    if (edge > 0.0 && hue >= 0.0) {
+      float k = 0.0;
+      for (int i = 0; i < 4; i++) {
+        if (uFringe[i].x <= 0.0) continue;
+        float dh = abs(mod(hue - uFringe[i].y + 540.0, 360.0) - 180.0);
+        k = max(k, uFringe[i].x * max(0.0, 1.0 - dh / 35.0));
+      }
+      float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = y + (c - y) * (1.0 - k * edge);
+    }
+  }
+  c *= uExposure;
+  outColor = vec4(srgb(c.r), srgb(c.g), srgb(c.b), 1.0);
+}`;
+
+// Full resolution: one point per raw pixel, drawn at the pixel's refocused
+// position and summed with additive blending (see core/superres.js).
+const SPLAT_VERTEX = `#version 300 es
+precision highp float;
+precision highp int;
+uniform highp usampler2D uRaw;
+uniform ivec2 uRawSize;
+uniform int uStart;
+uniform vec3 uBlack;
+uniform vec3 uScale;
+uniform vec3 uSaturated;
+uniform int uCfa[4];
+uniform vec4 uGrid;        // pitch, rowStep, cos, sin
+uniform vec2 uOrigin;
+uniform float uRUse;
+uniform vec2 uUV0;
+uniform float uInv2a2;     // 0: no aperture weighting
+uniform sampler2D uVig;    // bins x bins, RGB gains
+uniform float uVigRMax;
+uniform int uVigBins;
+uniform sampler2D uBase;   // standard render (linear filtering)
+uniform vec2 uBaseSize;
+uniform highp sampler2D uDepth;
+uniform int uAllInFocus;
+uniform float uAlpha;
+uniform vec2 uMin;
+uniform float uUnit;
+uniform float uDetail;
+uniform float uOutScale;
+uniform ivec2 uOutSize;
+uniform int uReach;
+flat out vec2 vCenter;
+flat out float vY;
+flat out float vConf;
+
+float rawAt(ivec2 p) { return float(texelFetch(uRaw, p, 0).r); }
+
+float depthAt(vec2 p) {
+  ivec2 sz = textureSize(uDepth, 0);
+  vec2 f = clamp(p, vec2(0.0), vec2(sz) - 1.001);
+  ivec2 i = ivec2(floor(f));
+  vec2 a = f - vec2(i);
+  float d00 = texelFetch(uDepth, i, 0).r;
+  float d10 = texelFetch(uDepth, i + ivec2(1, 0), 0).r;
+  float d01 = texelFetch(uDepth, i + ivec2(0, 1), 0).r;
+  float d11 = texelFetch(uDepth, i + ivec2(1, 1), 0).r;
+  return mix(mix(d00, d10, a.x), mix(d01, d11, a.x), a.y);
+}
+
+void main() {
+  gl_PointSize = float(2 * uReach + 1);
+  gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // culled unless accepted below
+  vY = 0.0;
+  vConf = 0.0;
+  vCenter = vec2(0.0);
+  int idx = uStart + gl_VertexID;
+  int x = idx % uRawSize.x;
+  int y = idx / uRawSize.x;
+  if (x < 2 || y < 2 || x >= uRawSize.x - 2 || y >= uRawSize.y - 2) return;
+  float pitch = uGrid.x;
+  float rowStep = uGrid.y;
+  vec2 d = vec2(x, y) - uOrigin;
+  float lx = uGrid.z * d.x + uGrid.w * d.y;
+  float ly = -uGrid.w * d.x + uGrid.z * d.y;
+  int r0 = int(floor(ly / rowStep));
+  float best = 1e9;
+  int br = 0;
+  int bc = 0;
+  for (int r = r0; r <= r0 + 1; r++) {
+    float off = float(r & 1) * pitch * 0.5;
+    int c = int(floor((lx - off) / pitch + 0.5));
+    float uu = lx - (float(c) * pitch + off);
+    float vv = ly - float(r) * rowStep;
+    float dd = uu * uu + vv * vv;
+    if (dd < best) { best = dd; br = r; bc = c; }
+  }
+  float lensX = float(bc) * pitch + float(br & 1) * pitch * 0.5;
+  float lensY = float(br) * rowStep;
+  float u = lx - lensX;
+  float v = ly - lensY;
+  if (u * u + v * v > uRUse * uRUse) return;
+  int ch = uCfa[(y & 1) * 2 + (x & 1)];
+  float raw = rawAt(ivec2(x, y));
+  if (raw >= uSaturated[ch]) return;
+  float m = 0.25 * (rawAt(ivec2(x - 2, y)) + rawAt(ivec2(x + 2, y)) + rawAt(ivec2(x, y - 2)) + rawAt(ivec2(x, y + 2)));
+  if (raw > m * 3.0 + 40.0 || (raw < m * 0.2 && m > 100.0)) return;
+  float binScale = float(uVigBins) / (2.0 * uVigRMax);
+  int bu = int(floor((u + uVigRMax) * binScale));
+  int bv = int(floor((v + uVigRMax) * binScale));
+  if (bu < 0 || bv < 0 || bu >= uVigBins || bv >= uVigBins) return;
+  float gain = texelFetch(uVig, ivec2(bu, bv), 0)[ch];
+  if (!(gain > 0.0)) return;
+  float du = u - uUV0.x;
+  float dv = v - uUV0.y;
+  float conf = (1.0 - (u * u + v * v) / (uRUse * uRUse)) * (uInv2a2 > 0.0 ? exp(-(du * du + dv * dv) * uInv2a2) : 1.0);
+  if (conf < 1e-3) return;
+  vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
+  float alpha = uAllInFocus == 1 ? depthAt(lens * uDetail) : uAlpha;
+  vec2 o = (lens - alpha * vec2(du, dv)) * uOutScale;
+  ivec2 pp = ivec2(floor(o + 0.5));
+  if (pp.x < uReach || pp.y < uReach || pp.x >= uOutSize.x - uReach || pp.y >= uOutSize.y - uReach) return;
+  vec3 up = texture(uBase, (vec2(pp) + 0.5) / uOutScale * uDetail / uBaseSize).rgb;
+  float c = up[ch];
+  if (!(c > 1e-5)) return;
+  float upY = dot(up, vec3(0.2126, 0.7152, 0.0722));
+  float value = max(0.0, raw - uBlack[ch]) * uScale[ch] * gain;
+  vY = value * min(8.0, upY / c);
+  vConf = conf;
+  vCenter = o;
+  gl_Position = vec4((vec2(pp) + 0.5) / vec2(uOutSize) * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const SPLAT_FRAGMENT = `#version 300 es
+precision highp float;
+uniform float uInv2s2;
+flat in vec2 vCenter;
+flat in float vY;
+flat in float vConf;
+out vec4 outColor;
+void main() {
+  vec2 e = gl_FragCoord.xy - 0.5 - vCenter;
+  float w = exp(-dot(e, e) * uInv2s2) * vConf;
+  outColor = vec4(vY * w, w, 0.0, 0.0);
+}`;
+
 function compile(gl, type, src) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
@@ -203,9 +480,9 @@ function compile(gl, type, src) {
   return sh;
 }
 
-function program(gl, fragment) {
+function program(gl, fragment, vertex = VERTEX) {
   const p = gl.createProgram();
-  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, VERTEX));
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vertex));
   gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fragment));
   gl.bindAttribLocation(p, 0, 'aPos');
   gl.linkProgram(p);
@@ -253,7 +530,17 @@ export class GpuRenderer {
       bright: program(gl, BRIGHTNESS_PASS),
       view: program(gl, VIEW_PASS),
       refocus: program(gl, REFOCUS_PASS),
+      dofPrep: program(gl, DOF_PREP),
+      dofGather: program(gl, DOF_GATHER),
+      present: program(gl, PRESENT),
+      splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
     };
+    // Additive blending into 32-bit floats needs EXT_float_blend; otherwise
+    // accumulate in half floats (enough for these sums).
+    this.floatBlend = !!gl.getExtension('EXT_float_blend');
+    this.emptyVao = gl.createVertexArray();
+    this.canvas = gl.canvas;
+    this.pool = new Map();
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -448,7 +735,13 @@ export class GpuRenderer {
 
   // Refocused picture at `alpha` through an aperture centered on (u0, v0)
   // with Gaussian radius `sigma` (Infinity = the whole aperture).
-  refocus(alpha, { u0 = 0, v0 = 0, sigma = Infinity } = {}) {
+  refocus(alpha, opts) {
+    this.refocusTo(alpha, opts);
+    return this.readTarget();
+  }
+
+  // As refocus(), leaving the result in the view-size output texture.
+  refocusTo(alpha, { u0 = 0, v0 = 0, sigma = Infinity } = {}) {
     const gl = this.gl;
     const { outW, outH } = this.sampler;
     const { tex, samples, detail } = this.views;
@@ -469,6 +762,227 @@ export class GpuRenderer {
     gl.uniform4fv(P.u.uView, data);
     gl.uniform2f(P.u.uSize, outW, outH);
     this.draw();
-    return this.readTarget();
+    return this.outTex;
+  }
+
+  // As renderView(), leaving the result in the view-size output texture.
+  renderViewTex(u, v) {
+    this.renderViewTo(u, v, this.outTex);
+    return this.outTex;
+  }
+
+  // Scratch textures by size, reused between frames.
+  scratch(w, h, name) {
+    const key = `${w}x${h}:${name}`;
+    let t = this.pool.get(key);
+    if (!t) {
+      // Half floats: plenty for display, and half the memory at full
+      // resolution.
+      t = this.texture(w, h, this.gl.RGBA16F);
+      this.pool.set(key, t);
+    }
+    return t;
+  }
+
+  // Scratch texture with a full mip chain (for blurs that read averages).
+  mipmapped(w, h, name) {
+    const key = `${w}x${h}:${name}:mip`;
+    let t = this.pool.get(key);
+    if (!t) {
+      const gl = this.gl;
+      t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(w, h))) + 1, gl.RGBA16F, w, h);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.pool.set(key, t);
+    }
+    return t;
+  }
+
+  // Linear RGB from the CPU (e.g. a full resolution render) as a texture.
+  uploadRGB(rgb, w, h) {
+    const gl = this.gl;
+    const rgba = new Float32Array(w * h * 4);
+    for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+      rgba[j] = rgb[i];
+      rgba[j + 1] = rgb[i + 1];
+      rgba[j + 2] = rgb[i + 2];
+      rgba[j + 3] = 1;
+    }
+    const t = this.scratch(w, h, 'upload');
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, rgba);
+    return t;
+  }
+
+  // Per-pixel focus values (view size) for depth of field.
+  setDepth(alpha, w, h) {
+    const gl = this.gl;
+    if (this.depthTex) gl.deleteTexture(this.depthTex);
+    this.depthTex = this.texture(w, h, gl.R32F);
+    gl.bindTexture(gl.TEXTURE_2D, this.depthTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RED, gl.FLOAT, alpha);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < alpha.length; i++) {
+      if (alpha[i] < lo) lo = alpha[i];
+      if (alpha[i] > hi) hi = alpha[i];
+    }
+    this.depthRange = [lo, hi];
+    this.depthSize = [w, h];
+  }
+
+  // Synthetic depth of field with bokeh. `strength`: blur radius in pixels
+  // of this image per unit of focus difference. Returns the result texture.
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1 }) {
+    const gl = this.gl;
+    const prep = this.mipmapped(w, h, 'dofPrep');
+    const out = this.scratch(w, h, 'dofOut');
+    let P = this.programs.dofPrep;
+    this.target(prep, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, src);
+    gl.uniform1i(P.u.uDepth, 3);
+    this.bindTex(3, this.depthTex);
+    gl.uniform2f(P.u.uDepthScale, this.depthSize[0] / w, this.depthSize[1] / h);
+    gl.uniform1f(P.u.uFocus, focus);
+    gl.uniform1f(P.u.uStrength, strength);
+    gl.uniform1f(P.u.uClip, clip);
+    gl.uniform1f(P.u.uHighlights, highlights);
+    this.draw();
+
+    gl.bindTexture(gl.TEXTURE_2D, prep);
+    gl.generateMipmap(gl.TEXTURE_2D);
+
+    const [lo, hi] = this.depthRange;
+    const maxR = Math.min(64, strength * Math.max(Math.abs(hi - focus), Math.abs(lo - focus)));
+    const taps = Math.max(32, Math.min(MAX_TAPS, Math.round(maxR * maxR * 1.2)));
+    P = this.programs.dofGather;
+    this.target(out, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uPrep, 1);
+    this.bindTex(1, prep);
+    gl.uniform1i(P.u.uTaps, taps);
+    gl.uniform1f(P.u.uMaxR, Math.max(1, maxR));
+    gl.uniform1f(P.u.uLod, Math.max(0, Math.log2(Math.max(1, maxR) * Math.sqrt(Math.PI / taps)) - 0.5));
+    gl.uniform1i(P.u.uShape, shape === 'hexagon' ? 2 : shape === 'circle' ? 1 : 0);
+    this.draw();
+    return out;
+  }
+
+  // Full resolution accumulation (see renderSuperRes' gpuSplat option):
+  // returns { accY, wsum } as Float32Arrays of W * H.
+  splat(p) {
+    const gl = this.gl;
+    const { cam, dev, sampler } = this;
+    const g = sampler.grid;
+    const { W, H } = p;
+    const acc = this.texture(W, H, this.floatBlend ? gl.RGBA32F : gl.RGBA16F);
+    // Standard render (upsampled colors) with linear filtering.
+    const base = this.texture(p.baseW, p.baseH, gl.RGBA16F, gl.LINEAR);
+    const rgba = new Float32Array(p.baseW * p.baseH * 4);
+    for (let i = 0, j = 0; i < p.base.length; i += 3, j += 4) {
+      rgba[j] = p.base[i];
+      rgba[j + 1] = p.base[i + 1];
+      rgba[j + 2] = p.base[i + 2];
+      rgba[j + 3] = 1;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, base);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, p.baseW, p.baseH, gl.RGBA, gl.FLOAT, rgba);
+    const vg = p.vignetting;
+    const vig = this.texture(vg.bins, vg.bins, gl.RGBA32F);
+    const vigData = new Float32Array(vg.bins * vg.bins * 4);
+    for (let i = 0; i < vg.bins * vg.bins; i++) {
+      vigData[4 * i] = vg.gain[3 * i];
+      vigData[4 * i + 1] = vg.gain[3 * i + 1];
+      vigData[4 * i + 2] = vg.gain[3 * i + 2];
+    }
+    gl.bindTexture(gl.TEXTURE_2D, vig);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, vg.bins, vg.bins, gl.RGBA, gl.FLOAT, vigData);
+
+    this.target(acc, W, H);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    const P = this.programs.splat;
+    const U = P.u;
+    gl.useProgram(P.p);
+    gl.uniform1i(U.uRaw, 0);
+    this.bindTex(0, this.rawTex);
+    gl.uniform2i(U.uRawSize, cam.width, cam.height);
+    gl.uniform3fv(U.uBlack, dev.black);
+    gl.uniform3fv(U.uScale, dev.scale);
+    gl.uniform3fv(U.uSaturated, dev.saturated);
+    gl.uniform1iv(U.uCfa, [dev.cfa[0][0], dev.cfa[0][1], dev.cfa[1][0], dev.cfa[1][1]]);
+    gl.uniform4f(U.uGrid, g.pitch, g.rowStep, Math.cos(g.rotation), Math.sin(g.rotation));
+    gl.uniform2f(U.uOrigin, g.ox, g.oy);
+    gl.uniform1f(U.uRUse, p.rUse);
+    gl.uniform2f(U.uUV0, p.u0, p.v0);
+    gl.uniform1f(U.uInv2a2, Number.isFinite(p.apertureSigma) ? 1 / (2 * p.apertureSigma * p.apertureSigma) : 0);
+    gl.uniform1i(U.uVig, 1);
+    this.bindTex(1, vig);
+    gl.uniform1f(U.uVigRMax, vg.rMax);
+    gl.uniform1i(U.uVigBins, vg.bins);
+    gl.uniform1i(U.uBase, 2);
+    this.bindTex(2, base);
+    gl.uniform2f(U.uBaseSize, p.baseW, p.baseH);
+    gl.uniform1i(U.uDepth, 3);
+    this.bindTex(3, this.depthTex);
+    gl.uniform1i(U.uAllInFocus, p.allInFocus && p.depth ? 1 : 0);
+    gl.uniform1f(U.uAlpha, p.alpha);
+    gl.uniform2f(U.uMin, p.xMin, p.yMin);
+    gl.uniform1f(U.uUnit, p.unit);
+    gl.uniform1f(U.uDetail, p.detail);
+    gl.uniform1f(U.uOutScale, p.scale);
+    gl.uniform2i(U.uOutSize, W, H);
+    gl.uniform1i(U.uReach, p.reach);
+    gl.uniform1f(U.uInv2s2, 1 / (2 * p.sigma * p.sigma));
+    gl.bindVertexArray(this.emptyVao);
+    // In chunks, so no single draw runs long enough to trip a GPU watchdog.
+    const total = cam.width * cam.height;
+    const chunk = 1 << 22;
+    for (let start = 0; start < total; start += chunk) {
+      gl.uniform1i(U.uStart, start);
+      gl.drawArrays(gl.POINTS, 0, Math.min(chunk, total - start));
+    }
+    gl.disable(gl.BLEND);
+
+    const buf = new Float32Array(W * H * 4);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, buf);
+    const accY = new Float32Array(W * H);
+    const wsum = new Float32Array(W * H);
+    for (let i = 0; i < W * H; i++) {
+      accY[i] = buf[4 * i];
+      wsum[i] = buf[4 * i + 1];
+    }
+    for (const t of [acc, base, vig]) gl.deleteTexture(t);
+    return { accY, wsum };
+  }
+
+  // Color matrix, defringing, exposure and sRGB, drawn to the canvas and
+  // handed over as an ImageBitmap. fringe: [[amount, hue] x 4].
+  present(src, w, h, { matrix, exposure, fringe }) {
+    const gl = this.gl;
+    const P = this.programs.present;
+    this.canvas.width = w;
+    this.canvas.height = h;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, src);
+    gl.uniformMatrix3fv(P.u.uMatrix, true, matrix);
+    gl.uniform1f(P.u.uExposure, exposure);
+    const f = fringe || [];
+    const on = f.some(([amount]) => amount > 0);
+    gl.uniform1i(P.u.uFringeOn, on ? 1 : 0);
+    gl.uniform2fv(P.u.uFringe, Float32Array.from([0, 1, 2, 3].flatMap((i) => (f[i] ? [f[i][0], f[i][1]] : [0, 0]))));
+    this.draw();
+    return this.canvas.transferToImageBitmap();
   }
 }

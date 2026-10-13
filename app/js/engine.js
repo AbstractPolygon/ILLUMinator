@@ -46,6 +46,9 @@ export class Engine {
   }
 }
 
+// A worker picture: an ImageBitmap (GPU path) or RGBA bytes (CPU path).
+// Both can be drawn and passed to createImageBitmap.
 export function toImageData(msg) {
+  if (msg.bitmap) return msg.bitmap;
   return new ImageData(new Uint8ClampedArray(msg.pixels), msg.width, msg.height);
 }
