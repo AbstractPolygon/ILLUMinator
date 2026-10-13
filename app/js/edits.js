@@ -27,7 +27,7 @@ export const EDIT_GROUPS = {
   camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'highlights'],
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'sharp-masking', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
   defringe: ['lens-distortion', 'lens-vignetting', 'lens-midpoint', 'flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
-  animation: ['anim-on', 'anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
+  animation: ['anim-on', 'anim', 'anim-keys', 'key-step', 'frame-zoom', 'frame-pan-x', 'frame-pan-y', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
   rendering: ['detail', 'still-scale', 'still-passes'],
   local: ['local-masks'],
   geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],

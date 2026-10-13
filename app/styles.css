@@ -472,3 +472,12 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .mask-del { padding: 4px 6px; color: var(--muted); }
 .mask-del:hover { color: #ff8a80; }
 .mask-delete { margin-top: 8px; color: #ff8a80; }
+
+/* Animation keyframes. */
+.key-buttons { margin: 4px 0 6px; }
+.key-buttons button { flex: 1; }
+.key-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.key-list li { display: flex; align-items: center; gap: 6px; }
+.key-time { width: 40px; flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.key-go { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 3px 4px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.key-go:hover { background: #22262c; }

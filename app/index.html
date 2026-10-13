@@ -501,6 +501,7 @@
           <select id="anim">
             <option value="viewpoint">Viewpoint</option>
             <option value="focus">Focus sweep</option>
+            <option value="keyframes">Keyframes</option>
           </select>
         </label>
         <div id="anim-viewpoint">
@@ -520,6 +521,26 @@
           <label>Near <input id="near" type="range" min="-1.6" max="0" step="0.05" value="-0.6"></label>
           <label>Far <input id="far" type="range" min="0" max="1.6" step="0.05" value="0.6"></label>
           <label>Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
+        </div>
+        <div id="anim-keyframes" hidden>
+          <label title="Zooms in on the picture (pan and zoom)">Zoom <output data-for="frame-zoom" for="frame-zoom">100%</output>
+            <input id="frame-zoom" type="range" min="100" max="300" step="5" value="100" data-default="100">
+          </label>
+          <label>Pan X <output data-for="frame-pan-x" for="frame-pan-x">0</output>
+            <input id="frame-pan-x" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Pan Y <output data-for="frame-pan-y" for="frame-pan-y">0</output>
+            <input id="frame-pan-y" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <div class="row key-buttons">
+            <button id="key-add" type="button" title="Adds the current focus, aperture, viewpoint, zoom and pan as a keyframe">Add keyframe</button>
+            <button id="key-clear" type="button">Clear</button>
+          </div>
+          <ol id="key-list" class="key-list"></ol>
+          <label>Seconds between keyframes <output data-for="key-step" for="key-step">2.0 s</output>
+            <input id="key-step" type="range" min="0.5" max="6" step="0.5" value="2" data-default="2">
+          </label>
+          <input id="anim-keys" type="hidden" value="[]" data-text>
         </div>
         </fieldset>
       </details>

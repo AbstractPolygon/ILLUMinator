@@ -88,6 +88,7 @@ The light field controls.
 
 - *Animate: Viewpoint* moves the viewpoint along a *Path* (circle, left–right, up–down, figure eight, diagonal) by an *Amount*, in a number of *Frames*.
 - *Animate: Focus sweep* refocuses from *Near* to *Far* in a number of *Steps*.
+- *Animate: Keyframes* eases between keyframes you set. Set the aperture, focus (click the picture) and viewpoint (drag), and frame the picture with *Zoom*, *Pan X* and *Pan Y*, then *Add keyframe*; repeat for the next one. Click a keyframe to show it again, the trash button to delete it. *Seconds between keyframes* sets the pace.
 
 Play with the button below the picture (or Space) and scrub with the slider.
 

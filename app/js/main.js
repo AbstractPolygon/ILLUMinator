@@ -844,6 +844,14 @@ function pathPoint(kind, t) {
 
 function animationRequest() {
   const p = cameraParams();
+  const keyed = $('anim').value === 'keyframes' ? keyframeFrames() : null;
+  if (keyed) {
+    return { type: 'frames', kind: 'frames', loop: 'loop', values: [], framing: keyed.framing, args: { path: keyed.path, alpha: p.alpha, aperture: p.aperture, dof: p.dof, bokeh: p.bokeh } };
+  }
+  if ($('anim').value === 'keyframes') {
+    // Fewer than two keyframes: the current view only.
+    return { type: 'frames', kind: 'frames', loop: 'loop', values: [], framing: [liveFraming()], args: { path: [{ u: p.u, v: p.v }], alpha: p.alpha, aperture: p.aperture, dof: p.dof, bokeh: p.bokeh } };
+  }
   if ($('anim').value === 'focus') {
     const n = +$('steps').value;
     const near = +$('near').value;
@@ -886,8 +894,9 @@ function ensureAnimation() {
   state.animKey = key;
   state.frames = new Array(req.type === 'frames' ? req.args.path.length : req.args.alphas.length);
   state.framePivots = withPivotZoom(req.type === 'frames'
-    ? req.args.path.map(({ u, v }) => pivotFor(u, v, req.args.alpha, req.args.aperture))
+    ? req.args.path.map((f) => pivotFor(f.u, f.v, f.alpha ?? req.args.alpha, f.aperture ?? req.args.aperture))
     : req.args.alphas.map((alpha) => pivotFor(req.args.u, req.args.v, alpha, req.args.aperture)));
+  if (req.framing) state.framePivots = state.framePivots.map((p, i) => combineMotion(p, req.framing[i]));
   state.frameValues = req.values;
   state.loop = req.loop;
   state.index = 0;
@@ -1582,7 +1591,8 @@ function withPivotZoom(pivots) {
 function currentPivot() {
   if (state.showingFrames && state.framePivots) return state.framePivots[state.drawFrame ?? state.index] || null;
   const p = cameraParams();
-  return withPivotZoom([pivotFor(p.u, p.v, p.alpha, p.aperture)])[0];
+  const pivot = withPivotZoom([pivotFor(p.u, p.v, p.alpha, p.aperture)])[0];
+  return keyframesOn() ? combineMotion(pivot, liveFraming()) : pivot;
 }
 
 function geometrySettings() {
@@ -2029,6 +2039,146 @@ function localSettings() {
   return { masks: $('local-masks').value, show: $('mask-show').checked ? maskSel : -1 };
 }
 
+// ---------------------------------------------------------------- keyframes
+
+// Keyframed animation: each keyframe holds the aperture, focus, viewpoint
+// and framing (zoom and pan); the frames in between ease from one to the
+// next. Framing is applied when the picture is drawn, like the pivot.
+const KEY_FPS = 24;
+
+function getKeys() {
+  try {
+    const keys = JSON.parse($('anim-keys').value || '[]');
+    return Array.isArray(keys) ? keys : [];
+  } catch {
+    return [];
+  }
+}
+
+function setKeys(keys) {
+  $('anim-keys').value = JSON.stringify(keys);
+  renderKeys();
+  animationSettingsChanged();
+  scheduleSave();
+}
+
+function keyframesOn() {
+  return $('anim-on').checked && $('anim').value === 'keyframes';
+}
+
+// Zoom (1..3) and pan (-1..1 each way) -> a picture shift and zoom.
+function framing(zoom, panX, panY) {
+  const room = (1 - 1 / zoom) / 2;
+  return { shift: [-panX * room, -panY * room], zoom };
+}
+
+function liveFraming() {
+  return framing(+$('frame-zoom').value / 100, +$('frame-pan-x').value / 100, +$('frame-pan-y').value / 100);
+}
+
+// Pivot and framing together.
+function combineMotion(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return { shift: [a.shift[0] + b.shift[0], a.shift[1] + b.shift[1]], zoom: a.zoom * b.zoom };
+}
+
+function keyLabel(k) {
+  const f = F_STOPS[k.fstop] ?? 2;
+  return `f/${f} · focus ${k.focus >= 0 ? '+' : '−'}${Math.abs(k.focus).toFixed(2)}${k.zoom > 1.001 ? ` · ${Math.round(k.zoom * 100)}%` : ''}`;
+}
+
+function renderKeys() {
+  const keys = getKeys();
+  const step = +$('key-step').value;
+  $('key-list').replaceChildren(...keys.map((k, i) => {
+    const li = document.createElement('li');
+    const time = Object.assign(document.createElement('span'), { className: 'key-time', textContent: `${(i * step).toFixed(1)} s` });
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'key-go', textContent: keyLabel(k), title: 'Show this keyframe' });
+    go.onclick = () => applyKey(k);
+    const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', title: 'Delete keyframe' });
+    del.innerHTML = TRASH_ICON;
+    del.setAttribute('aria-label', `Delete keyframe ${i + 1}`);
+    del.onclick = () => {
+      const list = getKeys();
+      list.splice(i, 1);
+      setKeys(list);
+    };
+    li.append(time, go, del);
+    return li;
+  }));
+  $('key-clear').disabled = !keys.length;
+}
+
+// Shows a keyframe: its settings become the current ones.
+function applyKey(k) {
+  if (state.showingFrames) backToCamera();
+  $('fstop').value = k.fstop;
+  $('focus').value = k.focus;
+  $('frame-zoom').value = Math.round(k.zoom * 100);
+  $('frame-pan-x').value = Math.round(k.panX * 100);
+  $('frame-pan-y').value = Math.round(k.panY * 100);
+  for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) showSliderValue($(id));
+  state.camera = { u: k.u, v: k.v };
+  showFNumber();
+  cameraChanged({ final: true });
+}
+
+$('key-add').onclick = () => {
+  const keys = getKeys();
+  keys.push({
+    fstop: +$('fstop').value,
+    focus: +$('focus').value,
+    u: state.camera.u,
+    v: state.camera.v,
+    zoom: +$('frame-zoom').value / 100,
+    panX: +$('frame-pan-x').value / 100,
+    panY: +$('frame-pan-y').value / 100,
+  });
+  setKeys(keys);
+};
+$('key-clear').onclick = () => setKeys([]);
+$('key-step').oninput = () => {
+  showSliderValue($('key-step'));
+  renderKeys();
+};
+$('key-step').onchange = animationSettingsChanged;
+for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) {
+  $(id).oninput = () => {
+    showSliderValue($(id));
+    if (state.lastImage) draw(state.lastImage);
+  };
+  $(id).onchange = () => scheduleSave();
+}
+
+const ease = (t) => t * t * (3 - 2 * t);
+
+// Frames between the keyframes: the camera settings for the worker and the
+// framing for drawing.
+function keyframeFrames() {
+  const keys = getKeys();
+  if (keys.length < 2) return null;
+  const per = Math.max(1, Math.round(+$('key-step').value * KEY_FPS));
+  const path = [];
+  const frames = [];
+  for (let s = 0; s < keys.length - 1; s++) {
+    const a = keys[s];
+    const b = keys[s + 1];
+    const last = s === keys.length - 2;
+    for (let i = 0; i < per + (last ? 1 : 0); i++) {
+      const t = ease(i / per);
+      const mix = (x, y) => x + (y - x) * t;
+      // Aperture eases in f-number steps (log scale).
+      const fa = F_STOPS[a.fstop] ?? 2;
+      const fb = F_STOPS[b.fstop] ?? 2;
+      const lens = apertureFor(Math.exp(mix(Math.log(fa), Math.log(fb))));
+      path.push({ u: mix(a.u, b.u), v: mix(a.v, b.v), alpha: mix(a.focus, b.focus), aperture: lens.aperture, dof: lens.dof * depthOfFieldScale() });
+      frames.push(framing(mix(a.zoom, b.zoom), mix(a.panX, b.panX), mix(a.panY, b.panY)));
+    }
+  }
+  return { path, framing: frames };
+}
+
 // ---------------------------------------------------------------- tone curve
 
 const CURVE_REGIONS = ['shadows', 'darks', 'lights', 'highlights'];
@@ -2310,6 +2460,8 @@ for (const b of document.querySelectorAll('#modes button')) b.onclick = () => se
 function animationSettingsChanged() {
   $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
   $('anim-focus').hidden = $('anim').value !== 'focus';
+  $('anim-keyframes').hidden = $('anim').value !== 'keyframes';
+  if (state.lastImage) draw(state.lastImage);
   invalidateAnimation();
   if (state.showingFrames) {
     backToCamera();
@@ -2334,6 +2486,7 @@ $('anim-on').onchange = () => {
     }
   }
   showAnimationEnabled();
+  if (state.lastImage) draw(state.lastImage);
 };
 
 async function applySettings() {
@@ -2466,6 +2619,8 @@ async function restoreEdits(info) {
     for (const input of document.querySelectorAll('aside.controls input[type=range]')) showSliderValue(input);
     showFNumber();
     $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
+    $('anim-keyframes').hidden = $('anim').value !== 'keyframes';
+    renderKeys();
     $('anim-focus').hidden = $('anim').value !== 'focus';
     await applySettings();
   } finally {
@@ -2577,6 +2732,8 @@ function showSliderValue(input) {
   else if (input.id === 'tilt-rotation') out.textContent = `${v}°`;
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
+  else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
+  else if (input.id === 'key-step') out.textContent = `${v.toFixed(1)} s`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;
   else if (input.closest('.mask-shape')) out.textContent = `${v}`;
