@@ -1937,6 +1937,18 @@ function maskLabel(m, i) {
   return `${MASK_NAMES[m.kind]} ${same}`;
 }
 
+const TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+
+function deleteMask(i) {
+  const list = getMasks();
+  if (!list[i]) return;
+  list.splice(i, 1);
+  if (maskSel >= i) maskSel = Math.max(list.length ? 0 : -1, maskSel - 1);
+  if (!list.length) $('mask-show').checked = false;
+  setMasks(list);
+  renderMasks();
+}
+
 function renderMasks() {
   const masks = getMasks();
   if (maskSel >= masks.length) maskSel = masks.length - 1;
@@ -1950,15 +1962,10 @@ function renderMasks() {
       renderMasks();
       applySettingsSoon();
     };
-    const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', textContent: '×', title: 'Delete mask' });
+    const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', title: 'Delete mask' });
+    del.innerHTML = TRASH_ICON;
     del.setAttribute('aria-label', `Delete ${maskLabel(m, i)}`);
-    del.onclick = () => {
-      const list = getMasks();
-      list.splice(i, 1);
-      if (maskSel >= i) maskSel = Math.max(list.length ? 0 : -1, maskSel - 1);
-      setMasks(list);
-      renderMasks();
-    };
+    del.onclick = () => deleteMask(i);
     li.append(name, del);
     return li;
   }));
@@ -2016,6 +2023,7 @@ for (const input of document.querySelectorAll('.local-panel input[type=range]'))
 }
 for (const id of ['mask-on', 'mask-invert']) $(id).addEventListener('change', () => maskFromEditor(true));
 $('mask-show').addEventListener('change', () => applySettingsSoon());
+$('mask-delete').onclick = () => deleteMask(maskSel);
 
 function localSettings() {
   return { masks: $('local-masks').value, show: $('mask-show').checked ? maskSel : -1 };

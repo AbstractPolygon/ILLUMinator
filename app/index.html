@@ -270,9 +270,15 @@
       <details class="panel local-panel" data-panel="camera">
         <summary><h2>Local Adjustments</h2></summary>
         <div class="row mask-add">
-          <button id="mask-add-radial" type="button" title="An ellipse: full effect inside, fading out">+ Radial</button>
-          <button id="mask-add-linear" type="button" title="A graduated filter: full effect on one side of a line, fading to none">+ Gradient</button>
-          <button id="mask-add-depth" type="button" title="By depth: full effect between a near and a far depth">+ Depth</button>
+          <button id="mask-add-radial" type="button" class="icon-only mask-icon" title="Add a radial mask: an ellipse, full effect inside and fading out" aria-label="Add a radial mask">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><defs><radialGradient id="mask-icon-radial"><stop offset="0.35" stop-color="currentColor" stop-opacity="0.85"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient></defs><ellipse cx="12" cy="12" rx="9" ry="7" fill="url(#mask-icon-radial)" stroke="currentColor" stroke-width="1.4"/></svg>
+          </button>
+          <button id="mask-add-linear" type="button" class="icon-only mask-icon" title="Add a gradient mask: full effect on one side of a line, fading to none" aria-label="Add a gradient mask">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><defs><linearGradient id="mask-icon-linear" x1="0" y1="0" x2="0" y2="1"><stop offset="0.2" stop-color="currentColor" stop-opacity="0.85"/><stop offset="0.85" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="url(#mask-icon-linear)" stroke="currentColor" stroke-width="1.4"/></svg>
+          </button>
+          <button id="mask-add-depth" type="button" class="icon-only mask-icon" title="Add a depth mask: full effect between a near and a far depth" aria-label="Add a depth mask">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 15.5 12 20l9-4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2" stroke-linejoin="round"/><path d="M3 11.5 12 16l9-4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5L12 3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </button>
         </div>
         <ul id="mask-list" class="mask-list"></ul>
         <div id="mask-editor" hidden>
@@ -339,6 +345,7 @@
             <label>Tint <output data-for="mx-tint" for="mx-tint">0</output>
               <input id="mx-tint" type="range" min="-100" max="100" step="1" value="0" data-default="0">
             </label>
+          <button id="mask-delete" type="button" class="wide mask-delete">Delete mask</button>
         </div>
         <input id="local-masks" type="hidden" value="[]" data-text>
       </details>

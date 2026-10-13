@@ -307,25 +307,27 @@ async function open({ id, bytes, synthetic }) {
 
 // Viewpoint animation along `path`; with an open aperture each frame is
 // refocused at `alpha` through an aperture around the path point.
+// Animation frames along `path`: [{ u, v }] with the shared focus, aperture
+// and blur, or with any of them per frame ({ u, v, alpha, aperture, dof },
+// for keyframed animations).
 async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }) {
-  if (state.pp) return processedFrames({ id, job, kind: 'frames', list: path.map(({ u, v }) => ({ u, v, alpha, aperture, dof, bokeh })) });
+  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh }));
+  if (state.pp) return processedFrames({ id, job, kind: 'frames', list });
   requireRaw();
   state.jobs.frames = job;
-  if (aperture > 0 && !(await ensureRefocusViews(id))) return { cancelled: true };
+  if (list.some((f) => f.aperture > 0) && !(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
-  for (let i = 0; i < path.length; i++) {
+  for (let i = 0; i < list.length; i++) {
     if (state.jobs.frames !== job) return { cancelled: true };
-    const { u, v } = path[i];
+    const f = list[i];
     if (state.gpu) {
-      const tex = aperture > 0 ? state.gpu.refocusTo(alpha, apertureOptions({ u, v, aperture })) : await singleView(id, u, v);
-      await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
+      const tex = f.aperture > 0 ? state.gpu.refocusTo(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
+      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
-    const rgb = aperture > 0
-      ? refocusRGB(alpha, apertureOptions({ u, v, aperture }))
-      : await singleView(id, u, v);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alpha, dof, 1, bokeh));
+    const rgb = f.aperture > 0 ? refocusRGB(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, bokeh));
     await tick();
   }
   return { done: true };

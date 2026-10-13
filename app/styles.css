@@ -459,10 +459,16 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 
 /* Local adjustments. */
 .mask-add { margin: 2px 0 8px; }
-.mask-add button { flex: 1; padding: 5px 6px; font-size: 12.5px; }
+.mask-add { gap: 4px; }
+.mask-add .mask-icon { padding: 4px; border-radius: 6px; }
+.mask-add .mask-icon svg { width: 26px; height: 26px; }
+.mask-add .mask-icon:hover:not(:disabled) { background: #22262c; }
 .mask-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .mask-list li { display: flex; align-items: center; border-radius: 5px; border: 1px solid transparent; }
 .mask-list li.current { border-color: var(--accent); }
 .mask-list li.off .mask-name { color: var(--muted); text-decoration: line-through; }
 .mask-name { flex: 1; text-align: left; background: none; border: 0; padding: 4px 6px; font-size: 12.5px; }
 .mask-fx-title { margin: 8px 0 4px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.mask-del { padding: 4px 6px; color: var(--muted); }
+.mask-del:hover { color: #ff8a80; }
+.mask-delete { margin-top: 8px; color: #ff8a80; }
