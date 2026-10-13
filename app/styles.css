@@ -575,3 +575,7 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 
 /* Rendering: room between a checkbox and the field below it. */
 #depth-hq-row, #stereo-on-row { margin-bottom: 10px; }
+
+/* A disabled mask shows only its Enabled checkbox and Delete button. */
+#mask-editor.off > :not(.check-row):not(.mask-delete) { display: none; }
+#mask-editor.off .check-row > label:not(:has(#mask-on)) { display: none; }

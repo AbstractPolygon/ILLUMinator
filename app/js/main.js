@@ -2083,6 +2083,8 @@ function renderMasks() {
   for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) $(id).value = Math.round(m[key] * k);
   for (const [key, id] of Object.entries(FX_SLIDERS)) $(id).value = Math.round(m.fx[key] * 100);
   $('mask-on').checked = m.on;
+  // Disabled: only Enabled (and Delete) show.
+  $('mask-editor').classList.toggle('off', !m.on);
   $('mask-invert').checked = m.invert;
   $('mx-strength').value = Math.round((m.strength ?? 1) * 100);
   $('mask-follow').checked = !!m.follow;
@@ -2097,6 +2099,7 @@ function maskFromEditor(final) {
   for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) m[key] = +$(id).value / k;
   for (const [key, id] of Object.entries(FX_SLIDERS)) m.fx[key] = +$(id).value / 100;
   m.on = $('mask-on').checked;
+  if (!m.on && $('mask-show').checked) $('mask-show').checked = false;
   m.invert = $('mask-invert').checked;
   m.strength = +$('mx-strength').value / 100;
   // Following the focus from where it is now.
