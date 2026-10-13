@@ -9,6 +9,9 @@ const fsp = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
 const camera = require('./camera.cjs');
 
+// Render on the faster GPU of computers that have two (laptops).
+app.commandLine.appendSwitch('force_high_performance_gpu');
+
 const APP_DIR = path.join(__dirname, '..', 'app');
 const POLL_MS = 3000;
 

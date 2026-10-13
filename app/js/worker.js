@@ -41,6 +41,10 @@ const state = {
   depth: null,
   // GpuRenderer when WebGL2 is available (false: not used, e.g. ?cpu).
   gpu: typeof location !== 'undefined' && new URLSearchParams(location.search).has('cpu') ? false : null,
+  // Changes whenever the photo, the views or the depth map change (see
+  // view()); `kept` is the last view before its color pass, on the GPU.
+  gen: 0,
+  kept: null,
   refocusBuild: null,
   jobs: {},
   scratch: null,
@@ -90,6 +94,13 @@ function render(u, v) {
   return renderView(lf.raw, lf.cam, dev, sampler, u, v, state.scratch);
 }
 
+// The center view (linear RGB), rendered once per sampler: color settings
+// measure it on every change. Read only.
+function centerView() {
+  if (!state.center) state.center = render(0, 0);
+  return state.center;
+}
+
 function asShotKelvin() {
   const c = state.lf && state.lf.cam && state.lf.cam.capture;
   return (c && c.cct) || DEFAULT_KELVIN;
@@ -101,7 +112,7 @@ function updateColor() {
     updateProcessedColor();
     return;
   }
-  const center = render(0, 0);
+  const center = centerView();
   state.centerMeans = channelMeans(center);
   const s = state.settings;
   const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
@@ -122,7 +133,9 @@ function updateColor() {
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
   // Reduce flare: the veil is measured once on the center view.
   const { outW, outH } = state.sampler;
-  state.veil = s.flare && s.flare.on ? estimateVeil(center, outW, outH) : null;
+  if (!(s.flare && s.flare.on)) state.veil = null;
+  else if (!state.veil || state.veilOf !== center) state.veil = estimateVeil(center, outW, outH);
+  state.veilOf = state.veil ? center : null;
   state.veilAmount = state.veil ? s.flare.amount : 0;
   if (state.gpu) state.gpu.setVeil(state.veil);
   state.baseExposure = autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
@@ -168,8 +181,9 @@ function toPixels(rgb, w, h, ctx) {
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
 // field and bokeh, then color, defringing and tone mapping) and posts it as
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
-// unit of `dof`, for this image's size.
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha } }, message) {
+// unit of `dof`, for this image's size. `keep`: keep the picture as it is
+// before the color pass, so color changes can redraw it (see view()).
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null }, message) {
   const gpu = state.gpu;
   if (dof > 0 && (await ensureDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
@@ -185,10 +199,21 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     });
   }
   if (state.detail) tex = gpu.details(tex, w, h, state.detail);
-  const resolved = state.masks && state.masks.length ? resolveMasks(state.masks, masks) : null;
-  const packed = resolved ? { ...packMasks(resolved), show: state.maskShow } : null;
-  if (resolved && hasSpatial(resolved)) tex = gpu.localSpatial(tex, w, h, packed);
-  const bitmap = gpu.present(tex, w, h, {
+  const packed = packedMasks(masks);
+  if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
+  if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
+  finishGpu(tex, w, h, packed, message);
+}
+
+// Local adjustments resolved for a picture, packed for the GPU, or null.
+function packedMasks(ctx) {
+  const resolved = state.masks && state.masks.length ? resolveMasks(state.masks, ctx) : null;
+  return resolved ? { ...packMasks(resolved), show: state.maskShow, spatial: hasSpatial(resolved) } : null;
+}
+
+// The color pass: color, defringing, local adjustments and tone mapping.
+function finishGpu(tex, w, h, packed, message) {
+  const bitmap = state.gpu.present(tex, w, h, {
     matrix: state.matrix,
     exposure: state.baseExposure * Math.pow(2, state.settings.ev),
     fringe: state.settings.defringe,
@@ -219,6 +244,8 @@ function frameMessage(id, index, rgb, ctx) {
 function rebuildSampler() {
   const { lf } = state;
   state.sampler = buildSampler(lf.grid, lf.cam, state.settings.detail);
+  state.center = null;
+  state.gen++;
   state.refocusViews = null;
   state.vignetting = null;
   state.depth = null;
@@ -294,6 +321,7 @@ function requireRaw() {
 
 async function open({ id, bytes, synthetic }) {
   state.lf = null;
+  state.gen++;
   state.refocusViews = null;
   for (const k of Object.keys(state.jobs)) state.jobs[k] = null;
   const onProgress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
@@ -497,6 +525,18 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
   if (state.pp) return processedView({ id, u, v, alpha, aperture, dof, bokeh });
   requireRaw();
   if (state.gpu) {
+    const { outW, outH } = state.sampler;
+    const masks = { focus: alpha, view: viewOf(u, v) };
+    // Everything that decides the picture before the color pass. When only
+    // color settings changed since the last view, redraw from the kept
+    // picture instead of rendering it again.
+    if (dof > 0 && !(await ensureDepth(id))) return { cancelled: true };
+    const packed = packedMasks(masks);
+    const key = JSON.stringify([state.gen, u, v, alpha, aperture, dof, bokeh || null, state.settings.mvDenoise, state.detail, packed && packed.spatial ? packed : null]);
+    if (state.kept && state.kept.key === key) {
+      finishGpu(state.kept.tex, outW, outH, packed, { id, type: 'result' });
+      return undefined;
+    }
     let tex;
     if (aperture > 0) {
       if (!(await ensureRefocusViews(id))) return { cancelled: true };
@@ -504,7 +544,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     } else {
       tex = await singleView(id, u, v);
     }
-    await presentGpu(id, tex, state.sampler.outW, state.sampler.outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: alpha, view: viewOf(u, v) } }, { id, type: 'result' });
+    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key }, { id, type: 'result' });
     return undefined;
   }
   let rgb;
@@ -633,9 +673,10 @@ function applyDepthSmoothing() {
   const raw = state.depthRaw;
   if (!raw) return;
   const { outW, outH } = state.sampler;
-  const guide = equalize(render(0, 0));
+  const guide = equalize(Float32Array.from(centerView()));
   state.depth = { ...raw, alpha: smoothDepth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence }) };
   state.depthSmoothingApplied = amount;
+  state.gen++;
   if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
 }
 
@@ -688,7 +729,7 @@ async function whiteBalanceAt({ x, y }) {
     matrix = colorMatrix({ ccm: null }, { ...state.settings, useCcm: false, ccm: null });
   } else {
     requireRaw();
-    rgb = render(0, 0);
+    rgb = centerView();
     w = state.sampler.outW;
     h = state.sampler.outH;
     matrix = colorMatrix(state.lf.cam, state.settings);

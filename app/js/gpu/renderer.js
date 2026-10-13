@@ -102,6 +102,14 @@ void main() {
   outColor = s;
 }`;
 
+const COPY_PASS = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+out vec4 outColor;
+void main() {
+  outColor = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0);
+}`;
+
 const BRIGHTNESS_PASS = `#version 300 es
 precision highp float;
 precision highp int;
@@ -854,25 +862,48 @@ function compile(gl, type, src) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(`Shader compile failed: ${gl.getShaderInfoLog(sh)}`);
   return sh;
 }
 
+// Starts compiling and linking a program without waiting for it: the
+// status is checked the first time the program is used, so the driver can
+// compile every program at once (KHR_parallel_shader_compile) while the
+// photo opens.
 function program(gl, fragment, vertex = VERTEX) {
   const p = gl.createProgram();
-  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vertex));
-  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fragment));
+  const vs = compile(gl, gl.VERTEX_SHADER, vertex);
+  const fs = compile(gl, gl.FRAGMENT_SHADER, fragment);
+  gl.attachShader(p, vs);
+  gl.attachShader(p, fs);
   gl.bindAttribLocation(p, 0, 'aPos');
   gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(`Shader link failed: ${gl.getProgramInfoLog(p)}`);
-  const uniforms = {};
-  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
-  for (let i = 0; i < n; i++) {
-    const info = gl.getActiveUniform(p, i);
-    const name = info.name.replace(/\[0\]$/, '');
-    uniforms[name] = gl.getUniformLocation(p, info.name);
-  }
-  return { p, u: uniforms };
+  let uniforms = null;
+  const ready = () => {
+    if (uniforms) return;
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      for (const sh of [vs, fs]) {
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(`Shader compile failed: ${gl.getShaderInfoLog(sh)}`);
+      }
+      throw new Error(`Shader link failed: ${gl.getProgramInfoLog(p)}`);
+    }
+    uniforms = {};
+    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) {
+      const info = gl.getActiveUniform(p, i);
+      const name = info.name.replace(/\[0\]$/, '');
+      uniforms[name] = gl.getUniformLocation(p, info.name);
+    }
+  };
+  return {
+    get p() {
+      ready();
+      return p;
+    },
+    get u() {
+      ready();
+      return uniforms;
+    },
+  };
 }
 
 function latticeOrigins(cfa) {
@@ -888,7 +919,8 @@ export class GpuRenderer {
     if (typeof OffscreenCanvas === 'undefined') return null;
     try {
       const canvas = new OffscreenCanvas(1, 1);
-      const gl = canvas.getContext('webgl2', { antialias: false, depth: false, stencil: false, premultipliedAlpha: false });
+      // Ask for the faster GPU on computers that have two (laptops).
+      const gl = canvas.getContext('webgl2', { antialias: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: 'high-performance' });
       if (!gl || !gl.getExtension('EXT_color_buffer_float')) return null;
       const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
       if (cam.width > max || cam.height > max) return null;
@@ -902,9 +934,11 @@ export class GpuRenderer {
     this.gl = gl;
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.name = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    gl.getExtension('KHR_parallel_shader_compile');
     this.programs = {
       lens: program(gl, LENS_PASS),
       box: program(gl, BOX_PASS),
+      copy: program(gl, COPY_PASS),
       bright: program(gl, BRIGHTNESS_PASS),
       view: program(gl, VIEW_PASS),
       refocus: program(gl, REFOCUS_PASS),
@@ -1186,6 +1220,25 @@ export class GpuRenderer {
   renderViewTex(u, v) {
     this.renderViewTo(u, v, this.outTex);
     return this.outTex;
+  }
+
+  // A copy of `src` that later renders leave alone (full float, so drawing
+  // from it gives the same picture as drawing from `src`).
+  keep(src, w, h) {
+    const gl = this.gl;
+    const key = `${w}x${h}:kept`;
+    let t = this.pool.get(key);
+    if (!t) {
+      t = this.texture(w, h);
+      this.pool.set(key, t);
+    }
+    const P = this.programs.copy;
+    this.target(t, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, src);
+    this.draw();
+    return t;
   }
 
   // Scratch textures by size, reused between frames.
@@ -1488,8 +1541,9 @@ export class GpuRenderer {
   present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0 }) {
     const gl = this.gl;
     const P = this.programs.present;
-    this.canvas.width = w;
-    this.canvas.height = h;
+    // Resizing reallocates the canvas: only when the size changes.
+    if (this.canvas.width !== w) this.canvas.width = w;
+    if (this.canvas.height !== h) this.canvas.height = h;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     gl.useProgram(P.p);
