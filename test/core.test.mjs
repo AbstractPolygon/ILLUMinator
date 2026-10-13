@@ -171,3 +171,14 @@ for (const name of samples ? fs.readdirSync(samples).filter((f) => /\.(lfr|lfp)$
     if (lf.raw) assert.ok(lf.gridQuality > 0.3, `grid quality ${lf.gridQuality}`);
   });
 }
+
+test('hot pixels are replaced by their same-color neighbors', async () => {
+  const { removeHotPixels } = await import('../app/js/core/raw.js');
+  const w = 10;
+  const raw = new Uint16Array(w * w).fill(100);
+  raw[5 * w + 5] = 1000; // hot
+  raw[3 * w + 4] = 180; // ordinary detail
+  assert.equal(removeHotPixels(raw, w, w), 1);
+  assert.equal(raw[5 * w + 5], 100);
+  assert.equal(raw[3 * w + 4], 180);
+});

@@ -1,7 +1,7 @@
 // High level decoding shared by the worker and the command line tool.
 
 import { bufferReader, isLfp, readLightFieldPicture, LfpError } from './lfp.js';
-import { cameraInfo, guessRawLayout, packedSize, unpackRaw } from './raw.js';
+import { cameraInfo, guessRawLayout, packedSize, unpackRaw, removeHotPixels } from './raw.js';
 import { gridFromCamera, calibrateGrid, measureGrid, normalizeGrid } from './lenslet.js';
 
 export async function decodeLightField(bytes, { onProgress = () => {}, calibrate = true } = {}) {
@@ -41,6 +41,7 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
   onProgress('Unpacking sensor data', 0.1);
   result.cam = cam;
   result.raw = unpackRaw(rawBytes, cam.width, cam.height, cam.bits);
+  result.hotPixels = removeHotPixels(result.raw, cam.width, cam.height);
 
   const metadataGrid = normalizeGrid(gridFromCamera(cam), cam);
   result.metadataGrid = metadataGrid;

@@ -730,6 +730,7 @@ function renderInfo() {
     rows.push(['Sensor', `${info.cam.width}×${info.cam.height}, ${info.cam.bits} bit`]);
     rows.push(['Views', `${info.width}×${info.height}`]);
     rows.push(['Lens pitch', `${fmt(info.grid.pitch, 3)} px`]);
+    if (info.hotPixels) rows.push(['Hot pixels fixed', info.hotPixels.toLocaleString()]);
     if (info.renderer) rows.push(['Rendering', info.renderer]);
   } else if (info.processed) {
     const p = info.processed;

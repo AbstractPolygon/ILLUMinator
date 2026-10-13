@@ -226,6 +226,7 @@ function summary() {
     grid: lf.grid,
     metadataGrid: lf.metadataGrid,
     gridQuality: lf.gridQuality,
+    hotPixels: lf.hotPixels || 0,
     width: sampler.outW,
     height: sampler.outH,
     // View size at each Resolution setting, and full resolution size at each

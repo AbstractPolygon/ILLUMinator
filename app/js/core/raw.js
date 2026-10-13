@@ -153,3 +153,26 @@ export function cameraInfo(metadata, fallbackLayout) {
     },
   };
 }
+
+// Hot pixels: sensor pixels stuck far brighter than their surroundings
+// (more of them in long exposures and at high ISO). Through the microlenses
+// each one becomes a small red, green or blue blotch, so they are replaced
+// by the average of their four same-color neighbors (two pixels away).
+// A pixel counts as hot when it is over three times that average plus a
+// margin; real detail at this scale never jumps that much in one pixel.
+// Modifies `raw` in place and returns the number replaced.
+export function removeHotPixels(raw, width, height) {
+  let count = 0;
+  const w2 = 2 * width;
+  for (let y = 2; y < height - 2; y++) {
+    let i = y * width + 2;
+    for (let x = 2; x < width - 2; x++, i++) {
+      const m = (raw[i - 2] + raw[i + 2] + raw[i - w2] + raw[i + w2]) * 0.25;
+      if (raw[i] > m * 3 + 40) {
+        raw[i] = Math.round(m);
+        count++;
+      }
+    }
+  }
+  return count;
+}
