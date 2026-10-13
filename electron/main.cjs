@@ -21,6 +21,7 @@ protocol.registerSchemesAsPrivileged([
 const allowed = new Set();
 let cameras = [];
 let importDir = null;
+let settings = { libraryDir: null };
 let win = null;
 
 function allow(file) {
@@ -31,11 +32,36 @@ function checkAllowed(file) {
   const p = path.resolve(file);
   if (allowed.has(p)) return p;
   if (importDir && p.startsWith(path.resolve(importDir) + path.sep)) return p;
+  if (p.startsWith(path.resolve(libraryDir()) + path.sep)) return p;
   throw new Error('This file was not opened in Illuminator.');
 }
 
+// App settings, kept in the user data folder.
+function settingsFile() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+async function loadSettings() {
+  try {
+    settings = { ...settings, ...JSON.parse(await fsp.readFile(settingsFile(), 'utf8')) };
+  } catch {
+    // First run: defaults.
+  }
+}
+
+async function saveSettings() {
+  await fsp.mkdir(path.dirname(settingsFile()), { recursive: true });
+  await fsp.writeFile(settingsFile(), JSON.stringify(settings, null, 2));
+}
+
+// Where the library lives (the user can choose it in Settings).
+function libraryDir() {
+  return settings.libraryDir || path.join(app.getPath('pictures'), 'Illuminator');
+}
+
+// Photos imported from the camera go into the library.
 function defaultImportDir() {
-  return path.join(app.getPath('pictures'), 'Lytro');
+  return path.join(libraryDir(), 'Photos');
 }
 
 async function describe(file) {
@@ -147,6 +173,21 @@ function registerIpc() {
 
   ipcMain.handle('import-dir', async () => importDir || defaultImportDir());
 
+  ipcMain.handle('library-dir', async () => libraryDir());
+
+  ipcMain.handle('choose-library-dir', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Choose library location',
+      defaultPath: libraryDir(),
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (res.canceled || !res.filePaths.length) return null;
+    settings.libraryDir = res.filePaths[0];
+    importDir = null;
+    await saveSettings();
+    return libraryDir();
+  });
+
   ipcMain.handle('choose-import-dir', async () => {
     const res = await dialog.showOpenDialog(win, {
       title: 'Import photos to',
@@ -188,7 +229,8 @@ function registerIpc() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await loadSettings();
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
     const file = path.normalize(path.join(APP_DIR, decodeURIComponent(pathname)));

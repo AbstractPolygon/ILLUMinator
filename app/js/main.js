@@ -976,6 +976,33 @@ for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt',
 
 $('spread-show').onchange = updateSpreadOverlay;
 
+// ---------------------------------------------------------------- settings
+
+// Settings window (gear at the right of the top bar).
+async function showLibraryLocation() {
+  $('library-path').classList.toggle('mono', !!native);
+  if (native) {
+    $('library-path').textContent = await native.libraryDir();
+    $('library-note').textContent = 'Each photo is kept in its own folder in the library, with its edits next to it.';
+    $('library-choose').hidden = false;
+  } else {
+    $('library-path').textContent = 'This browser’s storage';
+    $('library-note').textContent = 'In a browser the library is stored privately by the browser. Use the desktop app to keep it in a folder of your choice.';
+    $('library-choose').hidden = true;
+  }
+}
+
+$('settings-btn').onclick = async () => {
+  await showLibraryLocation();
+  $('settings-dialog').showModal();
+};
+
+$('library-choose').onclick = async () => {
+  if (!native) return;
+  const dir = await native.chooseLibraryDir();
+  if (dir) await showLibraryLocation();
+};
+
 // ---------------------------------------------------------------- export
 
 function baseName() {

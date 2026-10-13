@@ -282,3 +282,11 @@ button.wide { display: block; width: 100%; }
 .stack { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .stack > * { margin: 0; }
 .row.export { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.icon-btn { display: inline-flex; align-items: center; gap: 6px; }
+#settings-dialog { width: min(520px, calc(100vw - 32px)); }
+.setting h3 { margin: 0 0 6px; font-size: 13px; }
+.setting .path { margin: 0 0 6px; font-size: 13px; word-break: break-all; color: var(--text); }
+.setting .path.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+/* Divider lines between the right sidebar's sections. */
+.controls > .panel + .panel { border-top: 1px solid var(--line); padding-top: 6px; }

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('lytroNative', {
   listCameras: () => ipcRenderer.invoke('list-cameras'),
   cameraThumbnail: (cameraId, fileId) => ipcRenderer.invoke('camera-thumbnail', cameraId, fileId),
   importDir: () => ipcRenderer.invoke('import-dir'),
+  libraryDir: () => ipcRenderer.invoke('library-dir'),
+  chooseLibraryDir: () => ipcRenderer.invoke('choose-library-dir'),
   chooseImportDir: () => ipcRenderer.invoke('choose-import-dir'),
   importFromCamera: (cameraId, fileIds, destDir) => ipcRenderer.invoke('import-from-camera', cameraId, fileIds, destDir),
   listLibrary: () => ipcRenderer.invoke('list-library'),
