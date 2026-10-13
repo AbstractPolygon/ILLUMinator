@@ -3397,9 +3397,11 @@ $('tl-resize').addEventListener('pointerdown', (e) => {
   const startH = document.querySelector('.tl-main').getBoundingClientRect().height;
   handle.classList.add('dragging');
   const move = (ev) => {
-    // Leave the picture at least a third of the space.
+    // As tall as every track needs, as long as a strip of the picture (and
+    // the bars above the editor) stays in view.
     const stage = document.querySelector('.stage').getBoundingClientRect().height;
-    const max = Math.max(120, stage * 0.66 - 140);
+    const others = stage - $('timeline').getBoundingClientRect().height + document.querySelector('.tl-main').getBoundingClientRect().height - $('drop-zone').getBoundingClientRect().height;
+    const max = Math.max(120, stage - others - 80);
     setTimelineHeight(Math.round(Math.min(Math.max(max, minTimelineHeight()), startH - (ev.clientY - startY))));
   };
   const up = () => {
