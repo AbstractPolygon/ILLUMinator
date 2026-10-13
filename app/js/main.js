@@ -1476,6 +1476,7 @@ canvas.addEventListener('pointerdown', (event) => {
     canvas.onpointermove = null;
     suppressClick = moved;
     if (moved) {
+      autoKey();
       invalidateAnimation();
       scheduleSave();
     }
@@ -1492,6 +1493,7 @@ canvas.addEventListener('dblclick', () => {
 // A camera setting changed: update the picture and drop stale animation
 // frames. `final` is false while a slider is being dragged.
 function cameraChanged({ final }) {
+  if (final) autoKey();
   invalidateAnimation();
   scheduleSave();
   updateSpreadOverlay();
@@ -2129,6 +2131,8 @@ function localSettings() {
 const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', pan: 'Pan' };
 let anim = emptyAnimation();
 let keySel = null; // { k, t }
+// The Curves view of the keyframe editor (see drawCurves).
+const tlCurves = { on: false, hidden: new Set(), hits: [] };
 
 function keyframesOn() {
   return $('anim-on').checked && $('anim').value === 'keyframes';
@@ -2228,6 +2232,8 @@ function applyValue(k, v) {
 
 function showValue(k, v) {
   applyValue(k, v);
+  // Showing a keyframe is not a change to record.
+  autoKeyBase = currentValues();
   if (state.showingFrames) backToCamera();
   cameraChanged({ final: true });
 }
@@ -2241,10 +2247,45 @@ function previewAt(t) {
     applyValue(k, v);
     any = true;
   }
+  autoKeyBase = currentValues();
   if (!any) return;
   if (state.showingFrames) backToCamera();
   cameraChanged({ final: false });
 }
+
+// Auto key: when on, a change to an animatable setting records a keyframe
+// at the playhead, on that setting's track only (settings left alone get
+// no keyframes).
+let autoKeyBase = null;
+
+function sameValue(k, a, b) {
+  if (a === undefined || b === undefined) return a === b;
+  if (Array.isArray(a)) return Math.abs(a[0] - b[0]) < 1e-4 && Math.abs(a[1] - b[1]) < 1e-4;
+  return Math.abs(a - b) < (k === 'aperture' || k === 'depth' ? 1e-3 : 1e-4);
+}
+
+function currentValues() {
+  return Object.fromEntries(TRACKS.map((k) => [k, currentValue(k)]));
+}
+
+function autoKey() {
+  const now = currentValues();
+  const base = autoKeyBase;
+  autoKeyBase = now;
+  if (!$('tl-autokey').checked || !keyframesOn() || state.mode !== 'camera' || state.restoring) return;
+  const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
+  let added = false;
+  for (const k of TRACKS) {
+    if (!base || sameValue(k, base[k], now[k])) continue;
+    setKey(anim, k, t, now[k], KEY_FPS);
+    keySel = { k, t };
+    added = true;
+  }
+  if (added) saveAnimation();
+}
+$('tl-autokey').onchange = () => {
+  autoKeyBase = currentValues();
+};
 
 function playheadTime() {
   if (state.showingFrames && state.frames.length) return (state.drawFrame ?? state.index) / KEY_FPS;
@@ -2370,6 +2411,10 @@ function renderTimeline() {
   scroll.max = String(Math.max(0, len - span));
   scroll.step = String(1 / KEY_FPS);
   scroll.value = String(start);
+  const curves = tlCurves.on;
+  $('tl-grid').hidden = curves;
+  $('tl-curves').hidden = !curves;
+  if (curves) drawCurves();
 }
 
 // The time under the pointer; `r` is the track's (or ruler's) box, taken
@@ -2382,9 +2427,9 @@ function timeAt(e, r) {
 
 // Click or drag on the ruler or a track: the playhead follows the pointer,
 // showing the rendered frame there (or the animation's settings).
-function seekTimeline(e, el) {
+function seekTimeline(e, el, box) {
   e.preventDefault();
-  const r = el.getBoundingClientRect();
+  const r = box || el.getBoundingClientRect();
   let last = -1;
   const seek = (ev) => {
     const t = timeAt(ev, r);
@@ -2469,12 +2514,12 @@ $('tl-scroll').oninput = () => {
 };
 // Ctrl / ⌘ + wheel zooms around the pointer; Shift + wheel (or a sideways
 // swipe) scrolls along the animation.
-$('tl-grid').addEventListener('wheel', (e) => {
-  const track = e.target.closest('.tl-track, .tl-ruler');
+$('tl-grid').parentElement.addEventListener('wheel', (e) => {
+  const track = e.target.closest('.tl-track, .tl-ruler, .tl-plot');
   if (!track) return;
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
-    const r = track.getBoundingClientRect();
+    const r = track.classList.contains('tl-plot') ? plotBox() : track.getBoundingClientRect();
     const { start, span } = viewWindow();
     zoomTimeline(e.deltaY < 0 ? 1.25 : 0.8, start + ((e.clientX - r.left) / r.width) * span);
   } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
@@ -2500,7 +2545,9 @@ $('tl-ease').onchange = () => {
   saveAnimation();
 };
 document.addEventListener('keydown', (e) => {
-  if (!keySel || $('timeline').hidden || e.target.matches('input, select, textarea')) return;
+  if (!keySel || $('timeline').hidden) return;
+  // Not while typing (sliders, checkboxes and buttons may keep the focus).
+  if (e.target.matches('textarea, select, input:not([type=range], [type=checkbox], [type=radio], [type=button])')) return;
   if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
     deleteSelectedKey();
@@ -2613,7 +2660,10 @@ for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) {
     showSliderValue($(id));
     if (state.lastImage) draw(state.lastImage);
   };
-  $(id).onchange = () => scheduleSave();
+  $(id).onchange = () => {
+    autoKey();
+    scheduleSave();
+  };
 }
 
 // Values of every track at every frame: camera settings for the worker and
@@ -2634,6 +2684,265 @@ function keyframeFrames() {
   }
   return { path, framing: frames };
 }
+
+// ---------------------------------------------------------------- curves view
+
+// The keyframe editor's Curves view (like Blender's Graph Editor): each
+// setting as a curve over time, every component of a viewpoint or pan
+// separately, each fitted to the height of the view. Drag a keyframe to
+// change its time and value; drag anywhere else to move the playhead.
+
+const CHANNELS = [
+  { k: 'focus', c: 0, name: 'Focus', color: '#4fc3f7' },
+  { k: 'aperture', c: 0, name: 'Aperture', color: '#ffb74d' },
+  { k: 'depth', c: 0, name: 'Depth', color: '#ba68c8' },
+  { k: 'view', c: 0, name: 'Viewpoint X', color: '#ef5350' },
+  { k: 'view', c: 1, name: 'Viewpoint Y', color: '#66bb6a' },
+  { k: 'zoom', c: 0, name: 'Zoom', color: '#fff176' },
+  { k: 'pan', c: 0, name: 'Pan X', color: '#f48fb1' },
+  { k: 'pan', c: 1, name: 'Pan Y', color: '#aed581' },
+];
+const channelId = (ch) => `${ch.k}.${ch.c}`;
+// Room at the plot's sides so keyframes at the ends show whole.
+const PLOT_PAD = 8;
+
+// The plot's time axis on screen (its box without the side room).
+function plotBox() {
+  const r = $('tl-plot').getBoundingClientRect();
+  return { left: r.left + PLOT_PAD, top: r.top, width: r.width - 2 * PLOT_PAD, height: r.height };
+}
+
+// A channel's value as plotted (aperture in f-stops: log scale).
+function channelValue(ch, v) {
+  const x = Array.isArray(v) ? v[ch.c] : v;
+  return ch.k === 'aperture' ? Math.log2(x) : x;
+}
+
+function channelRange(ch) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const key of anim.tracks[ch.k]) {
+    const y = channelValue(ch, key.v);
+    lo = Math.min(lo, y);
+    hi = Math.max(hi, y);
+  }
+  if (!(hi > lo)) {
+    lo -= 0.5;
+    hi += 0.5;
+  }
+  const pad = (hi - lo) * 0.12;
+  return [lo - pad, hi + pad];
+}
+
+// The limits each channel's value is kept within.
+function channelLimits(ch) {
+  const r = (state.info && state.info.radius) || 4.5;
+  switch (ch.k) {
+    case 'aperture': return [Math.log2(Math.min(...F_STOPS)), Math.log2(Math.max(...F_STOPS))];
+    case 'depth': return [-100, 100];
+    case 'focus': return [-2, 2];
+    case 'view': return [-r, r];
+    case 'zoom': return [1, 3];
+    default: return [-1, 1];
+  }
+}
+
+function setChannelValue(ch, key, y) {
+  const [lo, hi] = channelLimits(ch);
+  y = Math.min(hi, Math.max(lo, y));
+  const x = ch.k === 'aperture' ? 2 ** y : y;
+  if (Array.isArray(key.v)) {
+    key.v = [...key.v];
+    key.v[ch.c] = x;
+  } else {
+    key.v = x;
+  }
+}
+
+function renderChannels() {
+  const list = CHANNELS.map((ch) => {
+    const id = channelId(ch);
+    const row = Object.assign(document.createElement('label'), { className: 'tl-channel' });
+    if (!anim.tracks[ch.k].length) row.classList.add('empty');
+    const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: !tlCurves.hidden.has(id) });
+    box.onchange = () => {
+      if (box.checked) tlCurves.hidden.delete(id);
+      else tlCurves.hidden.add(id);
+      drawCurves();
+    };
+    const sw = Object.assign(document.createElement('span'), { className: 'tl-swatch' });
+    sw.style.background = ch.color;
+    row.append(box, sw, document.createTextNode(ch.name));
+    return row;
+  });
+  $('tl-channels').replaceChildren(...list);
+}
+
+function drawCurves() {
+  const c = $('tl-plot');
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = c.clientWidth || 600;
+  const cssH = c.clientHeight || 200;
+  if (c.width !== Math.round(cssW * dpr) || c.height !== Math.round(cssH * dpr)) {
+    c.width = Math.round(cssW * dpr);
+    c.height = Math.round(cssH * dpr);
+  }
+  renderChannels();
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, cssW, cssH);
+  const { start, span } = viewWindow();
+  const top = 18;
+  const bottom = cssH - 6;
+  const plotW = cssW - 2 * PLOT_PAD;
+  const xOf = (t) => PLOT_PAD + ((t - start) / span) * plotW;
+  // Time grid and labels.
+  const step = tickStep(span);
+  g.font = '10px system-ui, sans-serif';
+  g.textBaseline = 'top';
+  for (let n = Math.ceil(start / step - 1e-6); n * step <= start + span + 1e-6; n++) {
+    const t = n * step;
+    const x = Math.round(xOf(t)) + 0.5;
+    g.strokeStyle = 'rgba(255,255,255,0.07)';
+    g.beginPath();
+    g.moveTo(x, top - 4);
+    g.lineTo(x, cssH);
+    g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.45)';
+    if (t < start + span * 0.94) g.fillText(`${+t.toFixed(step < 1 ? 2 : 0)}s`, x + 3, 3);
+  }
+  tlCurves.hits = [];
+  const sel = selectedKey();
+  for (const ch of CHANNELS) {
+    const keys = anim.tracks[ch.k];
+    if (!keys.length || tlCurves.hidden.has(channelId(ch))) continue;
+    const [lo, hi] = tlCurves.drag && tlCurves.drag.id === channelId(ch) ? tlCurves.drag.range : channelRange(ch);
+    const yOf = (y) => bottom - ((y - lo) / (hi - lo)) * (bottom - top);
+    // The curve, sampled every two pixels.
+    g.strokeStyle = ch.color;
+    g.lineWidth = 1.5;
+    g.beginPath();
+    for (let x = 0; x <= cssW + 2; x += 2) {
+      const t = Math.min(anim.length, Math.max(0, start + ((x - PLOT_PAD) / plotW) * span));
+      const y = yOf(channelValue(ch, valueAt(anim, ch.k, t)));
+      if (x === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.stroke();
+    // Keyframes.
+    for (const key of keys) {
+      const x = xOf(key.t);
+      const y = yOf(channelValue(ch, key.v));
+      if (x < -6 || x > cssW + 6) continue;
+      const on = key === sel;
+      if (on) {
+        // Selected: a bright ring around a white key.
+        g.fillStyle = '#ff9f1a';
+        g.beginPath();
+        g.arc(x, y, 7, 0, 2 * Math.PI);
+        g.fill();
+      }
+      g.fillStyle = on ? '#fff' : ch.color;
+      g.strokeStyle = '#15181c';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(x, y - 3.5);
+      g.lineTo(x + 3.5, y);
+      g.lineTo(x, y + 3.5);
+      g.lineTo(x - 3.5, y);
+      g.closePath();
+      g.fill();
+      g.stroke();
+      tlCurves.hits.push({ x, y, ch, key, range: [lo, hi] });
+    }
+  }
+  // Playhead.
+  const head = playheadTime();
+  if (head >= start && head <= start + span) {
+    const x = Math.round(xOf(head)) + 0.5;
+    g.strokeStyle = '#e5534b';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, cssH);
+    g.stroke();
+  }
+}
+
+function setCurvesView(on) {
+  tlCurves.on = on;
+  $('tl-view-keys').classList.toggle('active', !on);
+  $('tl-view-curves').classList.toggle('active', on);
+  $('tl-view-keys').setAttribute('aria-pressed', String(!on));
+  $('tl-view-curves').setAttribute('aria-pressed', String(on));
+  renderTimeline();
+  layoutCanvas();
+}
+$('tl-view-keys').onclick = () => setCurvesView(false);
+$('tl-view-curves').onclick = () => setCurvesView(true);
+
+$('tl-plot').addEventListener('pointerdown', (e) => {
+  const c = $('tl-plot');
+  const r = plotBox();
+  const px = e.clientX - r.left + PLOT_PAD;
+  const py = e.clientY - r.top;
+  let hit = null;
+  let best = 8;
+  for (const h of tlCurves.hits) {
+    const d = Math.hypot(h.x - px, h.y - py);
+    if (d < best) {
+      best = d;
+      hit = h;
+    }
+  }
+  if (!hit) {
+    seekTimeline(e, c, r);
+    return;
+  }
+  e.preventDefault();
+  const { ch, key } = hit;
+  const id = channelId(ch);
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const y0 = channelValue(ch, key.v);
+  const top = 18;
+  const bottom = r.height - 6;
+  // The value scale stays put while dragging.
+  tlCurves.drag = { id, range: hit.range };
+  keySel = { k: ch.k, t: key.t };
+  let moved = false;
+  const move = (ev) => {
+    if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 3) return;
+    moved = true;
+    const t = timeAt(ev, r);
+    if (!anim.tracks[ch.k].some((other) => other !== key && Math.abs(other.t - t) < 0.5 / KEY_FPS)) {
+      key.t = t;
+      anim.tracks[ch.k].sort((a, b) => a.t - b.t);
+    }
+    const [lo, hi] = hit.range;
+    setChannelValue(ch, key, y0 - ((ev.clientY - startY) / (bottom - top)) * (hi - lo));
+    keySel = { k: ch.k, t: key.t };
+    renderTimeline();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    tlCurves.drag = null;
+    if (moved) {
+      saveAnimation();
+    } else {
+      state.keyTime = key.t;
+      showValue(ch.k, key.v);
+    }
+    renderTimeline();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  renderTimeline();
+});
+window.addEventListener('resize', () => {
+  if (tlCurves.on && !$('timeline').hidden) drawCurves();
+});
 
 // ---------------------------------------------------------------- frame rate
 
