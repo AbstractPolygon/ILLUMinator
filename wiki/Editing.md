@@ -1,6 +1,6 @@
 # Editing
 
-The editing panels are in the right sidebar; click a title to open or close it. Drag the sidebar's left edge to make it wider or narrower (double-click the edge for the normal width). Each slider shows its value; double-click a slider to reset it. Everything you change is saved with the photo.
+The editing panels are in the right sidebar; click a title to open or close it. Drag the sidebar's left edge to make it wider or narrower (double-click the edge for the normal width). Each slider shows its value, and hovering over it shows what it does; double-click a slider to reset it. Everything you change is saved with the photo.
 
 ## Photo viewer
 

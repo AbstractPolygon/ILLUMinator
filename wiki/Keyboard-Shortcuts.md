@@ -2,7 +2,7 @@
 
 | Key | Does |
 | --- | --- |
-| Space | Play / pause the animation |
+| Space | Play / pause the animation (also right after using a slider or button) |
 | + / − | Zoom in / out (in the thumbnail grid: bigger / smaller thumbnails) |
 | 0 | Fit to window |
 | 1 | Actual pixels (1:1) |
