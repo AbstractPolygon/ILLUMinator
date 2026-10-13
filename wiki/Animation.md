@@ -38,6 +38,7 @@ A group's summary row shows a diamond wherever the group has keyframes; dragging
 - The ◆ beside a track keys that setting at the playhead; the ◆ on a group heading keys the whole group.
 - *Key all* keys every track of the open groups.
 - *Auto key*: while on, changing a setting records a keyframe at the playhead, on that setting's track only.
+- *Only keyed*: shows only the settings that have keyframes, and the groups holding them.
 
 **Editing keyframes.**
 - Click a keyframe to select it and see its value; drag it to move it in time.
@@ -45,7 +46,7 @@ A group's summary row shows a diamond wherever the group has keyframes; dragging
 - Dragging any selected keyframe moves all of them. *Delete key* (or Delete) deletes them.
 - Drag on the time ruler to move the playhead; the picture follows.
 
-**Curves.** *Curve to next* sets how a keyframe eases to the next one:
+**Curves.** The curve menu in the editor's bar (*Auto*, *Linear*, …) sets how the selected keyframe eases to the next one:
 - *Auto (continuous):* one smooth curve through all the keyframes, like Blender's auto handles. It flattens at highs, lows and the ends, and never overshoots.
 - *Linear*, *Smooth*, *Ease in*, *Ease out*, *Hold*, or *Custom*, a curve you shape by dragging its two handles.
 

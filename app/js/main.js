@@ -2468,6 +2468,30 @@ function updateKeyButtons() {
 const OPEN_AT_FIRST = new Set(['camera', 'cam-depth', 'cam-perspective', 'cam-framing']);
 const tlGroups = { closed: new Set(), opened: new Set() };
 const groupCollapsed = (id) => (OPEN_AT_FIRST.has(id) ? tlGroups.closed.has(id) : !tlGroups.opened.has(id));
+// Only keyed: the editor shows only the settings that have keyframes (and
+// the groups holding them). Remembered between sessions.
+function onlyKeyed() {
+  return $('tl-only-keyed').checked;
+}
+try {
+  $('tl-only-keyed').checked = localStorage.getItem('illuminator.tlOnlyKeyed') === '1';
+} catch {
+  // Storage unavailable: start with every setting shown.
+}
+$('tl-only-keyed').onchange = () => {
+  try {
+    localStorage.setItem('illuminator.tlOnlyKeyed', onlyKeyed() ? '1' : '0');
+  } catch {
+    // Not remembered; it still applies now.
+  }
+  renderTimeline();
+};
+
+// A group's tracks as the editor shows them.
+function shownTracks(g) {
+  return onlyKeyed() ? g.tracks.filter((k) => anim.tracks[k] && anim.tracks[k].length) : g.tracks;
+}
+
 // Closed itself or inside a closed group.
 const groupHidden = (g) => groupCollapsed(g.id) || (!!g.parent && groupCollapsed(g.parent));
 
@@ -2881,11 +2905,13 @@ function renderTimeline() {
   rows.push(Object.assign(document.createElement('div'), { className: 'tl-label tl-ruler-label' }), ruler);
   for (const grp of trackGroups()) {
     if (grp.off || (grp.parent && groupCollapsed(grp.parent))) continue;
+    const shown = shownTracks(grp);
+    if (!shown.length) continue;
     const heading = groupRow(grp, { pos, inView, head });
     for (const el of heading) el.dataset.group = grp.id;
     rows.push(...heading);
     if (groupCollapsed(grp.id) || grp.sections) continue;
-    for (const k of grp.tracks) {
+    for (const k of shown) {
     const label = Object.assign(document.createElement('div'), { className: `tl-label tl-sub${grp.parent ? ' tl-deep' : ''}` });
     const add = Object.assign(document.createElement('button'), { type: 'button', textContent: '◆', title: `Keyframe ${trackTitle(k).toLowerCase()} at the playhead` });
     add.setAttribute('aria-label', `Add a ${trackTitle(k).toLowerCase()} keyframe`);
@@ -3341,8 +3367,10 @@ function channelList() {
   for (const grp of trackGroups()) {
     if (grp.off) continue;
     if (grp.sections) continue;
-    if (grp.parent === 'camera') out.push(...CHANNELS.filter((ch) => grp.tracks.includes(ch.k)).map((ch) => ({ ...ch, group: grp })));
-    else grp.tracks.forEach((k, n) => out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[n % MASK_COLORS.length], group: grp }));
+    const shown = shownTracks(grp);
+    if (grp.parent === 'camera') out.push(...CHANNELS.filter((ch) => shown.includes(ch.k)).map((ch) => ({ ...ch, group: grp })));
+    // Colors by place in the group, so a curve keeps its color when others are hidden.
+    else shown.forEach((k) => out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[grp.tracks.indexOf(k) % MASK_COLORS.length], group: grp }));
   }
   return out;
 }

@@ -126,10 +126,11 @@
             <button id="tl-view-curves" type="button" aria-pressed="false" title="Curves: each setting as a curve over time; drag keyframes to change their time and value" aria-label="Curves"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 12.5C5 12.5 4.5 3.5 8 3.5s3 9 6.5 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
           </div>
           <label class="tl-autokey" title="Records a keyframe at the playhead for each setting you change"><input id="tl-autokey" type="checkbox"> Auto key</label>
+          <label class="tl-filter" title="Shows only the settings that have keyframes"><input id="tl-only-keyed" type="checkbox"> Only keyed</label>
           <button id="tl-key-all" type="button" title="Adds a keyframe on every track at the playhead, with the current settings">◆ Key all</button>
           <button id="tl-delete" type="button" title="Deletes the selected keyframe (Delete)" disabled>Delete key</button>
-          <label class="tl-ease">Curve to next
-            <select id="tl-ease" disabled>
+          <label class="tl-ease" title="Curve to the next keyframe">
+            <select id="tl-ease" disabled aria-label="Curve to the next keyframe">
               <option value="auto">Auto (continuous)</option>
               <option value="linear">Linear</option>
               <option value="smooth">Smooth</option>
