@@ -515,3 +515,15 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 /* Everything inside a section is indented like its subsections. */
 .controls > .panel > :not(summary) { margin-left: 6px; }
 .controls > .panel > :is(canvas, button.wide, .row.export) { width: calc(100% - 6px); }
+.mask-filter { width: auto; padding: 3px 6px; font-size: 12px; }
+
+/* Number fields: plain arrows instead of the browser's spinner. */
+input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.num { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.num input { padding-right: 18px !important; width: 100%; }
+.num-arrows { position: absolute; right: 3px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.num-arrows button { background: none; border: 0; padding: 1px 2px; line-height: 0; color: var(--muted); cursor: pointer; }
+.num-arrows button:hover, .num-arrows button:hover:not(:disabled) { background: none; color: var(--text); }
+.anim-length .num { width: 64px; }
+.ccm-grid .num { width: 100%; }

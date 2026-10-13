@@ -308,6 +308,14 @@
           <button id="mask-add-depth" type="button" class="icon-only mask-icon" title="Add a depth mask: full effect between a near and a far depth" aria-label="Add a depth mask">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="7" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h8A1.5 1.5 0 0 1 20 5.5v8a1.5 1.5 0 0 1-1.5 1.5H15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
+          <span class="spacer"></span>
+          <select id="mask-filter" class="mask-filter" aria-label="Add a living filter" title="Living filters: looks built from masks around the current focus">
+            <option value="">Living filter…</option>
+            <option value="pop">Color pop</option>
+            <option value="spotlight">Spotlight</option>
+            <option value="haze">Depth haze</option>
+            <option value="dreamy">Dreamy</option>
+          </select>
         </div>
         <ul id="mask-list" class="mask-list"></ul>
         <div id="mask-editor" hidden>
@@ -598,6 +606,17 @@
             <button id="png-btn" disabled>Save PNG</button>
             <button id="webm-btn">Export video</button>
           </div>
+          <label>3D
+            <select id="stereo-mode">
+              <option value="anaglyph">Anaglyph (red / cyan glasses)</option>
+              <option value="parallel">Side by side</option>
+              <option value="cross">Cross-eyed</option>
+            </select>
+          </label>
+          <label title="How far apart the two eyes' viewpoints are, as a share of the lens aperture">Baseline <output data-for="stereo-baseline" for="stereo-baseline">60</output>
+            <input id="stereo-baseline" type="range" min="10" max="100" step="5" value="60" data-default="60">
+          </label>
+          <button id="stereo-btn" class="wide" disabled>Save 3D image</button>
         </div>
       </details>
 

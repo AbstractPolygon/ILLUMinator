@@ -42,7 +42,9 @@ Up to four masks, each with its own effect: *Exposure*, *Contrast*, *Saturation*
 - **+ Gradient:** a graduated filter: full effect on one side of a line through *Center X/Y* at an *Angle*, fading to none over *Fade*.
 - **+ Depth:** uses the light field's depth: full effect between a *Near* and a *Far* depth (negative is nearer than the camera's focus), fading over *Feather*. Brighten a subject, darken or desaturate the background, and so on.
 
-Click a mask in the list to edit it, × to delete it. *Enabled* turns it off without losing it, *Invert* swaps inside and outside, and *Show mask* tints what it covers red while you adjust it.
+**Living filters** (the menu beside the mask buttons) add ready-made looks built from masks around the current focus: *Color pop* (only what is in focus keeps its color), *Spotlight*, *Depth haze* (farther away is paler, like air) and *Dreamy*. Once added they are ordinary masks to adjust.
+
+Click a mask in the list to edit it, the trash button to delete it (you are asked first). *Enabled* turns it off without losing it, *Invert* swaps inside and outside, and *Show mask* tints what it covers red while you adjust it.
 
 ## Camera
 

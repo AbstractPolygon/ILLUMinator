@@ -1143,6 +1143,7 @@ function setMode(mode) {
   $('detail').disabled = !raw;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
+  $('stereo-btn').disabled = !(state.info && state.info.hasRaw) || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
@@ -1996,6 +1997,7 @@ function renderMasks() {
   }));
   // Masks belong to a photo: none can be added until one is open.
   for (const kind of Object.keys(MASK_NAMES)) $(`mask-add-${kind}`).disabled = masks.length >= MAX_MASKS || !canRender();
+  $('mask-filter').disabled = masks.length >= MAX_MASKS || !canRender();
   const m = masks[maskSel];
   $('mask-editor').hidden = !m;
   if (!m) {
@@ -2455,6 +2457,128 @@ function keyframeFrames() {
   }
   return { path, framing: frames };
 }
+
+// ---------------------------------------------------------------- 3D
+
+// A stereo pair from two viewpoints across the lens aperture: anaglyph
+// (red / cyan glasses), side by side (parallel viewing) or cross-eyed.
+// Crop, rotation and the pivot apply to both eyes alike.
+async function saveStereo() {
+  if (!canRender() || !state.info.hasRaw) return;
+  $('stereo-btn').disabled = true;
+  try {
+    const p = cameraParams();
+    const b = (state.info.radius || 4.5) * (+$('stereo-baseline').value / 100);
+    const eyes = [p.u - b, p.u + b];
+    const shots = [];
+    for (const u of eyes) {
+      showProgress('Rendering 3D', shots.length / 2);
+      const msg = await engine.request('view', { ...p, u }, { onProgress: () => {} });
+      shots.push(toImageData(msg));
+    }
+    const pivots = withPivotZoom(eyes.map((u) => pivotFor(u, p.v, p.alpha, p.aperture)));
+    const base = { orientation: +$('orientation').value || 1, angle: +$('straighten').value, crop: cropValues() };
+    const views = shots.map((img, i) => {
+      const g = geometry(img.width, img.height, { ...base, ...(pivots[i] || {}) });
+      const c = Object.assign(document.createElement('canvas'), { width: g.width, height: g.height });
+      drawGeometry(c.getContext('2d'), img, g);
+      return c;
+    });
+    const [L, R] = views;
+    const mode = $('stereo-mode').value;
+    let out;
+    if (mode === 'anaglyph') {
+      // Red from the left eye, green and blue from the right.
+      out = Object.assign(document.createElement('canvas'), { width: L.width, height: L.height });
+      const o = out.getContext('2d');
+      const l = L.getContext('2d').getImageData(0, 0, L.width, L.height);
+      const r = R.getContext('2d').getImageData(0, 0, R.width, R.height);
+      for (let i = 0; i < l.data.length; i += 4) {
+        r.data[i] = 0.299 * l.data[i] + 0.587 * l.data[i + 1] + 0.114 * l.data[i + 2];
+      }
+      o.putImageData(r, 0, 0);
+    } else {
+      const [first, second] = mode === 'cross' ? [R, L] : [L, R];
+      out = Object.assign(document.createElement('canvas'), { width: L.width * 2, height: L.height });
+      const o = out.getContext('2d');
+      o.drawImage(first, 0, 0);
+      o.drawImage(second, L.width, 0);
+    }
+    out.toBlob((blob) => download(blob, `${baseName()}-3d-${mode}.png`), 'image/png');
+  } catch (err) {
+    showError(err);
+  } finally {
+    hideProgress();
+    $('stereo-btn').disabled = !canRender();
+    refresh();
+  }
+}
+$('stereo-btn').onclick = saveStereo;
+$('stereo-baseline').oninput = () => showSliderValue($('stereo-baseline'));
+
+// ---------------------------------------------------------------- living filters
+
+// Looks built from masks around the current focus; once added they are
+// ordinary masks to adjust.
+function livingFilter(name) {
+  const f = +$('focus').value;
+  const fx = (o) => ({ exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, ...o });
+  const depth = (near, far, feather, invert, effect) => ({ ...defaultMask('depth'), near, far, feather, invert, fx: fx(effect) });
+  switch (name) {
+    case 'pop': // in focus keeps its color, the rest goes gray
+      return [depth(f - 0.25, f + 0.25, 0.2, true, { saturation: -1 })];
+    case 'spotlight': // darker away from the focus point
+      return [{ ...defaultMask('radial'), x: state.focusPoint.x, y: state.focusPoint.y, w: 0.35, h: 0.35, feather: 0.7, invert: true, fx: fx({ exposure: -1.2 }) }];
+    case 'haze': // farther away is paler and softer, like air
+      return [depth(f + 0.2, 1.8, 0.6, false, { exposure: 0.35, contrast: -0.5, saturation: -0.45, temperature: -0.15 })];
+    case 'dreamy': // what is not in focus glows a little
+      return [depth(f - 0.2, f + 0.2, 0.25, true, { exposure: 0.4, contrast: -0.4, saturation: -0.2, temperature: 0.15 })];
+    default:
+      return [];
+  }
+}
+
+$('mask-filter').onchange = () => {
+  const added = livingFilter($('mask-filter').value);
+  $('mask-filter').value = '';
+  if (!added.length || !canRender()) return;
+  const masks = getMasks();
+  const room = MAX_MASKS - masks.length;
+  if (room < added.length) {
+    showNotice(`Up to ${MAX_MASKS} masks: delete one to add this filter.`);
+    startNoticeTimer();
+    return;
+  }
+  masks.push(...added);
+  maskSel = masks.length - 1;
+  setMasks(masks);
+  renderMasks();
+};
+
+// ---------------------------------------------------------------- number fields
+
+// Number fields get plain up/down arrows in place of the browser's spinner
+// (which draws a box behind them).
+const CHEVRON = (d) => `<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function addSteppers(input) {
+  const wrap = Object.assign(document.createElement('span'), { className: 'num' });
+  input.replaceWith(wrap);
+  const arrows = Object.assign(document.createElement('span'), { className: 'num-arrows' });
+  for (const [dir, d, label] of [[1, 'M1 5l4-4 4 4', 'Increase'], [-1, 'M1 1l4 4 4-4', 'Decrease']]) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', tabIndex: -1, innerHTML: CHEVRON(d) });
+    b.setAttribute('aria-label', label);
+    b.onclick = () => {
+      if (input.disabled) return;
+      if (dir > 0) input.stepUp();
+      else input.stepDown();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    arrows.append(b);
+  }
+  wrap.append(input, arrows);
+}
+for (const input of document.querySelectorAll('input[type=number]')) addSteppers(input);
 
 // ---------------------------------------------------------------- tone curve
 
