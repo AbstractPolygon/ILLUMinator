@@ -3401,12 +3401,14 @@ $('tl-resize').addEventListener('pointerdown', (e) => {
   const startY = e.clientY;
   const startH = document.querySelector('.tl-main').getBoundingClientRect().height;
   handle.classList.add('dragging');
+  // As tall as every track needs, as long as an 80px strip of the picture
+  // (and the bars around the editor) stays in view. Measured once: while
+  // dragging, the layout is changing under the pointer.
+  const stage = document.querySelector('.stage').getBoundingClientRect().height;
+  const h = (el) => (el ? el.getBoundingClientRect().height : 0);
+  const others = h(document.querySelector('.modes-row')) + h(document.querySelector('.transport')) + h($('timeline')) - startH;
+  const max = Math.max(120, stage - others - 80);
   const move = (ev) => {
-    // As tall as every track needs, as long as a strip of the picture (and
-    // the bars above the editor) stays in view.
-    const stage = document.querySelector('.stage').getBoundingClientRect().height;
-    const others = stage - $('timeline').getBoundingClientRect().height + document.querySelector('.tl-main').getBoundingClientRect().height - $('drop-zone').getBoundingClientRect().height;
-    const max = Math.max(120, stage - others - 80);
     setTimelineHeight(Math.round(Math.min(Math.max(max, minTimelineHeight()), startH - (ev.clientY - startY))));
   };
   const up = () => {
