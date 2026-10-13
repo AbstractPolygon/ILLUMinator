@@ -66,3 +66,17 @@ test('auto curves carry speed through keyframes without overshooting', () => {
   near(v[0], 0.5);
   near(v[1], -0.5);
 });
+
+test('a segment as Bezier handles draws the same curve', async () => {
+  const { segmentBezier } = await import('../app/js/core/keyframes.js');
+  const a = emptyAnimation();
+  setKey(a, 'focus', 0, 0);
+  setKey(a, 'focus', 1, 1);
+  setKey(a, 'focus', 3, 1.5);
+  const b = segmentBezier(a, 'focus', 1);
+  const auto = valueAt(a, 'focus', 2);
+  a.tracks.focus[1].ease = { type: 'custom', bezier: b };
+  near(valueAt(a, 'focus', 2), auto, 1e-3);
+  a.tracks.focus[1].ease = { type: 'hold', bezier: b };
+  assert.equal(segmentBezier(a, 'focus', 1), null);
+});

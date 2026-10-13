@@ -9,7 +9,7 @@ import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
-import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt } from './core/keyframes.js';
+import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
 // (the Frame rate setting).
@@ -2402,8 +2402,10 @@ function renderTimeline() {
   $('tl-delete').disabled = !sel;
   $('tl-ease').disabled = !sel;
   if (sel) $('tl-ease').value = sel.ease.type;
-  $('tl-curve').hidden = !(sel && sel.ease.type === 'custom');
-  if (sel && sel.ease.type === 'custom') drawCurve();
+  // The Curves view shows the handles on the curve itself.
+  const box = !!(sel && sel.ease.type === 'custom') && !tlCurves.on;
+  $('tl-curve').hidden = !box;
+  if (box) drawCurve();
   $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(len)}`;
   $('tl-zoom-label').textContent = span >= len ? 'All' : `${Math.round((100 * len) / span)}%`;
   const scroll = $('tl-scroll');
@@ -2855,6 +2857,30 @@ function drawCurves() {
       g.stroke();
       tlCurves.hits.push({ x, y, ch, key, range: [lo, hi] });
     }
+    // The selected keyframe's handles: where the curve leaves it and where
+    // it arrives, as in Blender.
+    const i = sel && keySel.k === ch.k ? keys.indexOf(sel) : -1;
+    if (i >= 0) {
+      for (const hd of keyHandles(ch, i)) {
+        const hx = xOf(hd.t);
+        const hy = yOf(hd.y);
+        const kx = xOf(sel.t);
+        const ky = yOf(channelValue(ch, sel.v));
+        g.strokeStyle = 'rgba(255,255,255,0.75)';
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(kx, ky);
+        g.lineTo(hx, hy);
+        g.stroke();
+        g.fillStyle = '#fff';
+        g.strokeStyle = '#15181c';
+        g.beginPath();
+        g.arc(hx, hy, 3, 0, 2 * Math.PI);
+        g.fill();
+        g.stroke();
+        tlCurves.hits.push({ x: hx, y: hy, ch, key: sel, handle: hd, range: [lo, hi] });
+      }
+    }
   }
   // Playhead.
   const head = playheadTime();
@@ -2869,7 +2895,96 @@ function drawCurves() {
   }
 }
 
+// Handles of keyframe i on a channel: { seg, end, t, y } for the curve
+// leaving it (end 1 of segment i) and arriving at it (end 2 of i - 1).
+function keyHandles(ch, i) {
+  const keys = anim.tracks[ch.k];
+  const out = [];
+  const val = (key) => channelValue(ch, key.v);
+  const after = segmentBezier(anim, ch.k, i, ch.c);
+  if (after) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    out.push({ seg: i, end: 1, t: a.t + after[0] * (b.t - a.t), y: val(a) + after[1] * (val(b) - val(a)) });
+  }
+  const before = i > 0 ? segmentBezier(anim, ch.k, i - 1, ch.c) : null;
+  if (before) {
+    const a = keys[i - 1];
+    const b = keys[i];
+    out.push({ seg: i - 1, end: 2, t: a.t + before[2] * (b.t - a.t), y: val(a) + before[3] * (val(b) - val(a)) });
+  }
+  return out;
+}
+
+// Drags a handle of the selected keyframe: the segment becomes a custom
+// curve, and the handle on the other side turns with it so the curve stays
+// smooth through the keyframe.
+function dragHandle(e, hit, r) {
+  e.preventDefault();
+  const { ch, handle } = hit;
+  const keys = anim.tracks[ch.k];
+  const i = keys.indexOf(hit.key);
+  const [lo, hi] = hit.range;
+  const top = 18;
+  const bottom = r.height - 6;
+  const { start, span } = viewWindow();
+  const val = (key) => channelValue(ch, key.v);
+  // Both curves at the keyframe become custom, starting as they look now.
+  for (const seg of [i - 1, i]) {
+    if (seg < 0 || seg >= keys.length - 1 || keys[seg].ease.type === 'hold') continue;
+    keys[seg].ease = { type: 'custom', bezier: segmentBezier(anim, ch.k, seg, ch.c) };
+  }
+  tlCurves.drag = { id: channelId(ch), range: hit.range };
+  const other = keyHandles(ch, i).find((h) => h.end !== handle.end);
+  const move = (ev) => {
+    const t = start + ((ev.clientX - r.left) / r.width) * span;
+    const y = lo + ((bottom - (ev.clientY - r.top)) / (bottom - top)) * (hi - lo);
+    const k0 = keys[handle.seg];
+    const k1 = keys[handle.seg + 1];
+    const d = val(k1) - val(k0);
+    const bz = k0.ease.bezier;
+    const x = Math.min(1, Math.max(0, (t - k0.t) / (k1.t - k0.t)));
+    const at = handle.end === 1 ? 0 : 2;
+    bz[at] = x;
+    if (Math.abs(d) > 1e-9) bz[at + 1] = (y - val(k0)) / d;
+    // Aligned: the other handle keeps its length in time and takes the
+    // same slope through the keyframe.
+    const key = keys[i];
+    const dt = handle.end === 1 ? bz[0] * (k1.t - k0.t) : (1 - bz[2]) * (k1.t - k0.t);
+    const dy = handle.end === 1 ? bz[1] * d : (1 - bz[3]) * d;
+    if (other && dt > 1e-9) {
+      const slope = dy / dt;
+      const o0 = keys[other.seg];
+      const o1 = keys[other.seg + 1];
+      const od = val(o1) - val(o0);
+      const obz = o0.ease.bezier;
+      if (Math.abs(od) > 1e-9) {
+        if (other.end === 2) {
+          const odt = (1 - obz[2]) * (o1.t - o0.t);
+          obz[3] = (val(key) - slope * odt - val(o0)) / od;
+        } else {
+          const odt = obz[0] * (o1.t - o0.t);
+          obz[1] = (slope * odt) / od;
+        }
+      }
+    }
+    renderTimeline();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    tlCurves.drag = null;
+    saveAnimation();
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
 function setCurvesView(on) {
+  // The curves take the room the tracks had: switching views keeps the
+  // editor's height.
+  const tracks = $('tl-grid').offsetHeight;
+  if (on && tracks) $('timeline').style.setProperty('--tl-natural', `${tracks}px`);
   tlCurves.on = on;
   $('tl-view-keys').classList.toggle('active', !on);
   $('tl-view-curves').classList.toggle('active', on);
@@ -2943,6 +3058,10 @@ $('tl-plot').addEventListener('pointerdown', (e) => {
   }
   if (!hit) {
     seekTimeline(e, c, r);
+    return;
+  }
+  if (hit.handle) {
+    dragHandle(e, hit, r);
     return;
   }
   e.preventDefault();

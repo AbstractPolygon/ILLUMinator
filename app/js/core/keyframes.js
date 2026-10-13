@@ -120,10 +120,31 @@ function autoValue(k, keys, i, t) {
   const out = va.map((_, c) => {
     // Cubic Hermite between the two keys.
     const ma = autoSlope(keys, i, k, c);
-    const mb = b.ease.type === 'auto' || i + 1 === keys.length - 1 ? autoSlope(keys, i + 1, k, c) : 0;
+    const mb = autoSlope(keys, i + 1, k, c);
     return (2 * s3 - 3 * s2 + 1) * va[c] + (s3 - 2 * s2 + s) * h * ma + (-2 * s3 + 3 * s2) * vb[c] + (s3 - s2) * h * mb;
   });
   return fromLinear(k, out);
+}
+
+// The curve from keys[i] to the next keyframe as Bezier handles
+// [x1, y1, x2, y2] (fractions of the time and of the value change between
+// the two keys; component c of a viewpoint or pan), or null after the last
+// keyframe or a hold.
+export function segmentBezier(anim, k, i, c = 0) {
+  const keys = anim.tracks[k];
+  const a = keys[i];
+  const b = keys[i + 1];
+  if (!a || !b || a.ease.type === 'hold') return null;
+  if (a.ease.type === 'custom') return [...a.ease.bezier];
+  if (a.ease.type === 'linear') return [1 / 3, 1 / 3, 2 / 3, 2 / 3];
+  if (a.ease.type !== 'auto') return [...(PRESETS[a.ease.type] || PRESETS.smooth)];
+  // Auto: the Hermite tangents as handles a third of the way along.
+  const h = b.t - a.t;
+  const d = toLinear(k, b.v)[c] - toLinear(k, a.v)[c];
+  if (Math.abs(d) < 1e-12) return [1 / 3, 0, 2 / 3, 1];
+  const ma = autoSlope(keys, i, k, c);
+  const mb = autoSlope(keys, i + 1, k, c);
+  return [1 / 3, (ma * h) / 3 / d, 2 / 3, 1 - (mb * h) / 3 / d];
 }
 
 function mix(k, a, b, e) {
