@@ -8,9 +8,12 @@
 //   view      [u, v] viewpoint
 //   zoom      1..3
 //   pan       [x, y], -1..1 each
-// ease: { type: 'linear' | 'smooth' | 'in' | 'out' | 'hold' | 'custom',
+// ease: { type: 'auto' | 'linear' | 'smooth' | 'in' | 'out' | 'hold' | 'custom',
 //         bezier: [x1, y1, x2, y2] } (custom: a cubic Bezier from (0, 0) to
 //         (1, 1) through those handles; y may leave 0..1 to overshoot).
+// auto: one continuous curve through the keyframes, like Blender's auto
+// clamped handles: the speed carries through each keyframe, flattening at
+// highs, lows and the ends, without overshooting.
 
 export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'pan'];
 export const FPS = 24;
@@ -50,13 +53,13 @@ export function parseAnimation(text) {
 }
 
 function normalizeEase(e) {
-  const type = e && ['linear', 'smooth', 'in', 'out', 'hold', 'custom'].includes(e.type) ? e.type : 'smooth';
+  const type = e && ['auto', 'linear', 'smooth', 'in', 'out', 'hold', 'custom'].includes(e.type) ? e.type : 'smooth';
   const b = e && Array.isArray(e.bezier) && e.bezier.length === 4 && e.bezier.every(Number.isFinite) ? e.bezier : PRESETS.smooth;
   return { type, bezier: [Math.min(1, Math.max(0, b[0])), b[1], Math.min(1, Math.max(0, b[2])), b[3]] };
 }
 
 export function defaultEase() {
-  return { type: 'smooth', bezier: [...PRESETS.smooth] };
+  return { type: 'auto', bezier: [...PRESETS.smooth] };
 }
 
 // Cubic Bezier from (0, 0) to (1, 1) with handles (x1, y1), (x2, y2), as
@@ -85,6 +88,44 @@ export function easeFunction(ease) {
   return cubicBezier(...b);
 }
 
+// Aperture moves in f-stops (log scale); views and pans per component.
+const toLinear = (k, v) => (k === 'aperture' ? [Math.log(v)] : isVec(k) ? v : [v]);
+const fromLinear = (k, c) => (k === 'aperture' ? Math.exp(c[0]) : isVec(k) ? c : c[0]);
+
+// Tangent (value per second) at keys[i], per component, for auto curves.
+function autoSlope(keys, i, k, c) {
+  if (i <= 0 || i >= keys.length - 1) return 0;
+  const p = toLinear(k, keys[i - 1].v)[c];
+  const v = toLinear(k, keys[i].v)[c];
+  const n = toLinear(k, keys[i + 1].v)[c];
+  const d0 = (v - p) / Math.max(1e-9, keys[i].t - keys[i - 1].t);
+  const d1 = (n - v) / Math.max(1e-9, keys[i + 1].t - keys[i].t);
+  // A high or low point (or a flat stretch) stays flat.
+  if (d0 * d1 <= 0) return 0;
+  const m = (n - p) / Math.max(1e-9, keys[i + 1].t - keys[i - 1].t);
+  // No overshoot: at most three times the gentler neighbouring slope.
+  const limit = 3 * Math.min(Math.abs(d0), Math.abs(d1));
+  return Math.sign(m) * Math.min(Math.abs(m), limit);
+}
+
+function autoValue(k, keys, i, t) {
+  const a = keys[i];
+  const b = keys[i + 1];
+  const h = Math.max(1e-9, b.t - a.t);
+  const s = (t - a.t) / h;
+  const s2 = s * s;
+  const s3 = s2 * s;
+  const va = toLinear(k, a.v);
+  const vb = toLinear(k, b.v);
+  const out = va.map((_, c) => {
+    // Cubic Hermite between the two keys.
+    const ma = autoSlope(keys, i, k, c);
+    const mb = b.ease.type === 'auto' || i + 1 === keys.length - 1 ? autoSlope(keys, i + 1, k, c) : 0;
+    return (2 * s3 - 3 * s2 + 1) * va[c] + (s3 - 2 * s2 + s) * h * ma + (-2 * s3 + 3 * s2) * vb[c] + (s3 - s2) * h * mb;
+  });
+  return fromLinear(k, out);
+}
+
 function mix(k, a, b, e) {
   if (k === 'aperture') return Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * e);
   if (isVec(k)) return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e];
@@ -102,6 +143,7 @@ export function valueAt(anim, k, t) {
   while (i < keys.length - 2 && t >= keys[i + 1].t) i++;
   const a = keys[i];
   const b = keys[i + 1];
+  if (a.ease.type === 'auto') return autoValue(k, keys, i, t);
   const x = (t - a.t) / Math.max(1e-9, b.t - a.t);
   return mix(k, a.v, b.v, easeFunction(a.ease)(x));
 }

@@ -42,3 +42,27 @@ test('animations parse safely and sample every frame', () => {
   assert.equal(s[0].zoom, 2);
   assert.deepEqual(parseAnimation('nonsense').tracks.focus, []);
 });
+
+test('auto curves carry speed through keyframes without overshooting', () => {
+  const a = emptyAnimation();
+  setKey(a, 'focus', 0, 0);
+  setKey(a, 'focus', 1, 1);
+  setKey(a, 'focus', 2, 2);
+  setKey(a, 'focus', 3, 2);
+  assert.equal(a.tracks.focus[0].ease.type, 'auto');
+  // Steady motion through the middle key: no stop there.
+  const before = valueAt(a, 'focus', 0.95);
+  const after = valueAt(a, 'focus', 1.05);
+  assert.ok(after - before > 0.07, `${before} ${after}`);
+  near(valueAt(a, 'focus', 1), 1);
+  // Flat at the plateau, never above it.
+  for (let t = 1; t <= 3; t += 0.05) assert.ok(valueAt(a, 'focus', t) <= 2 + 1e-9);
+  // Starts from rest.
+  assert.ok(valueAt(a, 'focus', 0.05) < 0.05);
+  // Views move per component.
+  setKey(a, 'view', 0, [0, 0]);
+  setKey(a, 'view', 1, [1, -1]);
+  const v = valueAt(a, 'view', 0.5);
+  near(v[0], 0.5);
+  near(v[1], -0.5);
+});
