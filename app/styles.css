@@ -256,7 +256,7 @@ input[type=range]:hover::-moz-range-track { background: var(--channel, var(--mut
 
 /* Channels that show what the slider does. */
 #wb-temperature { --channel: linear-gradient(to right, #3d7bff, #ffd23d); }
-#wb-tint { --channel: linear-gradient(to right, #2fd14a, #2fd1d1); }
+#wb-tint { --channel: linear-gradient(to right, #2fd14a, #f030f0); }
 #hue-red { --channel: linear-gradient(to right, #000, #ff3030); }
 #hue-yellow { --channel: linear-gradient(to right, #000, #ffe030); }
 #hue-green { --channel: linear-gradient(to right, #000, #30e050); }
