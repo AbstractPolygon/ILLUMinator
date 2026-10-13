@@ -62,3 +62,10 @@ test('fitAspect keeps the center and the frame', () => {
   near(c.w * 600, 400);
   near(c.x + c.w / 2, 0.5);
 });
+
+test('shift and zoom move the picture before it is cropped', () => {
+  const g = geometry(600, 400, { shift: [0.1, 0], zoom: 1.25 });
+  assert.equal(g.width, 600);
+  // The middle of the picture moves right by 10% of the width, zoomed.
+  nearPt(apply(g.matrix, 300, 200), [300 + 60 * 1.25, 200]);
+});

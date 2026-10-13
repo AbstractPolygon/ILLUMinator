@@ -882,6 +882,9 @@ function ensureAnimation() {
   engine.cancel(req.kind === 'frames' ? 'refocus' : 'frames');
   state.animKey = key;
   state.frames = new Array(req.type === 'frames' ? req.args.path.length : req.args.alphas.length);
+  state.framePivots = withPivotZoom(req.type === 'frames'
+    ? req.args.path.map(({ u, v }) => pivotFor(u, v, req.args.alpha, req.args.aperture))
+    : req.args.alphas.map((alpha) => pivotFor(req.args.u, req.args.v, alpha, req.args.aperture)));
   state.frameValues = req.values;
   state.loop = req.loop;
   state.index = 0;
@@ -932,6 +935,7 @@ function updateFrameLabel() {
 
 function showFrame(i) {
   const f = state.frames[i];
+  state.drawFrame = i;
   if (f && !state.fullRes && !state.depthShown) draw(f);
   $('scrub').value = i;
   updateFrameLabel();
@@ -1427,6 +1431,20 @@ $('depth-smooth').oninput = () => {
 };
 $('depth-smooth').onchange = () => {};
 
+$('pivot-on').onchange = () => {
+  $('pivot').disabled = !$('pivot-on').checked;
+  invalidateAnimation();
+  geometryChanged();
+};
+$('pivot').oninput = () => {
+  showSliderValue($('pivot'));
+  if (state.lastImage) draw(state.lastImage);
+};
+$('pivot').onchange = () => {
+  invalidateAnimation();
+  geometryChanged();
+};
+
 for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) {
   $(id).oninput = () => {
     showFNumber();
@@ -1532,8 +1550,38 @@ function setCropValues(c) {
   $('crop-h').value = c.h;
 }
 
+// Perspective pivot: moving the viewpoint shifts every depth but one: the
+// camera's own focus with the aperture closed, the focus plane otherwise.
+// A custom pivot keeps another depth still instead, by shifting the picture
+// against the viewpoint (and zooming in a little so no edge shows).
+// Positions move by (depth - still depth) x viewpoint offset, in lens
+// spacings: one view pixel at 1x resolution.
+function pivotFor(u, v, alpha, aperture) {
+  if (!$('pivot-on').checked || !state.info || !state.info.hasRaw || state.depthShown) return null;
+  const pivot = 1.6 * $('pivot').value / 100;
+  const still = aperture > 0 ? alpha : 0;
+  const k = +$('detail').value;
+  const { width: W, height: H } = state.info;
+  const s = (still - pivot) * k;
+  return { shift: [(s * u) / W, (s * v) / H], reach: Math.abs(s) * (state.info.radius || 0) };
+}
+
+// Zoom that hides the edges for every shift in `pivots`.
+function withPivotZoom(pivots) {
+  const reach = Math.max(0, ...pivots.map((p) => (p ? p.reach : 0)));
+  const zoom = state.info ? 1 + (2 * reach) / Math.min(state.info.width, state.info.height) : 1;
+  return pivots.map((p) => (p ? { shift: p.shift, zoom } : null));
+}
+
+function currentPivot() {
+  if (state.showingFrames && state.framePivots) return state.framePivots[state.drawFrame ?? state.index] || null;
+  const p = cameraParams();
+  return withPivotZoom([pivotFor(p.u, p.v, p.alpha, p.aperture)])[0];
+}
+
 function geometrySettings() {
   return {
+    ...(state.mode === 'camera' ? currentPivot() : null),
     orientation: +$('orientation').value || 1,
     angle: +$('straighten').value,
     crop: cropState.editing ? FULL_CROP : cropValues(),
@@ -2151,6 +2199,7 @@ async function restoreEdits(info) {
   state.restoring = true;
   try {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
+    $('pivot').disabled = !$('pivot-on').checked;
     resetTemperature(info, { keep: !!saved });
     state.camera = { ...view };
     state.focusPoint = { ...focusPoint };

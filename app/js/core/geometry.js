@@ -76,8 +76,9 @@ export function straightenScale(w, h, deg) {
   return 1 / (Math.cos(t) + Math.max(w / h, h / w) * Math.sin(t));
 }
 
-export function isIdentity({ orientation = 1, angle = 0, crop = FULL_CROP } = {}) {
-  return orientation === 1 && !angle && crop.x === 0 && crop.y === 0 && crop.w === 1 && crop.h === 1;
+export function isIdentity({ orientation = 1, angle = 0, crop = FULL_CROP, shift = [0, 0], zoom = 1 } = {}) {
+  return orientation === 1 && !angle && crop.x === 0 && crop.y === 0 && crop.w === 1 && crop.h === 1
+    && !shift[0] && !shift[1] && zoom === 1;
 }
 
 function clampCrop(crop) {
@@ -87,8 +88,10 @@ function clampCrop(crop) {
 }
 
 // For a W x H picture: the finished size, the straightened frame's size and
-// the matrix from rendered pixels to finished pixels.
-export function geometry(W, H, { orientation = 1, angle = 0, crop = FULL_CROP } = {}) {
+// the matrix from rendered pixels to finished pixels. `shift` ([x, y],
+// fractions of the picture) and `zoom` (about the middle) move the rendered
+// picture first (the perspective pivot).
+export function geometry(W, H, { orientation = 1, angle = 0, crop = FULL_CROP, shift = [0, 0], zoom = 1 } = {}) {
   const { flip, turns } = orientationParts(orientation);
   const OW = turns % 2 ? H : W;
   const OH = turns % 2 ? W : H;
@@ -101,7 +104,8 @@ export function geometry(W, H, { orientation = 1, angle = 0, crop = FULL_CROP } 
   m = multiply(m, rotate((angle * Math.PI) / 180));
   m = multiply(m, rotate((turns * Math.PI) / 2));
   m = multiply(m, scale(flip ? -1 : 1, 1));
-  m = multiply(m, translate(-W / 2, -H / 2));
+  m = multiply(m, scale(zoom, zoom));
+  m = multiply(m, translate(shift[0] * W - W / 2, shift[1] * H - H / 2));
   return {
     // Rounded down: never a sliver past the picture's edge.
     width: Math.max(1, Math.floor(c.w * frameWidth + 1e-6)),

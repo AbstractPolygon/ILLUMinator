@@ -67,6 +67,11 @@ export function recipeToEdits(recipe, ctx = {}) {
   }
   camera.tilt = Math.round(clamp(tilt, -100, 100));
   camera['tilt-rotation'] = Math.round(rotation);
+  // Perspective pivot (lambda; Lytro Desktop's default, -20, is its own
+  // automatic pivot).
+  const pivot = num(r.viewPivot, -20);
+  camera['pivot-on'] = pivot !== -20;
+  camera.pivot = camera['pivot-on'] ? Math.round(clamp((pivot * LAMBDA_TO_ALPHA) / FOCUS_RANGE * 100, -100, 100)) : 0;
 
   // Process.
   process.ev = clamp(num(r.viewExposure, 0), -3, 3);

@@ -22,7 +22,7 @@ const FRINGES = ['purple', 'green', 'red', 'blue'];
 export const EDIT_GROUPS = {
   process: ['awb', 'wb-temperature', 'wb-tint', 'ev', 'tone-contrast', 'tone-highlights', 'tone-shadows', 'tone-whites',
     'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`)],
-  camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', 'bokeh', 'highlights'],
+  camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'highlights'],
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
   defringe: ['fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],

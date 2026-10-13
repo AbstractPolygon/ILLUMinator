@@ -262,6 +262,13 @@
           </label>
         </details>
         <details class="subpanel">
+          <summary><h3>Perspective</h3></summary>
+          <label class="check" title="Choose the depth that stays still when the viewpoint moves; otherwise it is the focus plane (or, with the aperture closed, the camera's own focus)"><input id="pivot-on" type="checkbox"> Custom pivot</label>
+          <label>Pivot depth <output data-for="pivot" for="pivot">0</output>
+            <input id="pivot" type="range" min="-100" max="100" step="1" value="0" data-default="0" disabled>
+          </label>
+        </details>
+        <details class="subpanel">
           <summary><h3>Bokeh</h3></summary>
           <label>Shape
             <select id="bokeh">
