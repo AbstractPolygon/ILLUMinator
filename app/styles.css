@@ -172,10 +172,11 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
 .progress .bar { flex: 1; height: 6px; background: #2a2e35; border-radius: 3px; overflow: hidden; }
 #progress-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
 
-.modes, .transport {
+.modes-row, .transport {
   display: flex; gap: 6px; padding: 8px 12px; align-items: center;
   border-top: 1px solid var(--line); background: var(--panel); flex-wrap: wrap;
 }
+.modes { display: flex; gap: 6px; }
 .transport input[type=range] { flex: 1; min-width: 120px; }
 .zoom { display: flex; gap: 2px; align-items: center; }
 .zoom button { padding: 6px 9px; min-width: 32px; }
@@ -460,8 +461,8 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 /* Local adjustments. */
 .mask-add { margin: 2px 0 8px; }
 .mask-add { gap: 4px; }
-.mask-add .mask-icon { padding: 4px; border-radius: 6px; }
-.mask-add .mask-icon svg { width: 26px; height: 26px; }
+.mask-add .mask-icon { padding: 5px; border-radius: 6px; }
+.mask-add .mask-icon svg { width: 20px; height: 20px; display: block; }
 .mask-add .mask-icon:hover:not(:disabled) { background: #22262c; }
 .mask-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .mask-list li { display: flex; align-items: center; border-radius: 5px; border: 1px solid transparent; }
@@ -481,3 +482,36 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .key-time { width: 40px; flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .key-go { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 3px 4px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .key-go:hover { background: #22262c; }
+
+/* Animation length, beside the play bar. */
+.anim-length { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: var(--muted); }
+.anim-length input { width: 58px; padding: 4px 6px; background: #0f1114; border: 1px solid var(--line); border-radius: 5px; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Keyframe timeline: one row per property. */
+.timeline { border-top: 1px solid var(--line); background: var(--panel); padding: 6px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
+.tl-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-bar button { padding: 4px 10px; font-size: 12.5px; }
+.tl-ease { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: var(--muted); }
+.tl-ease select { width: auto; margin: 0; padding: 3px 6px; }
+.tl-time { margin-left: auto; font-variant-numeric: tabular-nums; }
+.tl-main { display: flex; gap: 10px; align-items: flex-start; }
+.tl-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: 112px 1fr; row-gap: 2px; user-select: none; }
+.tl-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); height: 20px; }
+.tl-label button { padding: 0 4px; line-height: 16px; font-size: 11px; background: none; border: 1px solid transparent; color: var(--muted); }
+.tl-label button:hover { color: var(--text); border-color: var(--line); }
+.tl-track { position: relative; height: 20px; background: #15181c; border-radius: 3px; cursor: pointer; }
+.tl-ruler { position: relative; height: 16px; cursor: pointer; }
+.tl-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); font-size: 10px; color: var(--muted); padding-left: 3px; }
+.tl-key {
+  position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+  background: var(--text); transform: rotate(45deg); border-radius: 1px; cursor: ew-resize;
+}
+.tl-key.selected { background: var(--accent); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25); }
+.tl-key.hold { border-radius: 0; background: var(--muted); }
+.tl-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid #e5534b; pointer-events: none; }
+.tl-curve { flex: none; }
+.tl-curve-canvas { display: block; width: 150px; height: 150px; touch-action: none; cursor: crosshair; }
+
+/* Everything inside a section is indented like its subsections. */
+.controls > .panel > :not(summary) { margin-left: 6px; }
+.controls > .panel > :is(canvas, button.wide, .row.export) { width: calc(100% - 6px); }

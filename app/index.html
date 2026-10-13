@@ -92,20 +92,49 @@
           <span id="progress-text"></span>
         </div>
       </div>
-      <nav class="modes" id="modes">
-        <button data-mode="camera" class="active">Camera</button>
-        <button data-mode="lenslets">Lenslets</button>
-      </nav>
-      <div class="transport">
-        <button id="play-btn" title="Play / pause (space)">Play</button>
-        <input id="scrub" type="range" min="0" max="0" value="0">
-        <span id="frame-label" class="hint"></span>
+      <div id="timeline" class="timeline" hidden>
+        <div class="tl-bar">
+          <button id="tl-key-all" type="button" title="Adds a keyframe on every track at the playhead, with the current settings">◆ Key all</button>
+          <button id="tl-delete" type="button" title="Deletes the selected keyframe (Delete)" disabled>Delete key</button>
+          <label class="tl-ease">Curve to next
+            <select id="tl-ease" disabled>
+              <option value="linear">Linear</option>
+              <option value="smooth">Smooth</option>
+              <option value="in">Ease in</option>
+              <option value="out">Ease out</option>
+              <option value="hold">Hold</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <span id="tl-time" class="hint tl-time"></span>
+        </div>
+        <div class="tl-main">
+          <div id="tl-grid" class="tl-grid"></div>
+          <div id="tl-curve" class="tl-curve" hidden>
+            <canvas id="tl-curve-canvas" class="tl-curve-canvas" width="150" height="150" role="img" aria-label="Curve to the next keyframe" title="Drag the two handles to shape the curve"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="modes-row">
+        <nav class="modes" id="modes">
+          <button data-mode="camera" class="active">Camera</button>
+          <button data-mode="lenslets">Lenslets</button>
+        </nav>
+        <span class="spacer"></span>
         <div class="zoom" role="group" aria-label="Zoom">
           <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
           <button id="zoom-label" title="Fit to window (0)">Fit</button>
           <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
           <button id="zoom-1" title="Actual pixels (1)">1:1</button>
         </div>
+      </div>
+      <div class="transport">
+        <button id="play-btn" title="Play / pause (space)">Play</button>
+        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Animation position">
+        <span id="frame-label" class="hint"></span>
+        <label id="anim-length-row" class="anim-length" title="Length of the animation">Length
+          <input id="anim-length" type="number" min="0.5" max="120" step="0.5" value="4" aria-label="Animation length in seconds"> s
+        </label>
       </div>
     </section>
 
@@ -271,13 +300,13 @@
         <summary><h2>Local Adjustments</h2></summary>
         <div class="row mask-add">
           <button id="mask-add-radial" type="button" class="icon-only mask-icon" title="Add a radial mask: an ellipse, full effect inside and fading out" aria-label="Add a radial mask">
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><defs><radialGradient id="mask-icon-radial"><stop offset="0.35" stop-color="currentColor" stop-opacity="0.85"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient></defs><ellipse cx="12" cy="12" rx="9" ry="7" fill="url(#mask-icon-radial)" stroke="currentColor" stroke-width="1.4"/></svg>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
           <button id="mask-add-linear" type="button" class="icon-only mask-icon" title="Add a gradient mask: full effect on one side of a line, fading to none" aria-label="Add a gradient mask">
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><defs><linearGradient id="mask-icon-linear" x1="0" y1="0" x2="0" y2="1"><stop offset="0.2" stop-color="currentColor" stop-opacity="0.85"/><stop offset="0.85" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="url(#mask-icon-linear)" stroke="currentColor" stroke-width="1.4"/></svg>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 12h16" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
           <button id="mask-add-depth" type="button" class="icon-only mask-icon" title="Add a depth mask: full effect between a near and a far depth" aria-label="Add a depth mask">
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 15.5 12 20l9-4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2" stroke-linejoin="round"/><path d="M3 11.5 12 16l9-4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5L12 3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3" y="7" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h8A1.5 1.5 0 0 1 20 5.5v8a1.5 1.5 0 0 1-1.5 1.5H15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           </button>
         </div>
         <ul id="mask-list" class="mask-list"></ul>
@@ -515,7 +544,7 @@
             </select>
           </label>
           <label>Amount <input id="amount" type="range" min="0.1" max="1" step="0.05" value="0.85"></label>
-          <label>Frames <input id="frames" type="range" min="12" max="96" step="4" value="48"></label>
+          <input id="frames" type="hidden" value="48">
         </div>
         <div id="anim-focus" hidden>
           <label>Near <input id="near" type="range" min="-1.6" max="0" step="0.05" value="-0.6"></label>
@@ -531,14 +560,6 @@
           </label>
           <label>Pan Y <output data-for="frame-pan-y" for="frame-pan-y">0</output>
             <input id="frame-pan-y" type="range" min="-100" max="100" step="1" value="0" data-default="0">
-          </label>
-          <div class="row key-buttons">
-            <button id="key-add" type="button" title="Adds the current focus, aperture, viewpoint, zoom and pan as a keyframe">Add keyframe</button>
-            <button id="key-clear" type="button">Clear</button>
-          </div>
-          <ol id="key-list" class="key-list"></ol>
-          <label>Seconds between keyframes <output data-for="key-step" for="key-step">2.0 s</output>
-            <input id="key-step" type="range" min="0.5" max="6" step="0.5" value="2" data-default="2">
           </label>
           <input id="anim-keys" type="hidden" value="[]" data-text>
         </div>

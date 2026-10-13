@@ -9,6 +9,7 @@ import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
+import { TRACKS, PRESETS, FPS as KEY_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier } from './core/keyframes.js';
 import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 
@@ -552,6 +553,7 @@ function resetView() {
 
 function closePhoto() {
   resetView();
+  renderMasks();
   $('histogram').getContext('2d').clearRect(0, 0, 256, 80);
   state.current = null;
   canvas.classList.add('hidden');
@@ -943,6 +945,7 @@ function updateFrameLabel() {
   $('frame-label').textContent = `${state.index + 1}/${n}` +
     (ready < n ? ` (rendering ${ready})` : '') +
     (val !== undefined ? ` · focus ${val.toFixed(2)}` : '');
+  if (typeof updatePlayhead === 'function') updatePlayhead();
 }
 
 function showFrame(i) {
@@ -1152,6 +1155,7 @@ function setMode(mode) {
     renderGridInfo();
   }
   $('frame-label').textContent = '';
+  renderTimeline();
   refresh();
 }
 
@@ -1979,7 +1983,8 @@ function renderMasks() {
     li.append(name, del);
     return li;
   }));
-  for (const kind of Object.keys(MASK_NAMES)) $(`mask-add-${kind}`).disabled = masks.length >= MAX_MASKS;
+  // Masks belong to a photo: none can be added until one is open.
+  for (const kind of Object.keys(MASK_NAMES)) $(`mask-add-${kind}`).disabled = masks.length >= MAX_MASKS || !canRender();
   const m = masks[maskSel];
   $('mask-editor').hidden = !m;
   if (!m) {
@@ -2010,7 +2015,7 @@ function maskFromEditor(final) {
 for (const kind of Object.keys(MASK_NAMES)) {
   $(`mask-add-${kind}`).onclick = () => {
     const masks = getMasks();
-    if (masks.length >= MAX_MASKS) return;
+    if (masks.length >= MAX_MASKS || !canRender()) return;
     masks.push(defaultMask(kind));
     maskSel = masks.length - 1;
     $('mask-show').checked = true;
@@ -2035,35 +2040,63 @@ for (const id of ['mask-on', 'mask-invert']) $(id).addEventListener('change', ()
 $('mask-show').addEventListener('change', () => applySettingsSoon());
 $('mask-delete').onclick = () => deleteMask(maskSel);
 
+renderMasks();
+
 function localSettings() {
   return { masks: $('local-masks').value, show: $('mask-show').checked ? maskSel : -1 };
 }
 
 // ---------------------------------------------------------------- keyframes
 
-// Keyframed animation: each keyframe holds the aperture, focus, viewpoint
-// and framing (zoom and pan); the frames in between ease from one to the
-// next. Framing is applied when the picture is drawn, like the pivot.
-const KEY_FPS = 24;
-
-function getKeys() {
-  try {
-    const keys = JSON.parse($('anim-keys').value || '[]');
-    return Array.isArray(keys) ? keys : [];
-  } catch {
-    return [];
-  }
-}
-
-function setKeys(keys) {
-  $('anim-keys').value = JSON.stringify(keys);
-  renderKeys();
-  animationSettingsChanged();
-  scheduleSave();
-}
+// Keyframed animation (core/keyframes.js): a track per property on the
+// timeline under the picture. Each track's diamonds are its keyframes: drag
+// to move, click to select (and show), Delete to remove; the selected one
+// sets the curve to the next. Framing (zoom and pan) is applied when the
+// picture is drawn, like the pivot.
+const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', pan: 'Pan' };
+let anim = emptyAnimation();
+let keySel = null; // { k, t }
 
 function keyframesOn() {
   return $('anim-on').checked && $('anim').value === 'keyframes';
+}
+
+// Earlier versions kept a plain list of keyframes, evenly spaced.
+function loadAnimation() {
+  let raw = null;
+  try {
+    raw = JSON.parse($('anim-keys').value || 'null');
+  } catch {
+    raw = null;
+  }
+  if (Array.isArray(raw) && raw.length) {
+    anim = emptyAnimation();
+    raw.forEach((k, i) => {
+      const t = i * 2;
+      setKey(anim, 'aperture', t, F_STOPS[k.fstop] ?? 2);
+      setKey(anim, 'focus', t, k.focus || 0);
+      setKey(anim, 'view', t, [k.u || 0, k.v || 0]);
+      setKey(anim, 'zoom', t, k.zoom || 1);
+      setKey(anim, 'pan', t, [k.panX || 0, k.panY || 0]);
+    });
+    anim.length = Math.max(1, (raw.length - 1) * 2);
+  } else {
+    anim = parseAnimation($('anim-keys').value);
+  }
+  keySel = null;
+  showAnimationLength();
+  renderTimeline();
+}
+
+function saveAnimation() {
+  $('anim-keys').value = JSON.stringify(anim);
+  scheduleSave();
+  invalidateAnimation();
+  if (state.showingFrames) {
+    backToCamera();
+    renderCamera();
+  }
+  renderTimeline();
 }
 
 // Zoom (1..3) and pan (-1..1 each way) -> a picture shift and zoom.
@@ -2083,66 +2116,308 @@ function combineMotion(a, b) {
   return { shift: [a.shift[0] + b.shift[0], a.shift[1] + b.shift[1]], zoom: a.zoom * b.zoom };
 }
 
-function keyLabel(k) {
-  const f = F_STOPS[k.fstop] ?? 2;
-  return `f/${f} · focus ${k.focus >= 0 ? '+' : '−'}${Math.abs(k.focus).toFixed(2)}${k.zoom > 1.001 ? ` · ${Math.round(k.zoom * 100)}%` : ''}`;
+function currentValue(k) {
+  switch (k) {
+    case 'aperture': return F_STOPS[+$('fstop').value] ?? 2;
+    case 'depth': return +$('dof-depth').value;
+    case 'focus': return +$('focus').value;
+    case 'view': return [state.camera.u, state.camera.v];
+    case 'zoom': return +$('frame-zoom').value / 100;
+    default: return [+$('frame-pan-x').value / 100, +$('frame-pan-y').value / 100];
+  }
 }
 
-function renderKeys() {
-  const keys = getKeys();
-  const step = +$('key-step').value;
-  $('key-list').replaceChildren(...keys.map((k, i) => {
-    const li = document.createElement('li');
-    const time = Object.assign(document.createElement('span'), { className: 'key-time', textContent: `${(i * step).toFixed(1)} s` });
-    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'key-go', textContent: keyLabel(k), title: 'Show this keyframe' });
-    go.onclick = () => applyKey(k);
-    const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', title: 'Delete keyframe' });
-    del.innerHTML = TRASH_ICON;
-    del.setAttribute('aria-label', `Delete keyframe ${i + 1}`);
-    del.onclick = () => {
-      const list = getKeys();
-      list.splice(i, 1);
-      setKeys(list);
-    };
-    li.append(time, go, del);
-    return li;
-  }));
-  $('key-clear').disabled = !keys.length;
-}
-
-// Shows a keyframe: its settings become the current ones.
-function applyKey(k) {
+// Shows a keyframe's value in the controls (and the picture).
+function showValue(k, v) {
+  if (k === 'aperture') {
+    let best = 0;
+    F_STOPS.forEach((n, i) => { if (Math.abs(Math.log(n / v)) < Math.abs(Math.log(F_STOPS[best] / v))) best = i; });
+    $('fstop').value = best;
+    showFNumber();
+  } else if (k === 'depth') {
+    $('dof-depth').value = Math.round(v);
+    showSliderValue($('dof-depth'));
+  } else if (k === 'focus') {
+    $('focus').value = v;
+  } else if (k === 'view') {
+    state.camera = { u: v[0], v: v[1] };
+  } else if (k === 'zoom') {
+    $('frame-zoom').value = Math.round(v * 100);
+    showSliderValue($('frame-zoom'));
+  } else {
+    $('frame-pan-x').value = Math.round(v[0] * 100);
+    $('frame-pan-y').value = Math.round(v[1] * 100);
+    showSliderValue($('frame-pan-x'));
+    showSliderValue($('frame-pan-y'));
+  }
   if (state.showingFrames) backToCamera();
-  $('fstop').value = k.fstop;
-  $('focus').value = k.focus;
-  $('frame-zoom').value = Math.round(k.zoom * 100);
-  $('frame-pan-x').value = Math.round(k.panX * 100);
-  $('frame-pan-y').value = Math.round(k.panY * 100);
-  for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) showSliderValue($(id));
-  state.camera = { u: k.u, v: k.v };
-  showFNumber();
   cameraChanged({ final: true });
 }
 
-$('key-add').onclick = () => {
-  const keys = getKeys();
-  keys.push({
-    fstop: +$('fstop').value,
-    focus: +$('focus').value,
-    u: state.camera.u,
-    v: state.camera.v,
-    zoom: +$('frame-zoom').value / 100,
-    panX: +$('frame-pan-x').value / 100,
-    panY: +$('frame-pan-y').value / 100,
-  });
-  setKeys(keys);
+function playheadTime() {
+  if (state.showingFrames && state.frames.length) return (state.drawFrame ?? state.index) / KEY_FPS;
+  return Math.min(anim.length, state.keyTime || 0);
+}
+
+function selectedKey() {
+  if (!keySel) return null;
+  return anim.tracks[keySel.k].find((key) => Math.abs(key.t - keySel.t) < 1e-6) || null;
+}
+
+const fmtTime = (t) => `${t.toFixed(2)} s`;
+
+// Moves the playhead without redrawing the timeline (while playing).
+function updatePlayhead() {
+  if ($('timeline').hidden) return;
+  const head = playheadTime();
+  for (const el of $('tl-grid').querySelectorAll('.tl-playhead')) el.style.left = `${(100 * head) / anim.length}%`;
+  $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(anim.length)}`;
+}
+
+function renderTimeline() {
+  const on = keyframesOn() && state.mode === 'camera';
+  if ($('timeline').hidden === on) {
+    $('timeline').hidden = !on;
+    // The picture gets less (or more) room.
+    layoutCanvas();
+  }
+  if (!on) return;
+  const grid = $('tl-grid');
+  const len = anim.length;
+  const pos = (t) => `${(100 * t) / len}%`;
+  const head = playheadTime();
+  const rows = [];
+  // Ruler: a tick each second (or each 5 s for long animations).
+  const step = len > 20 ? 5 : 1;
+  const ruler = Object.assign(document.createElement('div'), { className: 'tl-ruler' });
+  for (let t = 0; t <= len + 1e-6; t += step) {
+    ruler.append(Object.assign(document.createElement('span'), { className: 'tl-tick', textContent: `${t}s`, style: `left:${pos(t)}` }));
+  }
+  ruler.append(Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` }));
+  ruler.onpointerdown = (e) => seekTimeline(e, ruler);
+  rows.push(Object.assign(document.createElement('div'), { className: 'tl-label' }), ruler);
+  for (const k of TRACKS) {
+    const label = Object.assign(document.createElement('div'), { className: 'tl-label' });
+    const add = Object.assign(document.createElement('button'), { type: 'button', textContent: '◆', title: `Keyframe ${TRACK_NAMES[k].toLowerCase()} at the playhead` });
+    add.setAttribute('aria-label', `Add a ${TRACK_NAMES[k].toLowerCase()} keyframe`);
+    add.onclick = () => {
+      const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
+      setKey(anim, k, t, currentValue(k));
+      keySel = { k, t };
+      saveAnimation();
+    };
+    label.append(add, document.createTextNode(TRACK_NAMES[k]));
+    const track = Object.assign(document.createElement('div'), { className: 'tl-track' });
+    track.onpointerdown = (e) => {
+      if (e.target === track) seekTimeline(e, track);
+    };
+    for (const key of anim.tracks[k]) {
+      const d = Object.assign(document.createElement('span'), { className: 'tl-key', style: `left:${pos(key.t)}` });
+      if (keySel && keySel.k === k && Math.abs(keySel.t - key.t) < 1e-6) d.classList.add('selected');
+      if (key.ease.type === 'hold') d.classList.add('hold');
+      d.title = `${TRACK_NAMES[k]} at ${fmtTime(key.t)}`;
+      d.onpointerdown = (e) => dragKey(e, k, key, track);
+      track.append(d);
+    }
+    track.append(Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` }));
+    rows.push(label, track);
+  }
+  grid.replaceChildren(...rows);
+  const sel = selectedKey();
+  $('tl-delete').disabled = !sel;
+  $('tl-ease').disabled = !sel;
+  if (sel) $('tl-ease').value = sel.ease.type;
+  $('tl-curve').hidden = !(sel && sel.ease.type === 'custom');
+  if (sel && sel.ease.type === 'custom') drawCurve();
+  $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(len)}`;
+}
+
+function timeAt(e, el) {
+  const r = el.getBoundingClientRect();
+  const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * anim.length;
+  return Math.round(t * KEY_FPS) / KEY_FPS;
+}
+
+// Click on the ruler or a track: move the playhead there.
+function seekTimeline(e, el) {
+  const t = timeAt(e, el);
+  state.keyTime = t;
+  if (state.frames.length) {
+    const i = Math.min(state.frames.length - 1, Math.round(t * KEY_FPS));
+    if (state.playing) setPlaying(false);
+    state.showingFrames = true;
+    state.index = i;
+    showFrame(i);
+  }
+  renderTimeline();
+}
+
+// Drag a keyframe along its track; a click without moving selects it and
+// shows its value.
+function dragKey(e, k, key, track) {
+  e.preventDefault();
+  e.stopPropagation();
+  const startX = e.clientX;
+  let moved = false;
+  keySel = { k, t: key.t };
+  const move = (ev) => {
+    if (!moved && Math.abs(ev.clientX - startX) < 3) return;
+    moved = true;
+    const t = timeAt(ev, track);
+    if (anim.tracks[k].some((other) => other !== key && Math.abs(other.t - t) < 0.5 / KEY_FPS)) return;
+    key.t = t;
+    keySel = { k, t };
+    anim.tracks[k].sort((a, b) => a.t - b.t);
+    renderTimeline();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (moved) {
+      saveAnimation();
+    } else {
+      state.keyTime = key.t;
+      showValue(k, key.v);
+      renderTimeline();
+    }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  renderTimeline();
+}
+
+function deleteSelectedKey() {
+  const sel = selectedKey();
+  if (!sel) return;
+  anim.tracks[keySel.k] = anim.tracks[keySel.k].filter((key) => key !== sel);
+  keySel = null;
+  saveAnimation();
+}
+
+$('tl-delete').onclick = deleteSelectedKey;
+$('tl-key-all').onclick = () => {
+  const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
+  for (const k of TRACKS) setKey(anim, k, t, currentValue(k));
+  saveAnimation();
 };
-$('key-clear').onclick = () => setKeys([]);
-$('key-step').oninput = () => {
-  showSliderValue($('key-step'));
-  renderKeys();
+$('tl-ease').onchange = () => {
+  const sel = selectedKey();
+  if (!sel) return;
+  const type = $('tl-ease').value;
+  // A custom curve starts from the one chosen before.
+  if (type === 'custom' && sel.ease.type !== 'custom' && PRESETS[sel.ease.type]) sel.ease.bezier = [...PRESETS[sel.ease.type]];
+  sel.ease.type = type;
+  saveAnimation();
 };
-$('key-step').onchange = animationSettingsChanged;
+document.addEventListener('keydown', (e) => {
+  if (!keySel || $('timeline').hidden || e.target.matches('input, select, textarea')) return;
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    deleteSelectedKey();
+  }
+});
+
+// The custom curve: from (0, 0) to (1, 1), two handles to drag.
+const curvePad = 14;
+function curveGeom() {
+  const c = $('tl-curve-canvas');
+  const dpr = window.devicePixelRatio || 1;
+  const size = c.clientWidth || 150;
+  if (c.width !== size * dpr) {
+    c.width = size * dpr;
+    c.height = size * dpr;
+  }
+  // y from -0.5 to 1.5, so curves can overshoot.
+  const s = size - 2 * curvePad;
+  return { c, dpr, size, X: (x) => curvePad + x * s, Y: (y) => curvePad + (1.5 - y) / 2 * s, s };
+}
+
+function drawCurve() {
+  const sel = selectedKey();
+  if (!sel) return;
+  const { c, dpr, size, X, Y } = curveGeom();
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, size, size);
+  g.fillStyle = '#0f1114';
+  g.fillRect(X(0), Y(1.5), X(1) - X(0), Y(-0.5) - Y(1.5));
+  g.strokeStyle = '#2a2e35';
+  g.strokeRect(X(0), Y(1), X(1) - X(0), Y(0) - Y(1));
+  const [x1, y1, x2, y2] = sel.ease.bezier;
+  const f = cubicBezier(x1, y1, x2, y2);
+  g.strokeStyle = '#e6e6e6';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  for (let i = 0; i <= 60; i++) {
+    const x = i / 60;
+    if (i) g.lineTo(X(x), Y(f(x)));
+    else g.moveTo(X(x), Y(f(x)));
+  }
+  g.stroke();
+  g.lineWidth = 1;
+  g.strokeStyle = '#888';
+  for (const [ax, ay, hx, hy] of [[0, 0, x1, y1], [1, 1, x2, y2]]) {
+    g.beginPath();
+    g.moveTo(X(ax), Y(ay));
+    g.lineTo(X(hx), Y(hy));
+    g.stroke();
+    g.beginPath();
+    g.arc(X(hx), Y(hy), 5, 0, 2 * Math.PI);
+    g.fillStyle = '#e5534b';
+    g.fill();
+  }
+}
+
+$('tl-curve-canvas').addEventListener('pointerdown', (e) => {
+  const sel = selectedKey();
+  if (!sel) return;
+  const { c, X, Y, s } = curveGeom();
+  const r = c.getBoundingClientRect();
+  const px = e.clientX - r.left;
+  const py = e.clientY - r.top;
+  const b = sel.ease.bezier;
+  const d1 = Math.hypot(px - X(b[0]), py - Y(b[1]));
+  const d2 = Math.hypot(px - X(b[2]), py - Y(b[3]));
+  const h = d1 <= d2 ? 0 : 2;
+  c.setPointerCapture(e.pointerId);
+  const move = (ev) => {
+    const x = Math.min(1, Math.max(0, (ev.clientX - r.left - curvePad) / s));
+    const y = Math.min(1.5, Math.max(-0.5, 1.5 - ((ev.clientY - r.top - curvePad) / s) * 2));
+    b[h] = x;
+    b[h + 1] = y;
+    drawCurve();
+  };
+  const up = () => {
+    c.removeEventListener('pointermove', move);
+    c.removeEventListener('pointerup', up);
+    saveAnimation();
+  };
+  c.addEventListener('pointermove', move);
+  c.addEventListener('pointerup', up);
+  move(e);
+});
+
+// Length, beside the play bar: of the keyframed animation, or of the
+// viewpoint path (its number of frames).
+function showAnimationLength() {
+  const kind = $('anim').value;
+  $('anim-length-row').hidden = kind === 'focus';
+  $('anim-length').value = kind === 'keyframes' ? anim.length : +(+$('frames').value / KEY_FPS).toFixed(2);
+}
+
+$('anim-length').onchange = () => {
+  const len = Math.min(120, Math.max(0.5, +$('anim-length').value || 4));
+  if ($('anim').value === 'keyframes') {
+    anim.length = len;
+    saveAnimation();
+  } else {
+    $('frames').value = Math.max(2, Math.round(len * KEY_FPS));
+    scheduleSave();
+    animationSettingsChanged();
+  }
+  showAnimationLength();
+};
+
 for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) {
   $(id).oninput = () => {
     showSliderValue($(id));
@@ -2151,30 +2426,21 @@ for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) {
   $(id).onchange = () => scheduleSave();
 }
 
-const ease = (t) => t * t * (3 - 2 * t);
-
-// Frames between the keyframes: the camera settings for the worker and the
+// Values of every track at every frame: camera settings for the worker and
 // framing for drawing.
 function keyframeFrames() {
-  const keys = getKeys();
-  if (keys.length < 2) return null;
-  const per = Math.max(1, Math.round(+$('key-step').value * KEY_FPS));
+  if (!hasKeys(anim)) return null;
+  const live = { aperture: F_STOPS[+$('fstop').value] ?? 2, depth: +$('dof-depth').value, focus: +$('focus').value };
   const path = [];
   const frames = [];
-  for (let s = 0; s < keys.length - 1; s++) {
-    const a = keys[s];
-    const b = keys[s + 1];
-    const last = s === keys.length - 2;
-    for (let i = 0; i < per + (last ? 1 : 0); i++) {
-      const t = ease(i / per);
-      const mix = (x, y) => x + (y - x) * t;
-      // Aperture eases in f-number steps (log scale).
-      const fa = F_STOPS[a.fstop] ?? 2;
-      const fb = F_STOPS[b.fstop] ?? 2;
-      const lens = apertureFor(Math.exp(mix(Math.log(fa), Math.log(fb))));
-      path.push({ u: mix(a.u, b.u), v: mix(a.v, b.v), alpha: mix(a.focus, b.focus), aperture: lens.aperture, dof: lens.dof * depthOfFieldScale() });
-      frames.push(framing(mix(a.zoom, b.zoom), mix(a.panX, b.panX), mix(a.panY, b.panY)));
-    }
+  for (const v of sample(anim)) {
+    const lens = apertureFor(v.aperture ?? live.aperture);
+    const depth = v.depth ?? live.depth;
+    const view = v.view ?? [state.camera.u, state.camera.v];
+    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50) });
+    const z = v.zoom ?? +$('frame-zoom').value / 100;
+    const pan = v.pan ?? [+$('frame-pan-x').value / 100, +$('frame-pan-y').value / 100];
+    frames.push(framing(z, pan[0], pan[1]));
   }
   return { path, framing: frames };
 }
@@ -2461,6 +2727,8 @@ function animationSettingsChanged() {
   $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
   $('anim-focus').hidden = $('anim').value !== 'focus';
   $('anim-keyframes').hidden = $('anim').value !== 'keyframes';
+  showAnimationLength();
+  renderTimeline();
   if (state.lastImage) draw(state.lastImage);
   invalidateAnimation();
   if (state.showingFrames) {
@@ -2486,6 +2754,7 @@ $('anim-on').onchange = () => {
     }
   }
   showAnimationEnabled();
+  renderTimeline();
   if (state.lastImage) draw(state.lastImage);
 };
 
@@ -2620,7 +2889,7 @@ async function restoreEdits(info) {
     showFNumber();
     $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
     $('anim-keyframes').hidden = $('anim').value !== 'keyframes';
-    renderKeys();
+    loadAnimation();
     $('anim-focus').hidden = $('anim').value !== 'focus';
     await applySettings();
   } finally {
@@ -2733,7 +3002,6 @@ function showSliderValue(input) {
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
-  else if (input.id === 'key-step') out.textContent = `${v.toFixed(1)} s`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;
   else if (input.closest('.mask-shape')) out.textContent = `${v}`;
