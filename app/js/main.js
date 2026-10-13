@@ -142,6 +142,7 @@ async function openWith(args, transfer) {
     state.info = info;
     $('placeholder').hidden = true;
     resetTemperature(info);
+    showAutoFringe();
     renderInfo();
     if (!info.hasRaw && !info.processed) throw new Error('The file contains no light field image.');
     setMode(state.mode);
@@ -676,14 +677,19 @@ function fmt(v, digits = 2) {
   return typeof v === 'number' ? v.toFixed(digits) : v;
 }
 
-// Resolution options show the view size they give for this photo.
+// Resolution and Scale options show the picture size they give for this
+// photo.
 const RESOLUTION_NAMES = { 1: '1× (fast)', 1.5: '1.5×', 2: '2×' };
+const SCALE_NAMES = { 2: '2× lens grid', 3: '3× lens grid', 4: '4× lens grid' };
 function showResolutionSizes() {
-  const sizes = state.info && state.info.sizes;
-  for (const o of $('detail').options) {
-    const size = sizes && sizes[o.value];
-    o.textContent = `${RESOLUTION_NAMES[o.value]}${size ? ` — ${size[0]}×${size[1]} px` : ''}`;
-  }
+  const label = (select, names, sizes) => {
+    for (const o of select.options) {
+      const size = sizes && sizes[o.value];
+      o.textContent = `${names[o.value]}${size ? ` — ${size[0]}×${size[1]} px` : ''}`;
+    }
+  };
+  label($('detail'), RESOLUTION_NAMES, state.info && state.info.sizes);
+  label($('still-scale'), SCALE_NAMES, state.info && state.info.stillSizes);
 }
 
 function renderInfo() {
@@ -1192,6 +1198,7 @@ async function applySettings() {
     detail: +$('detail').value,
     defringe: {
       on: $('fringe-on').checked,
+      auto: $('fringe-auto').checked,
       radius: +$('fringe-radius').value,
       threshold: +$('fringe-threshold').value,
       // [amount, hue] for purple, green, red and blue fringes.
@@ -1199,6 +1206,11 @@ async function applySettings() {
     },
   };
   $('fringe-controls').disabled = !settings.defringe.on;
+  // Auto defringe sets the colors itself.
+  for (const key of FRINGES) {
+    $(`fringe-${key}`).disabled = settings.defringe.auto;
+    $(`fringe-${key}-hue`).disabled = settings.defringe.auto;
+  }
   $('wb-temperature').disabled = settings.autoWb;
   $('wb-tint').disabled = settings.autoWb;
   $('mv-blend').disabled = !settings.mvDenoise.on;
@@ -1207,12 +1219,25 @@ async function applySettings() {
   if (!canRender()) return;
   const info = await engine.request('settings', { settings });
   if (info) state.info = { ...state.info, ...info };
+  showAutoFringe();
+  showResolutionSizes();
   state.still = null;
   invalidateAnimation();
   if (state.showingFrames) backToCamera();
   refresh();
 }
 const FRINGES = ['purple', 'green', 'red', 'blue'];
+
+// Moves the defringe sliders to what auto defringe found.
+function showAutoFringe() {
+  const found = state.info && state.info.fringeAuto;
+  if (!found || !$('fringe-auto').checked) return;
+  FRINGES.forEach((key, i) => {
+    $(`fringe-${key}`).value = found[i][0];
+    $(`fringe-${key}-hue`).value = found[i][1];
+  });
+  showFringeHues();
+}
 
 function showFringeHues() {
   for (const key of FRINGES) $(`fringe-${key}-hue-label`).textContent = `${(+$(`fringe-${key}-hue`).value + 360) % 360}°`;
@@ -1287,7 +1312,7 @@ for (const input of document.querySelectorAll('.color-panel input[type=range], .
   });
 }
 
-for (const id of ['awb', 'mv-on', 'detail', 'fringe-on', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+for (const id of ['awb', 'mv-on', 'detail', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 

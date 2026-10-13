@@ -205,6 +205,7 @@
         <summary><h2>Defringe</h2></summary>
         <label class="check"><input id="fringe-on" type="checkbox"> Enabled</label>
         <fieldset id="fringe-controls" class="plain" disabled>
+        <label class="check"><input id="fringe-auto" type="checkbox"> Auto</label>
         <label>Radius <output id="fringe-radius-label" for="fringe-radius">2 px</output>
           <input id="fringe-radius" type="range" min="1" max="6" step="1" value="2">
         </label>
@@ -219,7 +220,7 @@
         </label>
         <label>Red amount <input id="fringe-red" type="range" min="0" max="1" step="0.05" value="0"></label>
         <label>Red hue <output id="fringe-red-hue-label" for="fringe-red-hue">0°</output>
-          <input id="fringe-red-hue" type="range" min="-30" max="30" step="5" value="0">
+          <input id="fringe-red-hue" type="range" min="-30" max="60" step="5" value="0">
         </label>
         <label>Blue amount <input id="fringe-blue" type="range" min="0" max="1" step="0.05" value="0"></label>
         <label>Blue hue <output id="fringe-blue-hue-label" for="fringe-blue-hue">220°</output>
@@ -275,7 +276,6 @@
                 <option value="4">4× lens grid</option>
               </select>
             </label>
-            <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
           </div>
           <div class="row export">
             <button id="png-btn">Save PNG</button>

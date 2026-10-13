@@ -10,7 +10,7 @@ import {
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
-import { defringe } from './core/defringe.js';
+import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN } from './core/color.js';
 import { makeDetail, applyDetail } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
@@ -25,6 +25,7 @@ const state = {
   dev: null,
   settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {}, mvDenoise: { on: false, blend: 1 } },
   pp: null, // ProcessedPicture for .lfp files without raw data
+  fringeAuto: null, // colors found by auto defringe
   look: null,
   detail: null, // Details panel filters (core/detail.js)
   baseExposure: 1,
@@ -109,6 +110,7 @@ function updateColor() {
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
   state.baseExposure = autoExposure(center, state.matrix);
+  applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
 
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -211,6 +213,7 @@ function summary() {
       sizes: { 1: [pp.width, pp.height], 1.5: [pp.width, pp.height], 2: [pp.width, pp.height] },
       radius: pp.radius,
       settings: state.settings,
+      fringeAuto: state.fringeAuto,
       renderer: 'CPU',
     };
   }
@@ -224,10 +227,16 @@ function summary() {
     gridQuality: lf.gridQuality,
     width: sampler.outW,
     height: sampler.outH,
-    // View size at each Resolution setting.
+    // View size at each Resolution setting, and full resolution size at each
+    // Scale (as renderSuperRes computes it).
     sizes: viewSizes(lf.grid, cam, [1, 1.5, 2]),
+    stillSizes: Object.fromEntries([2, 3, 4].map((k) => [k, [
+      Math.floor((sampler.outW / state.settings.detail) * k),
+      Math.floor((sampler.outH / state.settings.detail) * k),
+    ]])),
     radius: apertureRadius(),
     settings: state.settings,
+    fringeAuto: state.fringeAuto,
     renderer: state.gpu ? `GPU (${state.gpu.name})` : 'CPU',
   };
 }
@@ -713,6 +722,28 @@ function updateProcessedColor() {
   state.baseExposure = 1;
   state.look = makeLook(s);
   state.detail = makeDetail(s);
+  applyAutoDefringe(center, pp.width, pp.height);
+}
+
+// Auto defringe: finds the fringe colors in the center view (in output
+// colors, as defringing judges them) and uses them in place of the sliders.
+function applyAutoDefringe(center, w, h) {
+  const f = state.settings.defringe;
+  state.fringeAuto = null;
+  if (!f || !f.auto) return;
+  const m = state.matrix;
+  const k = state.baseExposure * Math.pow(2, state.settings.ev);
+  const out = new Float32Array(center.length);
+  for (let i = 0; i < center.length; i += 3) {
+    const r = center[i];
+    const g = center[i + 1];
+    const b = center[i + 2];
+    out[i] = (m[0] * r + m[1] * g + m[2] * b) * k;
+    out[i + 1] = (m[3] * r + m[4] * g + m[5] * b) * k;
+    out[i + 2] = (m[6] * r + m[7] * g + m[8] * b) * k;
+  }
+  state.fringeAuto = autoDefringe(out, w, h, f);
+  state.settings.defringe = { ...f, colors: state.fringeAuto.map(([amount, hue]) => [amount, (hue + 360) % 360]) };
 }
 
 // Camera parameters -> blur for the processed picture: 1 is the camera's
