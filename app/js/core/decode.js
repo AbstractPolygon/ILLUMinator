@@ -22,6 +22,7 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     metadata: picture ? picture.metadata : null,
     privateMetadata: picture ? picture.privateMetadata : null,
     stacks: picture ? picture.stacks : [],
+    frameDepth: picture ? picture.frameDepth : null,
     thumbnails: picture ? picture.thumbnails : [],
     readSection: picture ? picture.container.readSection : async () => null,
     cam: null,

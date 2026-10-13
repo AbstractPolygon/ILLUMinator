@@ -14,6 +14,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -275,3 +276,5 @@ input[type=range]:disabled { cursor: default; }
 .details-panel label:has(input[type=range]:disabled) { opacity: 0.45; }
 input[type=range]:disabled::-webkit-slider-thumb { background: var(--muted); }
 input[type=range]:disabled::-moz-range-thumb { background: var(--muted); }
+button.wide { display: block; width: 100%; margin: 8px 0 4px; }
+.row.export { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }

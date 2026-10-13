@@ -29,7 +29,7 @@
         <canvas id="view"></canvas>
         <canvas id="spread-overlay" hidden></canvas>
         <div id="placeholder" class="placeholder">
-          <p>Drop a Lytro ILLUM <code>.LFR</code> or first generation <code>.LFP</code> file here.</p>
+          <p>Drop a Lytro <code>.LFR</code> or <code>.LFP</code> file here.</p>
         </div>
         <div id="progress" class="progress" hidden>
           <div class="bar"><div id="progress-fill"></div></div>
@@ -44,15 +44,12 @@
         <button id="play-btn" title="Play / pause (space)">Play</button>
         <input id="scrub" type="range" min="0" max="0" value="0">
         <span id="frame-label" class="hint"></span>
-        <button id="fullres-btn" aria-pressed="false" title="Full resolution on/off (F)">Full resolution</button>
         <div class="zoom" role="group" aria-label="Zoom">
           <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
           <button id="zoom-label" title="Fit to window (0)">Fit</button>
           <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
           <button id="zoom-1" title="Actual pixels (1)">1:1</button>
         </div>
-        <button id="png-btn">Save PNG</button>
-        <button id="webm-btn">Export video</button>
       </div>
     </section>
 
@@ -172,16 +169,6 @@
           </label>
           <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
         </details>
-        <details class="subpanel">
-          <summary><h3>Rendering</h3></summary>
-          <label>Resolution
-            <select id="detail">
-              <option value="1" selected>1× (fast)</option>
-              <option value="1.5">1.5×</option>
-              <option value="2">2×</option>
-            </select>
-          </label>
-        </details>
       </details>
 
       <details class="panel details-panel" data-panel="camera">
@@ -213,18 +200,6 @@
         </details>
       </details>
 
-
-      <details class="panel" id="fullres-panel" hidden>
-        <summary><h2>Full resolution</h2></summary>
-        <label>Scale
-          <select id="still-scale">
-            <option value="2">2× lens grid</option>
-            <option value="3" selected>3× lens grid</option>
-            <option value="4">4× lens grid</option>
-          </select>
-        </label>
-        <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
-      </details>
 
       <details class="panel">
         <summary><h2>Defringe</h2></summary>
@@ -278,6 +253,32 @@
           <label>Near <input id="near" type="range" min="-1.6" max="0" step="0.05" value="-0.6"></label>
           <label>Far <input id="far" type="range" min="0" max="1.6" step="0.05" value="0.6"></label>
           <label>Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
+        </div>
+      </details>
+
+      <details class="panel">
+        <summary><h2>Rendering</h2></summary>
+        <label>Resolution
+          <select id="detail">
+            <option value="1" selected>1× (fast)</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+        <button id="fullres-btn" class="wide" aria-pressed="false" title="Full resolution on/off (F)">Full resolution</button>
+        <div id="fullres-panel" hidden>
+          <label>Scale
+            <select id="still-scale">
+              <option value="2">2× lens grid</option>
+              <option value="3" selected>3× lens grid</option>
+              <option value="4">4× lens grid</option>
+            </select>
+          </label>
+          <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
+        </div>
+        <div class="row export">
+          <button id="png-btn">Save PNG</button>
+          <button id="webm-btn">Export video</button>
         </div>
       </details>
 

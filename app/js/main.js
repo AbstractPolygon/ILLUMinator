@@ -31,7 +31,6 @@ const state = {
   depthShown: false,
   library: [],
   current: null,
-  stack: null, // pre-rendered focus stack from a processed LFP
   view: { busy: false, pending: false },
 };
 
@@ -114,7 +113,6 @@ async function openItem(item) {
 function resetView() {
   resetAnimation();
   state.info = null;
-  state.stack = null;
   state.still = null;
   state.camera = { u: 0, v: 0 };
   state.focusPoint = { x: 0.5, y: 0.5 };
@@ -130,7 +128,7 @@ function closePhoto() {
   state.current = null;
   canvas.classList.add('hidden');
   $('placeholder').hidden = false;
-  $('placeholder').innerHTML = '<p>Drop a Lytro ILLUM <code>.LFR</code> or first generation <code>.LFP</code> file here.</p>';
+  $('placeholder').innerHTML = '<p>Drop a Lytro <code>.LFR</code> or <code>.LFP</code> file here.</p>';
   $('info').replaceChildren();
   $('frame-label').textContent = '';
   setMode(state.mode);
@@ -145,11 +143,7 @@ async function openWith(args, transfer) {
     $('placeholder').hidden = true;
     resetTemperature(info);
     renderInfo();
-    if (!info.hasRaw && info.stacks.length) {
-      await loadStack(info.stacks);
-    } else if (!info.hasRaw) {
-      throw new Error('The file contains no light field image.');
-    }
+    if (!info.hasRaw && !info.processed) throw new Error('The file contains no light field image.');
     setMode(state.mode);
     if (info.hasRaw) engine.request('prepare').catch(() => {});
   } catch (err) {
@@ -157,13 +151,6 @@ async function openWith(args, transfer) {
   }
 }
 
-// Processed LFP files carry pre-rendered JPEG frames instead of raw data.
-async function loadStack(stacks) {
-  const focus = stacks.find((s) => s.images.some((i) => i.lambda !== undefined)) || stacks[0];
-  const images = [...focus.images].sort((a, b) => (a.lambda ?? 0) - (b.lambda ?? 0));
-  const bitmaps = await Promise.all(images.map((i) => createImageBitmap(new Blob([i.bytes], { type: i.mime }))));
-  state.stack = { kind: focus.kind, bitmaps, values: images.map((i) => i.lambda ?? 0) };
-}
 
 // ---------------------------------------------------------------- drawing
 
@@ -285,7 +272,7 @@ function showFocusPoint() {
 const spreadView = { busy: false, pending: false };
 async function updateSpreadOverlay() {
   const overlay = $('spread-overlay');
-  const on = $('spread-show').checked && state.info && state.info.hasRaw && state.mode === 'camera' && !state.depthShown;
+  const on = $('spread-show').checked && hasDepth() && state.mode === 'camera' && !state.depthShown;
   overlay.hidden = !on;
   $('spread-legend').hidden = !$('spread-show').checked;
   if (!on) return;
@@ -336,6 +323,19 @@ function cameraParams() {
   };
 }
 
+// Raw photos and processed .lfp files both drive the camera view.
+function canRender() {
+  return !!(state.info && (state.info.hasRaw || state.info.processed));
+}
+
+function hasDepth() {
+  return !!(state.info && (state.info.hasRaw || (state.info.processed && state.info.processed.hasDepth)));
+}
+
+function canDrag() {
+  return !!(state.info && (state.info.hasRaw || (state.info.processed && state.info.processed.canDrag)));
+}
+
 function showsCamera() {
   return state.mode === 'camera' && !state.fullRes && !state.depthShown && !state.showingFrames;
 }
@@ -343,7 +343,7 @@ function showsCamera() {
 // Live camera view. Requests are coalesced: while one renders, only the
 // latest settings are kept for the next.
 async function renderCamera() {
-  if (!state.info || !state.info.hasRaw) return;
+  if (!canRender()) return;
   const v = state.view;
   if (v.busy) {
     v.pending = true;
@@ -425,16 +425,6 @@ function resetAnimation() {
 
 // Renders the animation frames unless they match the current settings.
 function ensureAnimation() {
-  if (state.stack) {
-    if (!state.frames.length) {
-      state.frames = [...state.stack.bitmaps];
-      state.frameValues = state.stack.values;
-      state.loop = 'pingpong';
-      $('scrub').max = state.frames.length - 1;
-      state.animDone = Promise.resolve();
-    }
-    return state.animDone;
-  }
   const req = animationRequest();
   const key = JSON.stringify([req.type, req.args]);
   if (key === state.animKey) return state.animDone;
@@ -466,7 +456,6 @@ function ensureAnimation() {
 
 // A camera or animation setting changed: the frames are stale.
 function invalidateAnimation() {
-  if (state.stack) return;
   if (state.animKey) {
     engine.cancel('frames');
     engine.cancel('refocus');
@@ -537,7 +526,7 @@ function setPlaying(p) {
 
 // Shows the live camera view again after playing or scrubbing.
 function backToCamera() {
-  if (!state.showingFrames || state.stack) return;
+  if (!state.showingFrames) return;
   setPlaying(false);
   state.showingFrames = false;
   updateFrameLabel();
@@ -597,7 +586,7 @@ async function renderDepth() {
 }
 
 function setDepthShown(on, { restore = true } = {}) {
-  if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) {
+  if (on && !(hasDepth() && state.mode === 'camera')) {
     $('depth-btn').checked = false;
     return;
   }
@@ -657,15 +646,20 @@ function setMode(mode) {
   const raw = !!(state.info && state.info.hasRaw);
   for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
   const camera = mode === 'camera';
-  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation', 'spread-show']) $(id).disabled = !raw || !camera;
+  // Focus stacks bring their own blur; the depth effects need a depth map.
+  const depthTools = hasDepth() && camera;
+  const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
+  $('fullres-btn').disabled = !raw || !camera;
+  for (const id of ['depth-btn', 'spread-show']) $(id).disabled = !depthTools;
+  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
+  $('mv-on').disabled = !raw;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
   layoutCanvas();
   if (camera) {
-    state.showingFrames = !!state.stack;
-    if (state.stack) ensureAnimation();
+    state.showingFrames = false;
   } else {
     setPlaying(false);
     state.showingFrames = false;
@@ -697,8 +691,13 @@ function renderInfo() {
     rows.push(['Views', `${info.width}×${info.height}`]);
     rows.push(['Lens pitch', `${fmt(info.grid.pitch, 3)} px`]);
     if (info.renderer) rows.push(['Rendering', info.renderer]);
-  } else if (info.stacks.length) {
-    rows.push(['Content', info.stacks.map((s) => `${s.kind} (${s.images.length})`).join(', ')]);
+  } else if (info.processed) {
+    const p = info.processed;
+    const kinds = { warp: 'All-in-focus image', single: 'Single image', focus: 'Focus stack', perspective: 'Perspective views' };
+    if (info.cam) rows.push(['Camera', `${info.cam.make || ''} ${info.cam.model || ''}`.trim()]);
+    if (info.cam && info.cam.capture && info.cam.capture.time) rows.push(['Taken', new Date(info.cam.capture.time).toLocaleString()]);
+    rows.push(['Content', `${kinds[p.kind] || p.kind}${p.count > 1 ? ` (${p.count})` : ''}${p.hasDepth ? ' with depth map' : ''}`]);
+    rows.push(['Size', `${info.width}×${info.height}`]);
   }
   $('info').replaceChildren(...rows.flatMap(([k, v]) => {
     const dt = document.createElement('dt');
@@ -837,53 +836,10 @@ function viewPoint(event) {
   return state.info && state.info.width ? [fx * state.info.width, fy * state.info.height] : [fx * canvas.width, fy * canvas.height];
 }
 
-// Gradient energy around (x, y) in each frame; returns the sharpest index.
-// Used for pre-rendered focus stacks, which have no depth map.
-function sharpestFrame(frames, x, y, radius = 10) {
-  const size = radius * 2;
-  const probe = new OffscreenCanvas(size, size);
-  const pctx = probe.getContext('2d', { willReadFrequently: true });
-  let best = -1;
-  let bestScore = -Infinity;
-  frames.forEach((f, i) => {
-    if (!f) return;
-    pctx.clearRect(0, 0, size, size);
-    pctx.drawImage(f, x - radius, y - radius, size, size, 0, 0, size, size);
-    const d = pctx.getImageData(0, 0, size, size).data;
-    let s = 0;
-    let m = 0;
-    for (let j = 1; j < size - 1; j++) {
-      for (let k = 1; k < size - 1; k++) {
-        const o = (j * size + k) * 4;
-        const l = d[o] + 2 * d[o + 1] + d[o + 2];
-        const gx = d[o + 4] + 2 * d[o + 5] + d[o + 6] - (d[o - 4] + 2 * d[o - 3] + d[o - 2]);
-        const gy = d[o + size * 4] + 2 * d[o + size * 4 + 1] + d[o + size * 4 + 2] - (d[o - size * 4] + 2 * d[o - size * 4 + 1] + d[o - size * 4 + 2]);
-        s += gx * gx + gy * gy;
-        m += l;
-      }
-    }
-    const score = s / Math.max(1, m * m);
-    if (score > bestScore) {
-      bestScore = score;
-      best = i;
-    }
-  });
-  return best;
-}
 
 // Click to focus on the clicked spot. With a small aperture everything is
 // already sharp, so a click also opens up to f/2.8 to make the change visible.
 async function focusAt(event) {
-  if (state.stack) {
-    const rect = canvas.getBoundingClientRect();
-    const best = sharpestFrame(state.frames, ((event.clientX - rect.left) / rect.width) * canvas.width, ((event.clientY - rect.top) / rect.height) * canvas.height);
-    if (best >= 0) {
-      setPlaying(false);
-      state.index = best;
-      showFrame(best);
-    }
-    return;
-  }
   const [x, y] = viewPoint(event);
   const rect = canvas.getBoundingClientRect();
   state.focusPoint = {
@@ -918,7 +874,7 @@ canvas.addEventListener('pointerdown', (event) => {
     startPan(event);
     return;
   }
-  if (state.mode !== 'camera' || state.stack || !state.info.hasRaw) return;
+  if (state.mode !== 'camera' || !canDrag()) return;
   // Drag to turn the viewpoint, like grabbing the scene: dragging across half
   // the picture moves through the whole aperture.
   canvas.setPointerCapture(event.pointerId);
@@ -955,7 +911,7 @@ canvas.addEventListener('pointerdown', (event) => {
 });
 
 canvas.addEventListener('dblclick', () => {
-  if (state.mode !== 'camera' || state.stack || !state.info) return;
+  if (state.mode !== 'camera' || !canDrag()) return;
   state.camera.u = 0;
   state.camera.v = 0;
   cameraChanged({ final: true });
@@ -1198,7 +1154,7 @@ function animationSettingsChanged() {
   $('anim-viewpoint').hidden = $('anim').value !== 'viewpoint';
   $('anim-focus').hidden = $('anim').value !== 'focus';
   invalidateAnimation();
-  if (state.showingFrames && !state.stack) {
+  if (state.showingFrames) {
     backToCamera();
     renderCamera();
   }
@@ -1236,7 +1192,7 @@ async function applySettings() {
   $('mv-blend').disabled = !settings.mvDenoise.on;
   $('fringe-radius-label').textContent = `${settings.defringe.radius} px`;
   showFringeHues();
-  if (!state.info || !state.info.hasRaw) return;
+  if (!canRender()) return;
   const info = await engine.request('settings', { settings });
   if (info) state.info = { ...state.info, ...info };
   state.still = null;

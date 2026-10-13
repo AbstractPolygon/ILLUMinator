@@ -14,6 +14,8 @@ import { defringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN } from './core/color.js';
 import { makeDetail, applyDetail } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
+import { ProcessedPicture, decodeDepth } from './core/processed.js';
+import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -22,6 +24,7 @@ const state = {
   sampler: null,
   dev: null,
   settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {}, mvDenoise: { on: false, blend: 1 } },
+  pp: null, // ProcessedPicture for .lfp files without raw data
   look: null,
   detail: null, // Details panel filters (core/detail.js)
   baseExposure: 1,
@@ -88,6 +91,10 @@ function asShotKelvin() {
 
 function updateColor() {
   const { lf } = state;
+  if (state.pp) {
+    updateProcessedColor();
+    return;
+  }
   const center = render(0, 0);
   state.centerMeans = channelMeans(center);
   const s = state.settings;
@@ -184,11 +191,28 @@ function summary() {
     hasRaw: !!(lf && lf.raw),
     metadata: lf.metadata,
     privateMetadata: lf.privateMetadata,
-    stacks: lf.stacks.map((s) => ({
-      kind: s.kind,
-      images: s.images.map(({ lambda, coord, mime, bytes, width, height }) => ({ lambda, coord, mime, bytes, width, height })),
-    })),
+    stacks: lf.stacks.map((s) => ({ kind: s.kind, source: s.source, count: s.images.length })),
   };
+  if (state.pp) {
+    const pp = state.pp;
+    let cam = null;
+    try {
+      const c = lf.metadata ? cameraInfo(lf.metadata) : null;
+      if (c) cam = { model: c.model, make: c.make, capture: c.capture };
+    } catch {
+      // Not every processed file keeps the camera metadata.
+    }
+    return {
+      ...base,
+      cam,
+      processed: { kind: pp.kind, source: pp.source, count: pp.images.length, hasDepth: pp.hasDepth, canDrag: pp.canDrag },
+      width: pp.width,
+      height: pp.height,
+      radius: pp.radius,
+      settings: state.settings,
+      renderer: 'CPU',
+    };
+  }
   if (!base.hasRaw) return base;
   const { cam } = lf;
   return {
@@ -219,7 +243,13 @@ async function open({ id, bytes, synthetic }) {
     onProgress('Generating sample', 0);
     data = await makeSyntheticLfr(synthetic);
   }
+  state.pp = null;
   state.lf = await decodeLightField(data, { onProgress });
+  if (!state.lf.raw && state.lf.stacks.length) {
+    onProgress('Decoding images', 0.5);
+    state.pp = await buildProcessed(state.lf);
+    updateColor();
+  }
   if (state.lf.raw) {
     state.dev = makeDevelopParams(state.lf.cam);
     if (state.gpu === null && state.settings.gpu !== false) state.gpu = GpuRenderer.create(state.lf.cam) || false;
@@ -232,6 +262,7 @@ async function open({ id, bytes, synthetic }) {
 // Viewpoint animation along `path`; with an open aperture each frame is
 // refocused at `alpha` through an aperture around the path point.
 async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }) {
+  if (state.pp) return processedFrames({ id, job, kind: 'frames', list: path.map(({ u, v }) => ({ u, v, alpha, aperture, dof, bokeh })) });
   requireRaw();
   state.jobs.frames = job;
   if (aperture > 0 && !(await ensureRefocusViews(id))) return { cancelled: true };
@@ -336,6 +367,7 @@ async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}
 }
 
 async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }) {
+  if (state.pp) return processedFrames({ id, job, kind: 'refocus', list: alphas.map((alpha) => ({ u, v, alpha, aperture, dof, bokeh })) });
   requireRaw();
   state.jobs.refocus = job;
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
@@ -395,6 +427,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // One picture for the interactive camera: a single view when the aperture
 // is closed, otherwise refocused at `alpha` through an aperture around (u, v).
 async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
+  if (state.pp) return processedView({ id, u, v, alpha, aperture, dof, bokeh });
   requireRaw();
   if (state.gpu) {
     let tex;
@@ -423,6 +456,10 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
 async function settings({ settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   Object.assign(state.settings, s);
+  if (state.pp) {
+    updateColor();
+    return summary();
+  }
   if (state.lf && state.lf.raw) {
     if (detailChanged) rebuildSampler();
     else updateColor();
@@ -505,10 +542,23 @@ async function ensureDepth(id) {
 }
 
 // Color-coded depth map: near is warm, far is cool.
-async function depthMap({ id }) {
+// Depth in camera focus units for the depth view and spread overlay:
+// measured for raw photos, from the file for processed ones.
+async function depthSource(id) {
+  if (state.pp) {
+    if (!state.pp.hasDepth) throw new Error('This file has no depth map');
+    if (!state.pp.alpha) state.pp.alpha = state.pp.alphaMap();
+    return { alpha: state.pp.alpha, w: state.pp.width, h: state.pp.height };
+  }
   requireRaw();
-  if (!(await ensureDepth(id))) return { cancelled: true };
-  const { alpha } = state.depth;
+  if (!(await ensureDepth(id))) return null;
+  return { alpha: state.depth.alpha, w: state.sampler.outW, h: state.sampler.outH };
+}
+
+async function depthMap({ id }) {
+  const src = await depthSource(id);
+  if (!src) return { cancelled: true };
+  const { alpha } = src;
   const sorted = Float32Array.from(alpha).sort();
   const lo = sorted[Math.floor(sorted.length * 0.02)];
   const hi = sorted[Math.floor(sorted.length * 0.98)];
@@ -521,17 +571,17 @@ async function depthMap({ id }) {
     pixels[4 * i + 2] = Math.round(255 * Math.min(1, 1.6 * t));
     pixels[4 * i + 3] = 255;
   }
-  post({ id, type: 'result', width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer, near: lo, far: hi }, [pixels.buffer]);
+  post({ id, type: 'result', width: src.w, height: src.h, pixels: pixels.buffer, near: lo, far: hi }, [pixels.buffer]);
   return undefined;
 }
 
 // Show spread overlay: pixels outside the sharp depth range around the
 // focus (with spread and tilt) in blue when nearer, orange when farther.
 async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0.5, 0.5] }) {
-  requireRaw();
-  if (!(await ensureDepth(id))) return { cancelled: true };
-  const { outW: w, outH: h } = state.sampler;
-  const depth = state.depth.alpha;
+  const src = await depthSource(id);
+  if (!src) return { cancelled: true };
+  const { w, h } = src;
+  const depth = src.alpha;
   const pixels = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) {
     const rowFocus = alpha + tilt[1] * ((y + 0.5) / h - point[1]);
@@ -563,6 +613,7 @@ async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0
 // is shifted back by the parallax of the current viewpoint, since the views
 // are centered.
 async function focusAt({ id, x, y, u = 0, v = 0 }) {
+  if (state.pp) return { alpha: state.pp.focusAt(x, y), confidence: 1 };
   requireRaw();
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
@@ -588,12 +639,107 @@ async function focusAt({ id, x, y, u = 0, v = 0 }) {
 // after a photo opens, so the first click or aperture change is quick. The
 // build yields between views, so other requests are served meanwhile.
 async function prepare({ id }) {
+  if (state.pp) return { done: true };
   if (!state.lf || !state.lf.raw) return { done: false };
   return { done: await ensureRefocusViews(id) };
 }
 
 async function readSection({ ref }) {
   return state.lf ? state.lf.readSection(ref) : null;
+}
+
+// ---------------------------------------------------------------- processed .lfp files
+
+// RGBA pixels of a JPEG or PNG, optionally scaled to w x h.
+async function decodeImage(bytes, mime, w, h) {
+  const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
+  const width = w || bitmap.width;
+  const height = h || bitmap.height;
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  return { width, height, data: ctx.getImageData(0, 0, width, height).data };
+}
+
+async function loadDepth(desc) {
+  if (!desc || !desc.bytes) return null;
+  const image = desc.mime ? await decodeImage(desc.bytes, desc.mime) : null;
+  return decodeDepth({ ...desc, width: desc.width || (image && image.width), height: desc.height || (image && image.height) }, image);
+}
+
+// Picks the most capable content of the file: images with a depth map
+// first (viewpoint and focus both work), then perspective, then focus
+// stacks, then a single image.
+async function buildProcessed(lf) {
+  const rank = (s) => {
+    const depth = !!(s.depth || lf.frameDepth);
+    if (s.block) return -1; // H.264 blocks are not decoded yet
+    if ((s.kind === 'warp' || s.kind === 'single') && depth) return 5;
+    if (s.kind === 'perspective') return 4;
+    if (s.kind === 'focus') return 3;
+    return 1;
+  };
+  const stacks = [...lf.stacks].sort((a, b) => rank(b) - rank(a));
+  const stack = stacks[0];
+  if (!stack || rank(stack) < 0) {
+    throw new Error('This .lfp file stores its pictures as H.264 video, which Illuminator cannot show yet.');
+  }
+  const first = await decodeImage(stack.images[0].bytes, stack.images[0].mime);
+  const images = [];
+  for (const img of stack.images) {
+    const px = img === stack.images[0] ? first : await decodeImage(img.bytes, img.mime, first.width, first.height);
+    images.push({ ...px, lambda: img.lambda, u: img.coord ? img.coord.x : 0, v: img.coord ? img.coord.y : 0 });
+  }
+  const depth = await loadDepth(stack.depth || lf.frameDepth);
+  return new ProcessedPicture({ kind: stack.kind, source: stack.source, images, depth, pitchRatio: stack.pitchRatio });
+}
+
+// Processed images are already developed (sRGB): only the color sliders
+// apply, with white balance relative to how the picture was rendered.
+function updateProcessedColor() {
+  const s = state.settings;
+  const pp = state.pp;
+  const center = pp.linear(pp.images[0]);
+  state.centerMeans = channelMeans(center);
+  const asShot = asShotKelvin();
+  const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
+  const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false });
+  state.matrix = sat.map((v, i) => v * auto[i % 3] * manual[i % 3]);
+  state.baseExposure = 1;
+  state.look = makeLook(s);
+  state.detail = makeDetail(s);
+}
+
+// Camera parameters -> blur for the processed picture: 1 is the camera's
+// own f/2 blur (aperture 1), synthetic depth of field adds to it.
+function processedBlur({ aperture = 0, dof = 0 }) {
+  const r = state.pp.radius || 0.5;
+  return aperture + (dof * 14) / Math.max(1e-6, r);
+}
+
+function processedPixels(params) {
+  const pp = state.pp;
+  const rgb = pp.render({ ...params, blur: processedBlur(params) });
+  return toPixels(rgb, pp.width, pp.height);
+}
+
+async function processedView({ id, ...params }) {
+  const pixels = processedPixels(params);
+  post({ id, type: 'result', width: state.pp.width, height: state.pp.height, pixels: pixels.buffer }, [pixels.buffer]);
+  return undefined;
+}
+
+async function processedFrames({ id, job, list, kind }) {
+  state.jobs[kind] = job;
+  for (let i = 0; i < list.length; i++) {
+    if (state.jobs[kind] !== job) return { cancelled: true };
+    const pixels = processedPixels(list[i]);
+    post({ id, type: 'frame', index: i, width: state.pp.width, height: state.pp.height, pixels: pixels.buffer }, [pixels.buffer]);
+    await tick();
+  }
+  return { done: true };
 }
 
 const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
