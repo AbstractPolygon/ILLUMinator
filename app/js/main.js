@@ -1755,7 +1755,8 @@ function aspectRatio() {
   const fw = g ? g.frameWidth : canvas.width;
   const fh = g ? g.frameHeight : canvas.height;
   if (v === 'original') return fw / fh;
-  // Portrait frames take the portrait form of the ratio.
+  // Wide ratios on a portrait frame (and tall ones on a landscape frame)
+  // turn with it: 3 : 2 on a portrait picture is 2 : 3.
   return fh > fw ? 1 / +v : +v;
 }
 
