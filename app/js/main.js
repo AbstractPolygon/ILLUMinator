@@ -2660,11 +2660,13 @@ function minTimelineHeight() {
     if (!last) return 0;
     return last.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop;
   };
-  if (!$('tl-grid').hidden) tlContent.keys = Math.ceil(contentHeight($('tl-grid')));
-  if (!$('tl-curves').hidden) tlContent.channels = Math.ceil(contentHeight($('tl-channels')));
+  // Only the view on show counts (Camera may be collapsed in it).
+  const content = tlCurves.on ? Math.ceil(contentHeight($('tl-channels'))) : Math.ceil(contentHeight($('tl-grid')));
+  if (tlCurves.on) tlContent.channels = content;
+  else tlContent.keys = content;
   const scroll = $('tl-scroll');
   const extra = scroll.hidden ? 0 : scroll.offsetHeight + 4;
-  return Math.max(tlContent.keys, tlContent.channels, 100) + extra;
+  return Math.max(content, 40) + extra;
 }
 
 // The time under the pointer; `r` is the track's (or ruler's) box, taken
