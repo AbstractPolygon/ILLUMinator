@@ -709,7 +709,9 @@ async function whiteBalanceAt({ x, y }) {
 
 // Show spread overlay: pixels outside the sharp depth range around the
 // focus (with spread and tilt) in blue when nearer, orange when farther.
-async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0.5, 0.5] }) {
+// Tints what lies outside the sharp range: blue nearer, orange farther,
+// fading in over the Smoothing width the way the blur builds up there.
+async function spreadMask({ id, alpha = 0, spread = 0, smooth = 0, tilt = [0, 0], point = [0.5, 0.5] }) {
   const src = await depthSource(id);
   if (!src) return { cancelled: true };
   const { w, h } = src;
@@ -721,7 +723,8 @@ async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0
       const i = y * w + x;
       // alpha < 0 is nearer than the focus.
       const d = depth[i] - (rowFocus + tilt[0] * ((x + 0.5) / w - point[0]));
-      if (Math.abs(d) <= spread) continue;
+      const excess = Math.abs(d) - spread;
+      if (excess <= 0) continue;
       const o = i * 4;
       if (d < 0) {
         pixels[o] = 40;
@@ -732,7 +735,7 @@ async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0
         pixels[o + 1] = 140;
         pixels[o + 2] = 20;
       }
-      pixels[o + 3] = 255;
+      pixels[o + 3] = smooth > 0 ? Math.round(255 * Math.min(1, excess / smooth)) : 255;
     }
   }
   post({ id, type: 'result', width: w, height: h, pixels: pixels.buffer }, [pixels.buffer]);

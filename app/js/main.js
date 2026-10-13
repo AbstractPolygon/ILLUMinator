@@ -777,7 +777,7 @@ async function updateSpreadOverlay() {
         overlay.height = canvas.height;
         const k = geometry(mask.width, mask.height, geometrySettings());
         const o = overlay.getContext('2d');
-        drawGeometry(o, mask, k, canvas.width / k.width);
+        drawGeometry(o, mask, k, canvas.width / k.width, false);
       } else {
         overlay.width = msg.width;
         overlay.height = msg.height;
@@ -1702,8 +1702,9 @@ function geometryFor(w, h) {
   return isIdentity(s) ? null : geometry(w, h, s);
 }
 
-// Draws `img` through `g` into a 2D context (scaled by `k`).
-function drawGeometry(c2d, img, g, k = 1) {
+// Draws `img` through `g` into a 2D context (scaled by `k`), on black (or,
+// with `fill` false, on transparency: overlays).
+function drawGeometry(c2d, img, g, k = 1, fill = true) {
   let src = img;
   if (img instanceof ImageData) {
     if (srcCanvas.width !== img.width || srcCanvas.height !== img.height) {
@@ -1714,8 +1715,12 @@ function drawGeometry(c2d, img, g, k = 1) {
     src = srcCanvas;
   }
   c2d.setTransform(1, 0, 0, 1, 0, 0);
-  c2d.fillStyle = '#000';
-  c2d.fillRect(0, 0, c2d.canvas.width, c2d.canvas.height);
+  if (fill) {
+    c2d.fillStyle = '#000';
+    c2d.fillRect(0, 0, c2d.canvas.width, c2d.canvas.height);
+  } else {
+    c2d.clearRect(0, 0, c2d.canvas.width, c2d.canvas.height);
+  }
   const m = g.matrix;
   c2d.setTransform(m[0] * k, m[1] * k, m[2] * k, m[3] * k, m[4] * k, m[5] * k);
   c2d.imageSmoothingEnabled = true;
