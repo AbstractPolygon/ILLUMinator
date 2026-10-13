@@ -1,6 +1,7 @@
 # Builds the desktop app installers on GitHub's machines: a Windows
 # installer (.exe), macOS disk images (.dmg, Apple Silicon and Intel) and
-# Linux packages (.AppImage and .deb, x64).
+# Linux packages (.AppImage and .deb, x64), plus the web version as a .zip
+# for any static web server.
 # Run it from the Actions tab (Build desktop apps → Run workflow): the
 # installers are attached to the run, under Artifacts. With "Publish a
 # release" ticked (or when a version tag such as v0.5.2 is pushed) they are
@@ -67,9 +68,30 @@ jobs:
             dist/*.deb
           if-no-files-found: error
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Build
+        run: |
+          name="ILLUMinator-$(node -p "require('./package.json').version")-web"
+          npm run build:web -- --out "dist/$name"
+          cd dist && zip -qr "$name.zip" "$name"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ILLUMinator-web
+          path: dist/*.zip
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release
-    needs: build
+    needs: [build, web]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,9 +115,17 @@ jobs:
           - **Windows:** \`ILLUMinator-${version}-win-x64.exe\`
           - **macOS:** \`ILLUMinator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`ILLUMinator-${version}-mac-x64.dmg\` (Intel)
           - **Linux:** \`ILLUMinator-${version}-linux-amd64.deb\` (Debian, Ubuntu) or \`ILLUMinator-${version}-linux-x86_64.AppImage\` (other distributions)
+          - **Web:** \`ILLUMinator-${version}-web.zip\`, to unzip onto any static web server
 
           The installers are not code signed. On Windows, choose *More info → Run anyway* if SmartScreen warns. On macOS, right-click the app and choose *Open* the first time. On Linux, make the AppImage executable (\`chmod +x\`) before running it.
           NOTES
-          gh release create "$tag" dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb --target "$GITHUB_SHA" \
-            --repo "$GITHUB_REPOSITORY" --title "ILLUMinator ${version}" \
-            --notes-file notes.md --generate-notes
+          files=(dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb dist/*.zip)
+          # Run again for a version already released: replace its files and notes.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          else
+            gh release create "$tag" "${files[@]}" --target "$GITHUB_SHA" \
+              --repo "$GITHUB_REPOSITORY" --title "ILLUMinator ${version}" \
+              --notes-file notes.md --generate-notes
+          fi
