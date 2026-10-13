@@ -109,7 +109,7 @@ function blur(src, w, h, r, shape) {
 
 // Clipped highlights hold far more light than the picture can store; give
 // them back some of it before blurring so they spread into bright bokeh
-// balls instead of dull smudges. `amount` 0..1.
+// balls instead of dull smudges. `amount` 0..1 (up to 128x).
 function boostHighlights(rgb, clip, amount) {
   if (!(amount > 0)) return rgb;
   const out = new Float32Array(rgb.length);
@@ -117,7 +117,7 @@ function boostHighlights(rgb, clip, amount) {
   for (let i = 0; i < rgb.length; i += 3) {
     const y = 0.2126 * rgb[i] + 0.7152 * rgb[i + 1] + 0.0722 * rgb[i + 2];
     const t = Math.max(0, Math.min(1, (y - knee) / (clip - knee)));
-    const k = 1 + amount * 12 * t * t;
+    const k = 1 + (2 ** (7 * amount) - 1) * t * t;
     out[i] = rgb[i] * k;
     out[i + 1] = rgb[i + 1] * k;
     out[i + 2] = rgb[i + 2] * k;

@@ -217,7 +217,9 @@ void main() {
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float knee = 0.8 * uClip;
   float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
-  c *= 1.0 + uHighlights * 12.0 * t * t;
+  // Up to 128x at full strength: real highlights (the sun, lamps) are far
+  // brighter than the image can store, and their bokeh should glow.
+  c *= 1.0 + (exp2(7.0 * uHighlights) - 1.0) * t * t;
   // Signed radius: positive behind the focus plane, negative in front.
   outColor = vec4(c, uStrength * d);
 }`;
@@ -872,7 +874,7 @@ export class GpuRenderer {
     this.bindTex(1, prep);
     gl.uniform1i(P.u.uTaps, taps);
     gl.uniform1f(P.u.uMaxR, Math.max(1, maxR));
-    gl.uniform1f(P.u.uLod, Math.max(0, Math.log2(Math.max(1, maxR) * Math.sqrt(Math.PI / taps)) - 0.5));
+    gl.uniform1f(P.u.uLod, Math.max(0, Math.log2(Math.max(1, maxR) * Math.sqrt(Math.PI / taps)) + 0.5));
     gl.uniform1i(P.u.uShape, shape === 'hexagon' ? 2 : shape === 'circle' ? 1 : 0);
     this.draw();
     return out;
