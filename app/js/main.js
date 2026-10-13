@@ -734,7 +734,8 @@ function showFNumber() {
 // the focus depth by 1.6 from one edge of the picture to the other. The
 // tilted focus plane turns around the focus point (normalized x, y).
 function focusField() {
-  const tilt = 1.6 * $('tilt').value / 100;
+  // Tilt off: a flat plane of focus, the settings kept for later.
+  const tilt = $('tilt-on').checked ? 1.6 * $('tilt').value / 100 : 0;
   const angle = (+$('tilt-rotation').value * Math.PI) / 180;
   return {
     spread: 1.6 * $('spread').value / 100,
@@ -1205,7 +1206,8 @@ function setMode(mode) {
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
   for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq']) $(id).disabled = !depthTools;
-  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
+  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt-on', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
+  if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = true;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
   for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
@@ -1547,6 +1549,11 @@ for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread
 }
 
 $('spread-show').onchange = updateSpreadOverlay;
+$('tilt-on').onchange = () => {
+  const off = !$('tilt-on').checked;
+  for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = off || $('tilt-on').disabled;
+  cameraChanged({ final: true });
+};
 
 // ---------------------------------------------------------------- settings
 

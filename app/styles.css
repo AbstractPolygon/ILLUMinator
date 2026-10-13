@@ -324,6 +324,7 @@ input[type=range]:focus-visible::-moz-range-thumb { background: var(--text); }
 input[type=range]:disabled { cursor: default; }
 .color-panel label:has(input[type=range]:disabled),
 .details-panel label:has(input[type=range]:disabled),
+[data-panel=camera] label:has(input[type=range]:disabled),
 #fringe-controls:not(:disabled) label:has(input[type=range]:disabled) { opacity: 0.45; }
 input[type=range]:disabled::-webkit-slider-thumb { background: var(--muted); }
 input[type=range]:disabled::-moz-range-thumb { background: var(--muted); }
@@ -608,3 +609,6 @@ label.lut-amount { margin-top: 14px; }
 
 /* Group headings look the same in the Curves channel list as in the tracks. */
 .tl-channels .tl-label.tl-group { flex: none; line-height: normal; }
+
+/* An on/off checkbox above the slider it controls. */
+[data-panel=camera] label.check:has(#pivot-on, #tilt-on) { margin-bottom: 10px; }
