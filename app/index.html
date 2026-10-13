@@ -27,6 +27,7 @@
     <section class="stage">
       <div id="drop-zone" class="viewer">
         <canvas id="view"></canvas>
+        <canvas id="spread-overlay" hidden></canvas>
         <div id="placeholder" class="placeholder">
           <p>Drop a Lytro ILLUM <code>.LFR</code> or first generation <code>.LFP</code> file here.</p>
         </div>
@@ -67,7 +68,7 @@
       </details>
 
       <details class="panel color-panel">
-        <summary><h2>Color</h2></summary>
+        <summary><h2>Process</h2></summary>
         <details class="subpanel">
           <summary><h3>White Balance</h3></summary>
           <label class="check"><input id="awb" type="checkbox"> Auto</label>
@@ -100,7 +101,7 @@
           </label>
         </details>
         <details class="subpanel">
-          <summary><h3>Saturation</h3></summary>
+          <summary><h3>Color</h3></summary>
           <label>Saturation <output for="saturation" data-for="saturation">0</output>
             <input id="saturation" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
@@ -135,19 +136,21 @@
           <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
             <input id="fstop" type="range" min="0" max="11" step="1" value="0">
           </label>
-          <label>Depth <output data-for="focus" for="focus">0.00</output>
-            <input id="focus" type="range" min="-1.6" max="1.6" step="0.02" value="0" data-default="0">
+          <label>Depth <output data-for="dof-depth" for="dof-depth">0</output>
+            <input id="dof-depth" type="range" min="-100" max="100" step="1" value="0" data-default="0">
           </label>
+          <input id="focus" type="hidden" value="0">
           <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
           <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
         </details>
         <details class="subpanel">
           <summary><h3>Focus Spread</h3></summary>
           <label>Focus Point <output id="focus-point">Center</output></label>
-          <p class="hint">Click the picture to set the focus point.</p>
           <label>Spread <output data-for="spread" for="spread">0</output>
             <input id="spread" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
+          <label class="check"><input id="spread-show" type="checkbox"> Show spread</label>
+          <p id="spread-legend" class="hint" hidden>Blue is nearer and orange farther than the sharp range.</p>
         </details>
         <details class="subpanel">
           <summary><h3>Tilt</h3></summary>
@@ -166,9 +169,6 @@
               <option value="circle">Circle</option>
               <option value="hexagon">Hexagon</option>
             </select>
-          </label>
-          <label>Blur strength <output id="blur-label" for="blur">1×</output>
-            <input id="blur" type="range" min="1" max="8" step="0.5" value="1">
           </label>
           <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
         </details>

@@ -118,6 +118,7 @@ function resetView() {
   state.camera = { u: 0, v: 0 };
   state.focusPoint = { x: 0.5, y: 0.5 };
   showFocusPoint();
+  $('spread-overlay').hidden = true;
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
 }
@@ -243,9 +244,10 @@ function apertureFor(n) {
   const native = (state.info && state.info.cam && state.info.cam.capture && state.info.cam.capture.fNumber) || 2;
   const ratio = native / n;
   const radius = state.info ? state.info.radius : 4.5;
-  // A shaped bokeh, focus spread and tilt are drawn from the depth map at
-  // every aperture, from the sharp single view.
-  if ($('bokeh').value !== 'natural' || focusField().spread > 0 || focusField().tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
+  // A shaped bokeh, a changed depth of field, focus spread and tilt are
+  // drawn from the depth map at every aperture, from the sharp single view.
+  const field = focusField();
+  if ($('bokeh').value !== 'natural' || +$('dof-depth').value !== 0 || field.spread > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
   // About one view's worth of the aperture: render that single view (fast).
   if (ratio < 0.15) return { aperture: 0, dof: 0 };
   if (ratio <= 1) return { aperture: ratio, dof: 0 };
@@ -276,6 +278,46 @@ function showFocusPoint() {
   $('focus-point').textContent = x === 0.5 && y === 0.5 ? 'Center' : `${Math.round(x * 100)}%, ${Math.round(y * 100)}%`;
 }
 
+// Show spread: tints what lies outside the sharp depth range, blue where
+// nearer and orange where farther. Drawn on its own canvas over the picture
+// (the histogram reads the picture). Requests are coalesced like the view.
+const spreadView = { busy: false, pending: false };
+async function updateSpreadOverlay() {
+  const overlay = $('spread-overlay');
+  const on = $('spread-show').checked && state.info && state.info.hasRaw && state.mode === 'camera' && !state.depthShown;
+  overlay.hidden = !on;
+  $('spread-legend').hidden = !$('spread-show').checked;
+  if (!on) return;
+  if (spreadView.busy) {
+    spreadView.pending = true;
+    return;
+  }
+  spreadView.busy = true;
+  try {
+    const msg = await engine.request('spreadMask', { alpha: +$('focus').value, ...focusField() }, { onProgress: showProgress });
+    hideProgress();
+    if (msg && msg.pixels) {
+      overlay.width = msg.width;
+      overlay.height = msg.height;
+      overlay.getContext('2d').putImageData(toImageData(msg), 0, 0);
+    }
+  } catch (err) {
+    showError(err);
+  } finally {
+    spreadView.busy = false;
+    if (spreadView.pending) {
+      spreadView.pending = false;
+      updateSpreadOverlay();
+    }
+  }
+}
+
+// Depth slider: the depth of field. Lower is shallower (things away from
+// the focus blur faster), higher is deeper; each 50 steps is 4x the blur.
+function depthOfFieldScale() {
+  return 4 ** (-$('dof-depth').value / 50);
+}
+
 // Camera settings shared by the live view, animations and full resolution.
 // Blur strength multiplies the simulated blur: a light field camera's own
 // aperture is small, so true-to-the-optics blur is often subtle.
@@ -286,7 +328,7 @@ function cameraParams() {
     v: state.camera.v,
     alpha: +$('focus').value,
     aperture: lens.aperture,
-    dof: lens.dof * +$('blur').value,
+    dof: lens.dof * depthOfFieldScale(),
     // The synthetic blur's options: bokeh shape and brightness, and the
     // focus field (spread and tilt).
     bokeh: { shape: $('bokeh').value === 'natural' ? 'smooth' : $('bokeh').value, highlights: +$('highlights').value, ...focusField() },
@@ -560,6 +602,7 @@ function setDepthShown(on, { restore = true } = {}) {
   }
   if (on === state.depthShown) return;
   state.depthShown = on;
+  updateSpreadOverlay();
   $('depth-btn').checked = on;
   $('depth-legend').hidden = !on;
   if (on) {
@@ -607,12 +650,13 @@ async function renderLenslets() {
 
 function setMode(mode) {
   state.mode = mode;
+  updateSpreadOverlay();
   for (const b of document.querySelectorAll('#modes button')) b.classList.toggle('active', b.dataset.mode === mode);
   for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== mode;
   const raw = !!(state.info && state.info.hasRaw);
   for (const b of document.querySelectorAll('#modes button')) b.disabled = !state.info || (!raw && b.dataset.mode !== 'camera');
   const camera = mode === 'camera';
-  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'blur', 'highlights', 'spread', 'tilt', 'tilt-rotation']) $(id).disabled = !raw || !camera;
+  for (const id of ['fullres-btn', 'depth-btn', 'focus', 'fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation', 'spread-show']) $(id).disabled = !raw || !camera;
   for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -708,6 +752,8 @@ function layoutCanvas() {
   canvas.style.top = `${viewer.clientHeight / 2 - view.cy * h}px`;
   // Show real pixels when inspecting detail.
   canvas.style.imageRendering = scale >= 2 ? 'pixelated' : 'auto';
+  const overlay = $('spread-overlay');
+  for (const k of ['width', 'height', 'left', 'top']) overlay.style[k] = canvas.style[k];
   canvas.classList.toggle('pannable', view.k > 1 && state.mode !== 'camera');
   $('zoom-label').textContent = view.k === 1 ? 'Fit' : `${Math.round(scale * 100)}%`;
   $('zoom-out').disabled = view.k <= 1;
@@ -918,6 +964,7 @@ canvas.addEventListener('dblclick', () => {
 // frames. `final` is false while a slider is being dragged.
 function cameraChanged({ final }) {
   invalidateAnimation();
+  updateSpreadOverlay();
   if (state.fullRes) {
     if (final) renderStill();
   } else if (!state.depthShown) {
@@ -926,15 +973,16 @@ function cameraChanged({ final }) {
   }
 }
 
-for (const id of ['focus', 'fstop', 'bokeh', 'blur', 'highlights', 'spread', 'tilt', 'tilt-rotation']) {
+for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'tilt', 'tilt-rotation']) {
   $(id).oninput = () => {
     showFNumber();
     showSliderValue($(id));
-    $('blur-label').textContent = `${$('blur').value}×`;
     cameraChanged({ final: false });
   };
   $(id).onchange = () => cameraChanged({ final: true });
 }
+
+$('spread-show').onchange = updateSpreadOverlay;
 
 // ---------------------------------------------------------------- export
 

@@ -502,6 +502,38 @@ async function depthMap({ id }) {
   return undefined;
 }
 
+// Show spread overlay: pixels outside the sharp depth range around the
+// focus (with spread and tilt) in blue when nearer, orange when farther.
+async function spreadMask({ id, alpha = 0, spread = 0, tilt = [0, 0], point = [0.5, 0.5] }) {
+  requireRaw();
+  if (!(await ensureDepth(id))) return { cancelled: true };
+  const { outW: w, outH: h } = state.sampler;
+  const depth = state.depth.alpha;
+  const pixels = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const rowFocus = alpha + tilt[1] * ((y + 0.5) / h - point[1]);
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      // alpha < 0 is nearer than the focus.
+      const d = depth[i] - (rowFocus + tilt[0] * ((x + 0.5) / w - point[0]));
+      if (Math.abs(d) <= spread) continue;
+      const o = i * 4;
+      if (d < 0) {
+        pixels[o] = 40;
+        pixels[o + 1] = 120;
+        pixels[o + 2] = 255;
+      } else {
+        pixels[o] = 255;
+        pixels[o + 1] = 140;
+        pixels[o + 2] = 20;
+      }
+      pixels[o + 3] = 255;
+    }
+  }
+  post({ id, type: 'result', width: w, height: h, pixels: pixels.buffer }, [pixels.buffer]);
+  return undefined;
+}
+
 // Focus value (alpha) that makes the picture sharp at output pixel (x, y)
 // of the camera view. Measured at the point itself; where the spot has no
 // texture to judge by, the (filled-in) depth map is used instead. The point
@@ -541,7 +573,7 @@ async function readSection({ ref }) {
   return state.lf ? state.lf.readSection(ref) : null;
 }
 
-const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {
