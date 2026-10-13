@@ -2656,20 +2656,23 @@ $('tl-curve-canvas').addEventListener('pointerdown', (e) => {
 function showAnimationLength() {
   const kind = $('anim').value;
   $('anim-length-row').hidden = kind === 'focus';
-  $('anim-length').value = kind === 'keyframes' ? anim.length : +(+$('frames').value / KEY_FPS).toFixed(2);
+  $('anim-length').value = kind === 'keyframes' ? frameCount(anim, KEY_FPS) : +$('frames').value;
+  $('anim-length').max = String(Math.round(120 * KEY_FPS) + 1);
 }
 
+// Length in frames (as the play bar counts them).
 $('anim-length').onchange = () => {
-  const len = Math.min(120, Math.max(0.5, +$('anim-length').value || 4));
+  const frames = Math.min(Math.round(120 * KEY_FPS) + 1, Math.max(2, Math.round(+$('anim-length').value) || 2));
   if ($('anim').value === 'keyframes') {
-    anim.length = len;
+    anim.length = (frames - 1) / KEY_FPS;
     saveAnimation();
   } else {
-    $('frames').value = Math.max(2, Math.round(len * KEY_FPS));
+    $('frames').value = frames;
     scheduleSave();
     animationSettingsChanged();
   }
   showAnimationLength();
+  updateFrameLabel();
 };
 
 for (const id of ['frame-zoom', 'frame-pan-x', 'frame-pan-y']) {
