@@ -2580,7 +2580,7 @@ function renderTimeline() {
   rulerHead.hidden = !inView(head);
   ruler.append(rulerHead);
   ruler.onpointerdown = (e) => seekTimeline(e, ruler);
-  rows.push(Object.assign(document.createElement('div'), { className: 'tl-label' }), ruler);
+  rows.push(Object.assign(document.createElement('div'), { className: 'tl-label tl-ruler-label' }), ruler);
   for (const grp of trackGroups()) {
     const heading = groupRow(grp, { pos, inView, head });
     for (const el of heading) el.dataset.group = grp.id;

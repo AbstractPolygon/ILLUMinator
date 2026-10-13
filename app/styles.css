@@ -579,3 +579,6 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 /* A disabled mask shows only its Enabled checkbox and Delete button. */
 #mask-editor.off > :not(.check-row):not(.mask-delete) { display: none; }
 #mask-editor.off .check-row > label:not(:has(#mask-on)) { display: none; }
+
+/* The time ruler stays in view while the tracks scroll. */
+.tl-ruler, .tl-ruler-label { position: sticky; top: 0; z-index: 4; background: var(--panel); }
