@@ -11,6 +11,7 @@ import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe } from './core/defringe.js';
+import { makeLook, whiteBalanceGains } from './core/color.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -18,7 +19,8 @@ const state = {
   lf: null,
   sampler: null,
   dev: null,
-  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null },
+  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { temperature: 0, tint: 0 }, tone: {}, color: {} },
+  look: null,
   baseExposure: 1,
   matrix: null,
   wbGains: [1, 1, 1],
@@ -81,7 +83,10 @@ function updateColor() {
   const center = render(0, 0);
   state.centerMeans = channelMeans(center);
   const s = state.settings;
-  state.wbGains = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
+  const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
+  const manual = whiteBalanceGains(s.wb.temperature, s.wb.tint);
+  state.wbGains = auto.map((g, i) => g * manual[i]);
+  state.look = makeLook(s);
   const ccm = colorMatrix(lf.cam, s);
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
@@ -94,7 +99,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 function toPixels(rgb, w, h) {
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
-  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure);
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
   const srgb = new Float32Array(rgb.length);
@@ -106,7 +111,7 @@ function toPixels(rgb, w, h) {
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure);
+  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, state.look);
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -128,6 +133,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     matrix: state.matrix,
     exposure: state.baseExposure * Math.pow(2, state.settings.ev),
     fringe: state.settings.defringe,
+    look: state.look,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }

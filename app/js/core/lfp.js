@@ -8,8 +8,8 @@
 //    n bytes of data, then zero padding up to a 16 byte boundary
 //
 // The table of contents (LFM) is JSON. It points at content sections by their
-// sha1 reference. First generation cameras use the "picture.frameArray" layout,
-// the ILLUM uses "frames" and puts the LFM at the end of the file.
+// sha1 reference. Version 1 files use the "picture.frameArray" layout,
+// version 2 files (ILLUM) use "frames" and "views" and put the LFM at the end.
 
 const FILE_MAGIC = [0x89, 0x4c, 0x46, 0x50, 0x0d, 0x0a, 0x1a, 0x0a];
 const SECTION_TAIL = [0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00];
@@ -157,46 +157,145 @@ export function findThumbnailRefs(toc) {
   }));
 }
 
-// Processed LFP files (exported from Lytro Desktop or the web viewer) carry
-// pre-rendered JPEG stacks: refocus stacks with a "lambda" per image and
-// perspective stacks with a coordinate per image. They live in different
-// places depending on the schema version, so walk the whole TOC.
-export function findImageStacks(toc, container) {
-  const stacks = new Map();
-  const thumbs = new Set(findThumbnailRefs(toc).map((t) => t.ref));
-  const walk = (node, kind) => {
-    if (Array.isArray(node)) {
-      node.forEach((n) => walk(n, kind));
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    const k = node.kind || node.type || kind;
-    if (typeof node.imageRef === 'string' && !thumbs.has(node.imageRef) && container.bySha.has(node.imageRef)) {
-      const name = typeof k === 'string' ? k : 'images';
-      if (!stacks.has(name)) stacks.set(name, []);
-      stacks.get(name).push({
-        ref: node.imageRef,
-        lambda: typeof node.lambda === 'number' ? node.lambda : undefined,
-        coord: node.coord && typeof node.coord.x === 'number' ? { x: node.coord.x, y: node.coord.y } : undefined,
-        width: node.width,
-        height: node.height,
-        representation: node.representation,
-      });
-    }
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'imageRef' || key === 'frame' || key === 'thumbnails' || key === 'thumbnailArray') continue;
-      walk(value, k);
-    }
+// --- processed pictures ---
+//
+// Processed LFP files (exported from Lytro Desktop or shared online) carry
+// pre-rendered images instead of, or next to, the raw sensor data:
+//   focus        refocus stack: one image per focus depth (lambda)
+//   perspective  one image per viewpoint (u, v)
+//   warp         all-in-focus image(s) plus a depth map ("edofWarp"); the
+//                player shifts pixels by depth to change viewpoint
+//   single       one picture, sometimes with a depth map
+// Depth maps hold lambda (focus depth) values.
+//
+// Second generation files (ILLUM, picture schema 2.x) list these under
+// views[].accelerations[] with a "kind"; images are perImage[] entries with
+// { imageRef, focus } or { imageRef, perspective: { u, v } }, or a
+// blockOfImagesRef holding all of them as H.264. Frame accelerations can
+// hold an uncropped depth map. First generation files use
+// picture.accelerationArray[] with "type" and vendorContent.imageArray[]
+// entries with { imageRef, lambda } and a float depthLut.
+
+const KINDS = {
+  focusStack: 'focus',
+  edofPerspective: 'perspective',
+  edofWarp: 'warp',
+  edofWarpPreAdjust: 'warp',
+  singleImage: 'single',
+  uncropped: 'single',
+};
+
+function depthDescriptor(d, extra = {}) {
+  if (!d || typeof d.imageRef !== 'string') return null;
+  return {
+    ref: d.imageRef,
+    representation: d.representation || extra.representation || 'packedFloat',
+    width: d.width ?? extra.width,
+    height: d.height ?? extra.height,
+    minLambda: d.minLambda ?? extra.minLambda,
+    maxLambda: d.maxLambda ?? extra.maxLambda,
+    mapToImage: d.mapToImage || extra.mapToImage || null,
   };
-  walk(toc.views || toc.viewArray || [], undefined);
-  walk(toc.accelerations || [], undefined);
-  walk(toc.picture && toc.picture.accelerationArray, undefined);
-  walk(asArray(toc.frames).map((f) => f.accelerations), undefined);
+}
+
+function imageEntry(img) {
+  const p = img.perspective;
+  return {
+    ref: img.imageRef,
+    lambda: typeof img.focus === 'number' ? img.focus : typeof img.lambda === 'number' ? img.lambda : undefined,
+    coord: p && typeof p.u === 'number' ? { x: p.u, y: p.v }
+      : img.coord && typeof img.coord.x === 'number' ? { x: img.coord.x, y: img.coord.y } : undefined,
+  };
+}
+
+function v2Stacks(toc) {
+  const stacks = [];
+  for (const view of asArray(toc.views)) {
+    for (const acc of asArray(view && view.accelerations)) {
+      const kind = acc && KINDS[acc.kind];
+      if (!kind) continue;
+      const stack = {
+        kind,
+        source: acc.kind,
+        width: acc.width,
+        height: acc.height,
+        pitchRatio: acc.pitchRatio || null,
+        representation: acc.representation,
+        images: [],
+        depth: depthDescriptor(acc.depthMap),
+      };
+      if (typeof acc.imageRef === 'string') stack.images.push({ ref: acc.imageRef });
+      const perImage = asArray(acc.perImage).concat(...asArray(acc.perFrame).map((f) => {
+        if (!stack.depth && f.depthMap) stack.depth = depthDescriptor(f.depthMap);
+        if (f.representation) stack.representation = f.representation;
+        return asArray(f.perImage);
+      }));
+      if (typeof acc.blockOfImagesRef === 'string') {
+        stack.blockRef = acc.blockOfImagesRef;
+        stack.images = perImage.map(imageEntry);
+      } else {
+        for (const img of perImage) if (img && typeof img.imageRef === 'string') stack.images.push(imageEntry(img));
+      }
+      if (stack.images.length) stacks.push(stack);
+    }
+  }
   return stacks;
 }
 
-// Reads the LFP and returns everything the decoder needs. Image data stays
-// unread (lazy) except for small JPEG/PNG stacks which are loaded eagerly.
+// Uncropped depth map stored with the raw frame (second generation).
+export function findFrameDepth(toc) {
+  for (const f of asArray(toc.frames)) {
+    for (const acc of asArray(f && f.accelerations)) {
+      if (acc && acc.kind === 'depthMap') {
+        const d = depthDescriptor(acc.depthMap, acc);
+        if (d) return { ...d, frame: true };
+      }
+    }
+  }
+  return null;
+}
+
+// First generation: walk the acceleration tree for image arrays.
+function v1Stacks(toc, container) {
+  const stacks = new Map();
+  const thumbs = new Set(findThumbnailRefs(toc).map((t) => t.ref));
+  let depth = null;
+  const walk = (node, type) => {
+    if (Array.isArray(node)) {
+      node.forEach((n) => walk(n, type));
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const t = typeof node.type === 'string' ? node.type : type;
+    if (typeof node.imageRef === 'string' && !thumbs.has(node.imageRef) && container.bySha.has(node.imageRef)) {
+      if (!stacks.has(t)) stacks.set(t, []);
+      stacks.get(t).push(imageEntry(node));
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'depthLut' || key === 'depthMap') {
+        depth = depth || depthDescriptor(value, { representation: 'packedFloat' });
+        continue;
+      }
+      if (key === 'imageRef' || key === 'frame' || key === 'thumbnails' || key === 'thumbnailArray' || key === 'confidenceMap') continue;
+      walk(value, t);
+    }
+  };
+  walk(toc.picture && toc.picture.accelerationArray, undefined);
+  walk(toc.accelerations || [], undefined);
+  walk(toc.viewArray || [], undefined);
+  return [...stacks].map(([type, images]) => {
+    const kind = images.some((i) => i.lambda !== undefined) ? 'focus'
+      : images.some((i) => i.coord) ? 'perspective' : 'single';
+    return { kind, source: type || 'images', images, depth: kind === 'focus' || kind === 'single' ? depth : null };
+  });
+}
+
+export function findImageStacks(toc, container) {
+  return Array.isArray(toc.views) ? v2Stacks(toc) : v1Stacks(toc, container);
+}
+
+// Reads the LFP and returns everything the decoder needs. The raw sensor
+// data stays unread (lazy); processed images and depth maps are loaded.
 export async function readLightFieldPicture(reader) {
   const container = await openContainer(reader);
   const { toc, json } = container;
@@ -209,18 +308,32 @@ export async function readLightFieldPicture(reader) {
     privateMetadata = json.get(frame.privateMetadataRef) || frame.privateMetadata || null;
     rawRef = frame.imageRef || null;
   }
+  const compressed = asArray(toc.frames).some((f) => asArray(f && f.accelerations).some((a) => a && a.kind === 'compressed'));
   const thumbnails = findThumbnailRefs(toc);
+  const loadDepth = async (d) => {
+    if (!d) return null;
+    const bytes = await container.readSection(d.ref);
+    return bytes ? { ...d, bytes, mime: sniffMime(bytes) } : null;
+  };
   const stacks = [];
-  for (const [kind, images] of findImageStacks(toc, container)) {
-    const loaded = [];
-    for (const img of images) {
-      const bytes = await container.readSection(img.ref);
-      const mime = bytes && sniffMime(bytes);
-      if (mime) loaded.push({ ...img, mime, bytes });
+  for (const stack of findImageStacks(toc, container)) {
+    const loaded = { ...stack, depth: await loadDepth(stack.depth) };
+    if (stack.blockRef) {
+      loaded.block = await container.readSection(stack.blockRef);
+      if (!loaded.block) continue;
+    } else {
+      loaded.images = [];
+      for (const img of stack.images) {
+        const bytes = await container.readSection(img.ref);
+        const mime = bytes && sniffMime(bytes);
+        if (mime) loaded.images.push({ ...img, mime, bytes });
+      }
+      if (!loaded.images.length) continue;
     }
-    if (loaded.length) stacks.push({ kind, images: loaded });
+    stacks.push(loaded);
   }
-  return { container, toc, frame, metadata, privateMetadata, rawRef, thumbnails, stacks };
+  const frameDepth = await loadDepth(findFrameDepth(toc));
+  return { container, toc, frame, metadata, privateMetadata, rawRef, thumbnails, stacks, frameDepth, compressed };
 }
 
 // Returns { mime, bytes } for the first decodable thumbnail, or null.

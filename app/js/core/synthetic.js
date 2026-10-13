@@ -134,7 +134,7 @@ export async function makeSyntheticLfr(options = {}) {
 
   const pixelPitch = 1.4e-6;
   const metadata = {
-    generator: 'lytro-illuminator synthetic sample',
+    generator: 'illuminator synthetic sample',
     camera: { make: 'Lytro, Inc.', model: 'ILLUM', firmware: 'synthetic' },
     image: {
       width,

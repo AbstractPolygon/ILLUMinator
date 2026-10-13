@@ -1,6 +1,6 @@
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail } from './core/lfp.js';
-import { openFiles, pickCameraFolder, isLightFieldName, download, native } from './platform.js';
+import { openFiles, pickCameraFolder, isLightFieldName, download, native, NativeFile } from './platform.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -954,18 +954,9 @@ async function exportVideo() {
 
 // ---------------------------------------------------------------- camera import
 
-async function importFromCamera() {
-  let result;
-  try {
-    result = await pickCameraFolder();
-  } catch (err) {
-    if (err.name !== 'AbortError') showError(err);
-    return;
-  }
-  const { files, source } = result;
-  $('camera-dialog-source').textContent = files.length
-    ? `${files.length} light field photo(s) found on ${source}.`
-    : `No .LFR files found on ${source}. Pick the camera drive or its DCIM folder.`;
+// Shows the photos found on a camera with thumbnails; `onImport(picked)`
+// runs when the user confirms. thumb(file) -> Promise<{ mime, bytes } | null>.
+function showCameraDialog({ files, thumb, onImport }) {
   const grid = $('camera-grid');
   grid.replaceChildren(...files.map((f, i) => {
     const label = document.createElement('label');
@@ -976,20 +967,96 @@ async function importFromCamera() {
     const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: true, value: i });
     name.append(cb, document.createTextNode(`${f.name} · ${(f.size / 1e6).toFixed(0)} MB`));
     label.append(ph, name);
-    readThumbnail(blobReader(f.file)).then((t) => {
+    thumb(f).then((t) => {
       if (!t) return;
       const img = Object.assign(document.createElement('img'), { src: URL.createObjectURL(new Blob([t.bytes], { type: t.mime })), alt: '' });
       ph.replaceWith(img);
     }).catch(() => {});
     return label;
   }));
-  $('camera-dialog').showModal();
+  $('camera-import').disabled = !files.length;
+  if (!$('camera-dialog').open) $('camera-dialog').showModal();
   $('camera-dialog').onclose = () => {
     if ($('camera-dialog').returnValue !== 'import') return;
-    const picked = [...grid.querySelectorAll('input:checked')].map((cb) => files[+cb.value]);
-    addToLibrary(picked);
-    if (picked.length) openItem(state.library.find((x) => x.name === picked[0].name));
+    onImport([...grid.querySelectorAll('input:checked')].map((cb) => files[+cb.value]));
   };
+}
+
+// Browser: the camera is a removable drive; the user picks it (or DCIM).
+async function importFromCameraFolder() {
+  let result;
+  try {
+    result = await pickCameraFolder();
+  } catch (err) {
+    if (err.name !== 'AbortError') showError(err);
+    return;
+  }
+  const { files, source } = result;
+  $('camera-select-row').hidden = true;
+  $('camera-dest').hidden = true;
+  $('camera-dialog-source').textContent = files.length
+    ? `${files.length} light field photo(s) found on ${source}.`
+    : `No .LFR files found on ${source}. Pick the camera drive or its DCIM folder.`;
+  showCameraDialog({
+    files,
+    thumb: (f) => readThumbnail(blobReader(f.file)),
+    onImport: (picked) => {
+      addToLibrary(picked);
+      if (picked.length) openItem(state.library.find((x) => x.name === picked[0].name));
+    },
+  });
+}
+
+// Desktop app: cameras are detected over USB; photos are copied into the
+// import folder, then opened from there.
+async function importFromConnectedCamera() {
+  const cameras = await native.listCameras();
+  const select = $('camera-select');
+  $('camera-dest').hidden = false;
+  $('camera-dest-path').textContent = await native.importDir();
+  if (!cameras.length) {
+    $('camera-select-row').hidden = true;
+    $('camera-dialog-source').textContent = 'No Lytro camera found. Connect it with its USB cable and switch it on: it appears as a drive with a DCIM folder. ' +
+      '(Cameras with USB debugging enabled are also found if adb is installed.)';
+    showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
+    return;
+  }
+  select.replaceChildren(...cameras.map((c, i) => Object.assign(document.createElement('option'), { value: i, textContent: c.label })));
+  $('camera-select-row').hidden = cameras.length < 2;
+  const show = () => {
+    const cam = cameras[+select.value || 0];
+    $('camera-dialog-source').textContent = `${cam.files.length} light field photo(s) on ${cam.label}.`;
+    showCameraDialog({
+      files: cam.files,
+      thumb: (f) => native.cameraThumbnail(cam.id, f.id),
+      onImport: async (picked) => {
+        if (!picked.length) return;
+        const stop = native.onImportProgress((p) => showProgress(`Importing ${p.file} (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
+        try {
+          const files = await native.importFromCamera(cam.id, picked.map((f) => f.id), $('camera-dest-path').textContent);
+          const entries = files.map((f) => ({ name: f.name, size: f.size, file: new NativeFile(f) }));
+          addToLibrary(entries);
+          if (entries.length) openItem(state.library.find((x) => x.name === entries[0].name));
+        } catch (err) {
+          showError(err);
+        } finally {
+          stop();
+          hideProgress();
+        }
+      },
+    });
+  };
+  select.onchange = show;
+  show();
+}
+
+$('camera-dest-btn').onclick = async () => {
+  const dir = await native.chooseImportDir();
+  if (dir) $('camera-dest-path').textContent = dir;
+};
+
+function importFromCamera() {
+  return native ? importFromConnectedCamera() : importFromCameraFolder();
 }
 
 $('camera-select-all').onclick = () => {
@@ -1059,9 +1126,11 @@ for (const id of ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps']) $
 async function applySettings() {
   const settings = {
     ev: +$('ev').value,
-    saturation: +$('saturation').value,
-    useCcm: $('ccm').checked,
+    saturation: 1 + $('saturation').value / 100,
     autoWb: $('awb').checked,
+    wb: { temperature: $('wb-temperature').value / 100, tint: $('wb-tint').value / 100 },
+    tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
+    color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
     defringe: {
       on: $('fringe-on').checked,
@@ -1088,7 +1157,47 @@ function showFringeHues() {
   for (const key of FRINGES) $(`fringe-${key}-hue-label`).textContent = `${(+$(`fringe-${key}-hue`).value + 360) % 360}°`;
 }
 
-for (const id of ['ev', 'saturation', 'ccm', 'awb', 'detail', 'fringe-on', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+const TONES = ['contrast', 'highlights', 'shadows', 'whites', 'blacks'];
+const HUE_SLIDERS = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'];
+
+// Color sliders update the picture while dragging (one request at a time),
+// show their value and reset to their default on double-click.
+let applying = null;
+let applyAgain = false;
+function applySettingsSoon() {
+  if (applying) {
+    applyAgain = true;
+    return;
+  }
+  applying = applySettings().finally(() => {
+    applying = null;
+    if (applyAgain) {
+      applyAgain = false;
+      applySettingsSoon();
+    }
+  });
+}
+function showSliderValue(input) {
+  const out = document.querySelector(`output[data-for="${input.id}"]`);
+  if (!out) return;
+  const v = +input.value;
+  const sign = v > 0 ? '+' : v < 0 ? '−' : '';
+  out.textContent = input.id === 'ev' ? `${sign}${Math.abs(v).toFixed(2)} EV` : `${sign}${Math.abs(v)}`;
+}
+for (const input of document.querySelectorAll('.color-panel input[type=range]')) {
+  showSliderValue(input);
+  input.addEventListener('input', () => {
+    showSliderValue(input);
+    applySettingsSoon();
+  });
+  input.addEventListener('dblclick', () => {
+    input.value = input.dataset.default;
+    showSliderValue(input);
+    applySettingsSoon();
+  });
+}
+
+for (const id of ['awb', 'detail', 'fringe-on', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 
@@ -1143,7 +1252,18 @@ document.addEventListener('drop', (e) => {
 
 canvas.classList.add('hidden');
 setMode('camera');
-if (native) document.body.classList.add('native');
+
+// Desktop app: show the photos already imported, and announce cameras as
+// they are plugged in.
+if (native) {
+  document.body.classList.add('native');
+  native.listLibrary().then((files) => addToLibrary(files.map((f) => ({ name: f.name, size: f.size, file: new NativeFile(f) })))).catch(() => {});
+  native.onCamerasChanged((cams) => {
+    const count = cams.reduce((n, c) => n + c.files.length, 0);
+    $('camera-status').textContent = cams.length ? `Lytro camera connected · ${count} photo${count === 1 ? '' : 's'}` : '';
+    $('camera-status').classList.toggle('connected', cams.length > 0);
+  });
+}
 
 // Test hook: ?sample opens the synthetic sample on load.
 if (new URLSearchParams(location.search).has('sample')) $('sample-btn').click();

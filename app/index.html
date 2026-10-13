@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lytro Illuminator</title>
+  <title>Illuminator</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="toolbar">
-    <h1>Lytro Illuminator</h1>
+    <h1>Illuminator</h1>
     <button id="open-btn" class="primary">Open…</button>
     <button id="camera-btn">Import from camera…</button>
     <button id="sample-btn">Synthetic sample</button>
@@ -56,12 +56,79 @@
     </section>
 
     <aside class="controls">
-      <details class="panel" open>
+      <details class="panel">
         <summary><h2>Histogram</h2></summary>
         <canvas id="histogram" width="256" height="80" role="img" aria-label="Histogram of the picture"></canvas>
       </details>
 
-      <details class="panel" data-panel="camera" open>
+      <details class="panel">
+        <summary><h2>Info</h2></summary>
+        <dl id="info"></dl>
+      </details>
+
+      <details class="panel color-panel">
+        <summary><h2>Color</h2></summary>
+        <details class="subpanel">
+          <summary><h3>White Balance</h3></summary>
+          <label>Temperature <output for="wb-temperature" data-for="wb-temperature">0</output>
+            <input id="wb-temperature" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Tint <output for="wb-tint" data-for="wb-tint">0</output>
+            <input id="wb-tint" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label class="check"><input id="awb" type="checkbox"> Auto</label>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Tone</h3></summary>
+          <label>Exposure <output for="ev" data-for="ev">0.00 EV</output>
+            <input id="ev" type="range" min="-3" max="3" step="0.05" value="0" data-default="0">
+          </label>
+          <label>Contrast <output for="tone-contrast" data-for="tone-contrast">0</output>
+            <input id="tone-contrast" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Highlights <output for="tone-highlights" data-for="tone-highlights">0</output>
+            <input id="tone-highlights" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Shadows <output for="tone-shadows" data-for="tone-shadows">0</output>
+            <input id="tone-shadows" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Whites <output for="tone-whites" data-for="tone-whites">0</output>
+            <input id="tone-whites" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Blacks <output for="tone-blacks" data-for="tone-blacks">0</output>
+            <input id="tone-blacks" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Saturation</h3></summary>
+          <label>Saturation <output for="saturation" data-for="saturation">0</output>
+            <input id="saturation" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Vibrance <output for="vibrance" data-for="vibrance">0</output>
+            <input id="vibrance" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Red <output for="hue-red" data-for="hue-red">0</output>
+            <input id="hue-red" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Yellow <output for="hue-yellow" data-for="hue-yellow">0</output>
+            <input id="hue-yellow" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Green <output for="hue-green" data-for="hue-green">0</output>
+            <input id="hue-green" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Cyan <output for="hue-cyan" data-for="hue-cyan">0</output>
+            <input id="hue-cyan" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Blue <output for="hue-blue" data-for="hue-blue">0</output>
+            <input id="hue-blue" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label>Magenta <output for="hue-magenta" data-for="hue-magenta">0</output>
+            <input id="hue-magenta" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+        </details>
+      </details>
+
+      <details class="panel" data-panel="camera">
         <summary><h2>Camera</h2></summary>
         <label>Focus <input id="focus" type="range" min="-1.6" max="1.6" step="0.02" value="0"></label>
         <label>Aperture <output id="fstop-label" for="fstop">f/22</output>
@@ -78,11 +145,18 @@
           <input id="blur" type="range" min="1" max="8" step="0.5" value="1">
         </label>
         <label>Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+        <label>Detail
+          <select id="detail">
+            <option value="1" selected>1× (fast)</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
         <label class="check"><input id="depth-btn" type="checkbox"> Show depth</label>
         <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
       </details>
 
-      <details class="panel" id="fullres-panel" open hidden>
+      <details class="panel" id="fullres-panel" hidden>
         <summary><h2>Full resolution</h2></summary>
         <label>Scale
           <select id="still-scale">
@@ -92,21 +166,6 @@
           </select>
         </label>
         <p class="hint">Uses every sensor pixel. Detail improves away from the camera's optical focus depth (focus ≈ 0).</p>
-      </details>
-
-      <details class="panel" open>
-        <summary><h2>Color</h2></summary>
-        <label>Exposure <input id="ev" type="range" min="-3" max="3" step="0.1" value="0"></label>
-        <label>Saturation <input id="saturation" type="range" min="0" max="2" step="0.05" value="1"></label>
-        <label class="check"><input id="ccm" type="checkbox" checked> Camera color matrix</label>
-        <label class="check"><input id="awb" type="checkbox"> Auto white balance</label>
-        <label>Detail
-          <select id="detail">
-            <option value="1" selected>1× (fast)</option>
-            <option value="1.5">1.5×</option>
-            <option value="2">2×</option>
-          </select>
-        </label>
       </details>
 
       <details class="panel">
@@ -136,7 +195,7 @@
         </fieldset>
       </details>
 
-      <details class="panel" data-panel="camera" open>
+      <details class="panel" data-panel="camera">
         <summary><h2>Animation</h2></summary>
         <label>Animate
           <select id="anim">
@@ -164,7 +223,7 @@
         </div>
       </details>
 
-      <details class="panel" data-panel="lenslets" open hidden>
+      <details class="panel" data-panel="lenslets" hidden>
         <summary><h2>Microlens grid</h2></summary>
         <p id="grid-info" class="hint"></p>
         <label>X <input id="lens-x" type="range" min="0" max="1" step="0.001" value="0.5"></label>
@@ -174,11 +233,6 @@
           <button id="grid-meta">Use metadata</button>
         </div>
       </details>
-
-      <details class="panel" open>
-        <summary><h2>Info</h2></summary>
-        <dl id="info"></dl>
-      </details>
     </aside>
   </main>
 
@@ -186,6 +240,11 @@
     <form method="dialog">
       <h2>Import from camera</h2>
       <p id="camera-dialog-source" class="hint"></p>
+      <label id="camera-select-row" hidden>Camera <select id="camera-select"></select></label>
+      <p id="camera-dest" class="row" hidden>
+        <span class="hint">Import to <span id="camera-dest-path"></span></span>
+        <button type="button" id="camera-dest-btn">Change…</button>
+      </p>
       <div id="camera-grid" class="camera-grid"></div>
       <menu>
         <button type="button" id="camera-select-all">Select all</button>

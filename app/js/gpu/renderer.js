@@ -297,6 +297,10 @@ uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
 uniform int uFringeOn;
 uniform int uFringeRadius;
 uniform float uFringeThreshold;
+uniform int uLookOn;
+uniform vec4 uTone;        // contrast, highlights, shadows, whites
+uniform vec2 uTone2;       // blacks, vibrance
+uniform float uHues[6];    // red, yellow, green, cyan, blue, magenta
 out vec4 outColor;
 
 vec3 colorAt(ivec2 q) { return uMatrix * texelFetch(uSrc, q, 0).rgb; }
@@ -311,6 +315,36 @@ float hueOf(vec3 c) {
   else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
   else h = (c.r - c.g) / d + 4.0;
   return mod(h * 60.0 + 360.0, 360.0);
+}
+
+// Same as toneCurve / applyLook in core/color.js.
+float toneCurve(float x) {
+  float black = -0.12 * uTone2.x;
+  float white = 1.0 - 0.15 * uTone.w;
+  x = (x - black) / (white - black);
+  float c = clamp(x, 0.0, 1.0);
+  x += uTone.z * 0.85 * c * (1.0 - c) * (1.0 - c);
+  x += uTone.y * 0.85 * c * c * (1.0 - c);
+  x += uTone.x * 0.8 * (smoothstep(0.0, 1.0, x) - clamp(x, 0.0, 1.0));
+  return max(x, 0.0);
+}
+
+vec3 applyLook(vec3 c) {
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  if (y > 1e-6) c *= pow(toneCurve(pow(y, 1.0 / 2.2)), 2.2) / y;
+  float mx = max(c.r, max(c.g, c.b));
+  float d = mx - min(c.r, min(c.g, c.b));
+  if (d > 1e-6 && mx > 1e-6) {
+    float h = hueOf(c);
+    float f = 1.0 + uTone2.y * (1.0 - d / mx) * 0.9;
+    for (int i = 0; i < 6; i++) {
+      float dh = abs(mod(h - float(i) * 60.0 + 540.0, 360.0) - 180.0);
+      f += uHues[i] * max(0.0, 1.0 - dh / 60.0);
+    }
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = l + (c - l) * max(f, 0.0);
+  }
+  return c;
 }
 
 float srgb(float v) {
@@ -350,6 +384,7 @@ void main() {
     }
   }
   c *= uExposure;
+  if (uLookOn == 1) c = applyLook(c);
   outColor = vec4(srgb(c.r), srgb(c.g), srgb(c.b), 1.0);
 }`;
 
@@ -973,7 +1008,7 @@ export class GpuRenderer {
   // Color matrix, defringing, exposure and sRGB, drawn to the canvas and
   // handed over as an ImageBitmap. fringe: defringe settings
   // { on, radius, threshold, colors: [[amount, hue] x 4] }.
-  present(src, w, h, { matrix, exposure, fringe }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null }) {
     const gl = this.gl;
     const P = this.programs.present;
     this.canvas.width = w;
@@ -991,6 +1026,12 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uFringeRadius, Math.max(1, Math.min(6, Math.round((fringe && fringe.radius) || 2))));
     gl.uniform1f(P.u.uFringeThreshold, (fringe && fringe.threshold) ?? 0.25);
     gl.uniform2fv(P.u.uFringe, Float32Array.from([0, 1, 2, 3].flatMap((i) => (f[i] ? [f[i][0], f[i][1]] : [0, 0]))));
+    gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
+    if (look) {
+      gl.uniform4f(P.u.uTone, look.contrast, look.highlights, look.shadows, look.whites);
+      gl.uniform2f(P.u.uTone2, look.blacks, look.vibrance);
+      gl.uniform1fv(P.u.uHues, Float32Array.from(look.hues));
+    }
     this.draw();
     return this.canvas.transferToImageBitmap();
   }

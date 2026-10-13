@@ -48,13 +48,56 @@ test('processed files expose JPEG refocus stacks with lambdas', async () => {
   const jpegs = [0, 1, 2].map((i) => Uint8Array.from([0xff, 0xd8, 0xff, i]));
   const refs = await Promise.all(jpegs.map(refFor));
   const toc = {
-    views: [{ accelerations: [{ kind: 'focusStack', perImage: refs.map((r, i) => ({ imageRef: r, lambda: i - 1 })) }] }],
+    views: [{ accelerations: [{ kind: 'focusStack', perImage: refs.map((r, i) => ({ imageRef: r, focus: i - 1 })) }] }],
   };
   const { bytes } = await writeContainer([...jpegs.map((data) => ({ type: 'LFC', data })), { type: 'LFM', data: encodeJson(toc) }]);
   const pic = await readLightFieldPicture(bufferReader(bytes));
   assert.equal(pic.stacks.length, 1);
-  assert.equal(pic.stacks[0].kind, 'focusStack');
+  assert.equal(pic.stacks[0].kind, 'focus');
   assert.deepEqual(pic.stacks[0].images.map((i) => i.lambda), [-1, 0, 1]);
+});
+
+test('second generation files expose perspective images and depth maps', async () => {
+  const jpegs = [0, 1].map((i) => Uint8Array.from([0xff, 0xd8, 0xff, 0x10 + i]));
+  const depth = Uint8Array.from([0, 64, 128, 255]);
+  const frameDepth = Uint8Array.from([1, 2, 3, 4, 5, 6]);
+  const refs = await Promise.all([...jpegs, depth, frameDepth].map(refFor));
+  const toc = {
+    frames: [{ frame: {}, accelerations: [{ kind: 'depthMap', width: 3, height: 2, minLambda: -5, maxLambda: 5, depthMap: { imageRef: refs[3], representation: 'packedEncodedByte' } }] }],
+    views: [{ accelerations: [{
+      kind: 'edofWarp', width: 2, height: 2, pitchRatio: { x: 0.5, y: 0.5 },
+      perImage: [{ imageRef: refs[0], perspective: { u: 0, v: 0 } }, { imageRef: refs[1], perspective: { u: 0.2, v: -0.1 } }],
+      depthMap: { imageRef: refs[2], representation: 'packedEncodedByte', width: 2, height: 2, minLambda: -4, maxLambda: 6 },
+    }] }],
+  };
+  const { bytes } = await writeContainer([...[...jpegs, depth, frameDepth].map((data) => ({ type: 'LFC', data })), { type: 'LFM', data: encodeJson(toc) }]);
+  const pic = await readLightFieldPicture(bufferReader(bytes));
+  assert.equal(pic.stacks.length, 1);
+  const warp = pic.stacks[0];
+  assert.equal(warp.kind, 'warp');
+  assert.deepEqual(warp.images.map((i) => i.coord), [{ x: 0, y: 0 }, { x: 0.2, y: -0.1 }]);
+  assert.deepEqual([...warp.depth.bytes], [...depth]);
+  assert.equal(warp.depth.minLambda, -4);
+  assert.equal(pic.frameDepth.width, 3);
+  assert.deepEqual([...pic.frameDepth.bytes], [...frameDepth]);
+});
+
+test('first generation files keep refocus stacks and their depth table', async () => {
+  const jpegs = [0, 1].map((i) => Uint8Array.from([0xff, 0xd8, 0xff, 0x20 + i]));
+  const lut = new Uint8Array(new Float32Array([1, 2, 3, 4]).buffer);
+  const refs = await Promise.all([...jpegs, lut].map(refFor));
+  const toc = {
+    picture: { accelerationArray: [{ type: 'com.lytro.acceleration.refocusStack', vendorContent: {
+      imageArray: refs.slice(0, 2).map((r, i) => ({ imageRef: r, lambda: i * 2 })),
+      depthLut: { imageRef: refs[2], width: 2, height: 2 },
+    } }] },
+  };
+  const { bytes } = await writeContainer([...[...jpegs, lut].map((data) => ({ type: 'LFC', data })), { type: 'LFM', data: encodeJson(toc) }]);
+  const pic = await readLightFieldPicture(bufferReader(bytes));
+  assert.equal(pic.stacks.length, 1);
+  assert.equal(pic.stacks[0].kind, 'focus');
+  assert.deepEqual(pic.stacks[0].images.map((i) => i.lambda), [0, 2]);
+  assert.equal(pic.stacks[0].depth.representation, 'packedFloat');
 });
 
 test('cameraInfo reads ILLUM mosaic and microlens geometry', () => {

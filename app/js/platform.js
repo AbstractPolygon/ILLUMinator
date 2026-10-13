@@ -6,6 +6,30 @@ const LF_FILE = /\.(lfr|lfp|raw)$/i;
 
 export const native = typeof window !== 'undefined' ? window.lytroNative || null : null;
 
+function toArrayBuffer(u8) {
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+}
+
+// A file on disk in the desktop app, usable wherever the app expects a
+// File: arrayBuffer() for the whole file, slice().arrayBuffer() for ranges.
+export class NativeFile {
+  constructor({ path, name, size }) {
+    this.path = path;
+    this.name = name;
+    this.size = size;
+  }
+
+  async arrayBuffer() {
+    return toArrayBuffer(await native.readFile(this.path));
+  }
+
+  slice(start, end) {
+    const from = Math.max(0, start);
+    const to = Math.min(this.size, end ?? this.size);
+    return { arrayBuffer: async () => toArrayBuffer(await native.readRange(this.path, from, Math.max(0, to - from))) };
+  }
+}
+
 function pickWithInput(input) {
   return new Promise((resolve) => {
     input.value = '';
@@ -15,6 +39,7 @@ function pickWithInput(input) {
 }
 
 export async function openFiles() {
+  if (native) return (await native.openFiles()).map((f) => new NativeFile(f));
   return pickWithInput(document.getElementById('file-input'));
 }
 
@@ -56,7 +81,11 @@ export function isLightFieldName(name) {
   return LF_FILE.test(name);
 }
 
-export function download(blob, name) {
+export async function download(blob, name) {
+  if (native) {
+    await native.saveFile(name, new Uint8Array(await blob.arrayBuffer()));
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

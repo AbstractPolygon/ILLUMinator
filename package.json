@@ -1,16 +1,50 @@
 {
-  "name": "lytro-illuminator",
+  "name": "illuminator",
+  "productName": "Illuminator",
   "version": "0.1.0",
   "description": "Open, refocus and animate Lytro ILLUM and first generation light field photographs",
   "license": "MIT",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
+    "start": "electron .",
     "web": "node scripts/serve.mjs",
+    "build:web": "node scripts/build-web.mjs",
     "test": "node --test \"test/**/*.test.mjs\"",
-    "render": "node scripts/lfr-render.mjs"
+    "render": "node scripts/lfr-render.mjs",
+    "dist": "electron-builder"
   },
   "engines": {
     "node": ">=20"
+  },
+  "build": {
+    "appId": "com.illuminator.app",
+    "productName": "Illuminator",
+    "files": [
+      "app/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "lfr",
+        "name": "Lytro ILLUM photo"
+      },
+      {
+        "ext": "lfp",
+        "name": "Lytro light field photo"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.photography"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Graphics"
+    }
   }
 }

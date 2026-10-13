@@ -7,6 +7,7 @@
 // them focuses on a different depth (synthetic refocus).
 
 import { lensCenters, toLocal } from './lenslet.js';
+import { applyLook } from './color.js';
 
 const TAPS = 8;
 
@@ -394,11 +395,14 @@ export function autoExposure(rgb, matrix) {
   return 1;
 }
 
-// Linear camera RGB -> sRGB RGBA bytes.
-export function toneMap(rgb, matrix, exposure, out) {
+// Linear camera RGB -> sRGB RGBA bytes. `look`: the per-pixel color
+// adjustments from makeLook (core/color.js), applied after exposure.
+export function toneMap(rgb, matrix, exposure, out, look = null) {
   const n = rgb.length / 3;
   const px = out || new Uint8ClampedArray(n * 4);
-  const m = matrix.map((v) => v * exposure * 4096);
+  const scale = look ? 1 : 4096;
+  const m = matrix.map((v) => v * exposure * scale);
+  const p = [0, 0, 0];
   for (let i = 0, o = 0; i < rgb.length; i += 3, o += 4) {
     const r = rgb[i];
     const g = rgb[i + 1];
@@ -406,6 +410,15 @@ export function toneMap(rgb, matrix, exposure, out) {
     let R = m[0] * r + m[1] * g + m[2] * b;
     let G = m[3] * r + m[4] * g + m[5] * b;
     let B = m[6] * r + m[7] * g + m[8] * b;
+    if (look) {
+      p[0] = R;
+      p[1] = G;
+      p[2] = B;
+      applyLook(p, look);
+      R = p[0] * 4096;
+      G = p[1] * 4096;
+      B = p[2] * 4096;
+    }
     R = R < 0 ? 0 : R > 4096 ? 4096 : R;
     G = G < 0 ? 0 : G > 4096 ? 4096 : G;
     B = B < 0 ? 0 : B > 4096 ? 4096 : B;
