@@ -2133,6 +2133,8 @@ let anim = emptyAnimation();
 let keySel = null; // { k, t }
 // The Curves view of the keyframe editor (see drawCurves).
 const tlCurves = { on: false, hidden: new Set(), hits: [] };
+// Heights of the tracks and channel list, for minTimelineHeight.
+const tlContent = { keys: 0, channels: 0 };
 
 function keyframesOn() {
   return $('anim-on').checked && $('anim').value === 'keyframes';
@@ -2417,6 +2419,19 @@ function renderTimeline() {
   $('tl-grid').hidden = curves;
   $('tl-curves').hidden = !curves;
   if (curves) drawCurves();
+  // Too short now (say, a scrollbar appeared): grow to fit every track.
+  const tl = $('timeline');
+  if (tl.classList.contains('sized') && parseFloat(tl.style.getPropertyValue('--tl-h')) < minTimelineHeight()) setTimelineHeight(minTimelineHeight());
+}
+
+// The least height that still shows every track (or every channel of the
+// Curves view), with the timeline's scrollbar when there is one.
+function minTimelineHeight() {
+  if (!$('tl-grid').hidden) tlContent.keys = $('tl-grid').scrollHeight;
+  if (!$('tl-curves').hidden) tlContent.channels = $('tl-channels').scrollHeight;
+  const scroll = $('tl-scroll');
+  const extra = scroll.hidden ? 0 : scroll.offsetHeight + 4;
+  return Math.max(tlContent.keys, tlContent.channels, 100) + extra;
 }
 
 // The time under the pointer; `r` is the track's (or ruler's) box, taken
@@ -2997,6 +3012,7 @@ function setCurvesView(on) {
 // gets the rest); a double-click goes back to the natural height.
 function setTimelineHeight(h) {
   const tl = $('timeline');
+  if (h > 0) h = Math.max(h, minTimelineHeight());
   tl.classList.toggle('sized', h > 0);
   if (h > 0) tl.style.setProperty('--tl-h', `${h}px`);
   else tl.style.removeProperty('--tl-h');
@@ -3019,7 +3035,7 @@ $('tl-resize').addEventListener('pointerdown', (e) => {
     // Leave the picture at least a third of the space.
     const stage = document.querySelector('.stage').getBoundingClientRect().height;
     const max = Math.max(120, stage * 0.66 - 140);
-    setTimelineHeight(Math.round(Math.min(max, Math.max(60, startH - (ev.clientY - startY)))));
+    setTimelineHeight(Math.round(Math.min(Math.max(max, minTimelineHeight()), startH - (ev.clientY - startY))));
   };
   const up = () => {
     handle.classList.remove('dragging');
