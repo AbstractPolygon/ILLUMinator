@@ -92,6 +92,27 @@
           <span id="progress-text"></span>
         </div>
       </div>
+      <div class="modes-row">
+        <nav class="modes" id="modes">
+          <button data-mode="camera" class="active">Camera</button>
+          <button data-mode="lenslets">Lenslets</button>
+        </nav>
+        <span class="spacer"></span>
+        <div class="zoom" role="group" aria-label="Zoom">
+          <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+          <button id="zoom-label" title="Fit to window (0)">Fit</button>
+          <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+          <button id="zoom-1" title="Actual pixels (1)">1:1</button>
+        </div>
+      </div>
+      <div class="transport">
+        <button id="play-btn" title="Play / pause (space)">Play</button>
+        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Animation position">
+        <span id="frame-label" class="hint"></span>
+        <label id="anim-length-row" class="anim-length" title="Length of the animation">Length
+          <input id="anim-length" type="number" min="0.5" max="120" step="0.5" value="4" aria-label="Animation length in seconds"> s
+        </label>
+      </div>
       <div id="timeline" class="timeline" hidden>
         <div class="tl-bar">
           <button id="tl-key-all" type="button" title="Adds a keyframe on every track at the playhead, with the current settings">◆ Key all</button>
@@ -114,27 +135,6 @@
             <canvas id="tl-curve-canvas" class="tl-curve-canvas" width="150" height="150" role="img" aria-label="Curve to the next keyframe" title="Drag the two handles to shape the curve"></canvas>
           </div>
         </div>
-      </div>
-      <div class="modes-row">
-        <nav class="modes" id="modes">
-          <button data-mode="camera" class="active">Camera</button>
-          <button data-mode="lenslets">Lenslets</button>
-        </nav>
-        <span class="spacer"></span>
-        <div class="zoom" role="group" aria-label="Zoom">
-          <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
-          <button id="zoom-label" title="Fit to window (0)">Fit</button>
-          <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
-          <button id="zoom-1" title="Actual pixels (1)">1:1</button>
-        </div>
-      </div>
-      <div class="transport">
-        <button id="play-btn" title="Play / pause (space)">Play</button>
-        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Animation position">
-        <span id="frame-label" class="hint"></span>
-        <label id="anim-length-row" class="anim-length" title="Length of the animation">Length
-          <input id="anim-length" type="number" min="0.5" max="120" step="0.5" value="4" aria-label="Animation length in seconds"> s
-        </label>
       </div>
     </section>
 
