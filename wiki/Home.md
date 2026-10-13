@@ -2,6 +2,8 @@
 
 ILLUMinator is a photo editor for Lytro ILLUM and first generation Lytro cameras. It can import libraries from Lytro Desktop. It runs as a desktop app (Windows, macOS, Linux) and in a web browser.
 
+**Latest version: {{version}}**
+
 Because a Lytro photo is a light field, it keeps working like a camera after the shot: you can refocus, change the aperture, move the viewpoint and tilt the plane of focus, then develop the picture and export stills or animations.
 
 ## Start here

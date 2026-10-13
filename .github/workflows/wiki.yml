@@ -1,12 +1,13 @@
 # Publishes the pages in wiki/ to the GitHub wiki whenever they change on
 # main (or when run by hand from the Actions tab). Pages only in the wiki
 # are left alone; README.md is the folder's own notes, not a page.
+# {{version}} in a page becomes the app's version from package.json.
 name: Publish wiki
 
 on:
   push:
     branches: [main]
-    paths: ['wiki/**']
+    paths: ['wiki/**', 'package.json']
   workflow_dispatch:
 
 permissions:
@@ -28,6 +29,8 @@ jobs:
         run: |
           git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki-repo
           rsync -a --exclude README.md wiki/ wiki-repo/
+          version=$(node -p "require('./package.json').version")
+          sed -i "s/{{version}}/${version}/g" wiki-repo/*.md
           cd wiki-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
