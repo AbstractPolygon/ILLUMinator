@@ -7,6 +7,7 @@ import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar,
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
+import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -530,6 +531,9 @@ async function openItem(photo) {
 }
 
 function resetView() {
+  finishCrop(false);
+  state.lastImage = null;
+  state.geom = null;
   hideNotice();
   state.notice = null;
   resetAnimation();
@@ -580,13 +584,20 @@ async function openWith(args, transfer) {
 function draw(img) {
   if (!img) return;
   startNoticeTimer();
-  if (canvas.width !== img.width || canvas.height !== img.height) {
-    canvas.width = img.width;
-    canvas.height = img.height;
+  state.lastImage = img;
+  const g = geometryFor(img.width, img.height);
+  const w = g ? g.width : img.width;
+  const h = g ? g.height : img.height;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
     layoutCanvas();
   }
-  if (img instanceof ImageData) ctx.putImageData(img, 0, 0);
+  state.geom = g ? { ...g, inverse: invert(g.matrix), srcW: img.width, srcH: img.height } : null;
+  if (g) drawGeometry(ctx, img, g);
+  else if (img instanceof ImageData) ctx.putImageData(img, 0, 0);
   else ctx.drawImage(img, 0, 0);
+  if (cropState.editing) positionCropBox();
   canvas.classList.remove('hidden');
   scheduleHistogram();
   if (state.wantThumb && state.mode === 'camera') saveThumbnail();
@@ -712,9 +723,20 @@ async function updateSpreadOverlay() {
     const msg = await engine.request('spreadMask', { alpha: +$('focus').value, ...focusField() }, { onProgress: showProgress });
     hideProgress();
     if (msg && msg.pixels) {
-      overlay.width = msg.width;
-      overlay.height = msg.height;
-      overlay.getContext('2d').putImageData(toImageData(msg), 0, 0);
+      const mask = toImageData(msg);
+      const g = state.geom;
+      if (g) {
+        // Through the same crop and rotation as the picture.
+        overlay.width = canvas.width;
+        overlay.height = canvas.height;
+        const k = geometry(mask.width, mask.height, geometrySettings());
+        const o = overlay.getContext('2d');
+        drawGeometry(o, mask, k, canvas.width / k.width);
+      } else {
+        overlay.width = msg.width;
+        overlay.height = msg.height;
+        overlay.getContext('2d').putImageData(mask, 0, 0);
+      }
     }
   } catch (err) {
     showError(err);
@@ -1219,6 +1241,7 @@ function layoutCanvas() {
   for (const k of ['width', 'height', 'left', 'top']) overlay.style[k] = canvas.style[k];
   canvas.classList.toggle('pannable', view.k > 1 && state.mode !== 'camera');
   $('zoom-label').textContent = view.k === 1 ? 'Fit' : `${Math.round(scale * 100)}%`;
+  positionCropBox();
   $('zoom-out').disabled = view.k <= 1;
   $('zoom-in').disabled = scale >= MAX_SCALE - 1e-6;
 }
@@ -1293,9 +1316,7 @@ $('zoom-1').onclick = zoomActual;
 // Pointer position in camera view pixels (the full resolution still is
 // larger than the camera view; both cover the same picture).
 function viewPoint(event) {
-  const rect = canvas.getBoundingClientRect();
-  const fx = (event.clientX - rect.left) / rect.width;
-  const fy = (event.clientY - rect.top) / rect.height;
+  const [fx, fy] = sourceFraction(event);
   return state.info && state.info.width ? [fx * state.info.width, fy * state.info.height] : [fx * canvas.width, fy * canvas.height];
 }
 
@@ -1304,11 +1325,8 @@ function viewPoint(event) {
 // already sharp, so a click also opens up to f/2.8 to make the change visible.
 async function focusAt(event) {
   const [x, y] = viewPoint(event);
-  const rect = canvas.getBoundingClientRect();
-  state.focusPoint = {
-    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
-  };
+  const [fx, fy] = sourceFraction(event);
+  state.focusPoint = { x: Math.min(1, Math.max(0, fx)), y: Math.min(1, Math.max(0, fy)) };
   showFocusPoint();
   const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v }, { onProgress: showProgress });
   hideProgress();
@@ -1323,6 +1341,7 @@ async function focusAt(event) {
 }
 
 canvas.addEventListener('click', (event) => {
+  if (cropState.editing) return;
   if (state.picking) {
     pickWhiteBalance(event);
     return;
@@ -1336,7 +1355,7 @@ canvas.addEventListener('click', (event) => {
 });
 
 canvas.addEventListener('pointerdown', (event) => {
-  if (!state.info || event.button !== 0 || state.picking) return;
+  if (!state.info || event.button !== 0 || state.picking || cropState.editing) return;
   if (event.shiftKey || (view.k > 1 && state.mode !== 'camera')) {
     startPan(event);
     return;
@@ -1493,6 +1512,277 @@ $('library-choose').onclick = async () => {
   await showLibraryLocation();
 };
 
+// ---------------------------------------------------------------- crop, straighten, orientation
+
+// Applied to the finished picture in camera mode (core/geometry.js); the
+// settings are kept with the photo's edits. While the crop frame is being
+// edited the whole straightened picture is shown with the frame over it.
+const srcCanvas = document.createElement('canvas');
+const cropState = { editing: false, saved: null, rect: null, drag: null };
+
+function cropValues() {
+  return { x: +$('crop-x').value, y: +$('crop-y').value, w: +$('crop-w').value, h: +$('crop-h').value };
+}
+
+function setCropValues(c) {
+  $('crop-x').value = c.x;
+  $('crop-y').value = c.y;
+  $('crop-w').value = c.w;
+  $('crop-h').value = c.h;
+}
+
+function geometrySettings() {
+  return {
+    orientation: +$('orientation').value || 1,
+    angle: +$('straighten').value,
+    crop: cropState.editing ? FULL_CROP : cropValues(),
+  };
+}
+
+// Geometry for an image of this size, or null when there is none to apply.
+function geometryFor(w, h) {
+  if (state.mode !== 'camera') return null;
+  const s = geometrySettings();
+  return isIdentity(s) ? null : geometry(w, h, s);
+}
+
+// Draws `img` through `g` into a 2D context (scaled by `k`).
+function drawGeometry(c2d, img, g, k = 1) {
+  let src = img;
+  if (img instanceof ImageData) {
+    if (srcCanvas.width !== img.width || srcCanvas.height !== img.height) {
+      srcCanvas.width = img.width;
+      srcCanvas.height = img.height;
+    }
+    srcCanvas.getContext('2d').putImageData(img, 0, 0);
+    src = srcCanvas;
+  }
+  c2d.setTransform(1, 0, 0, 1, 0, 0);
+  c2d.fillStyle = '#000';
+  c2d.fillRect(0, 0, c2d.canvas.width, c2d.canvas.height);
+  const m = g.matrix;
+  c2d.setTransform(m[0] * k, m[1] * k, m[2] * k, m[3] * k, m[4] * k, m[5] * k);
+  c2d.imageSmoothingEnabled = true;
+  c2d.imageSmoothingQuality = 'high';
+  c2d.drawImage(src, 0, 0);
+  c2d.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+// Where an event on the picture falls in the rendered picture, as fractions.
+function sourceFraction(event) {
+  const rect = canvas.getBoundingClientRect();
+  const fx = (event.clientX - rect.left) / rect.width;
+  const fy = (event.clientY - rect.top) / rect.height;
+  if (!state.geom) return [fx, fy];
+  const [x, y] = applyMatrix(state.geom.inverse, fx * canvas.width, fy * canvas.height);
+  return [x / state.geom.srcW, y / state.geom.srcH];
+}
+
+function geometryChanged() {
+  if (state.lastImage) draw(state.lastImage);
+  updateSpreadOverlay();
+  scheduleSave();
+}
+
+// The crop as a pixel aspect ratio (width / height), or 0 for free.
+function aspectRatio() {
+  const v = $('crop-aspect').value;
+  if (v === 'free') return 0;
+  const g = state.geom;
+  const fw = g ? g.frameWidth : canvas.width;
+  const fh = g ? g.frameHeight : canvas.height;
+  if (v === 'original') return fw / fh;
+  // Portrait frames take the portrait form of the ratio.
+  return fh > fw ? 1 / +v : +v;
+}
+
+function frameSize() {
+  if (state.geom) return [state.geom.frameWidth, state.geom.frameHeight];
+  return [canvas.width, canvas.height];
+}
+
+function constrainCrop(c) {
+  const r = aspectRatio();
+  if (!r) return c;
+  const [fw, fh] = frameSize();
+  return fitAspect(c, r, fw, fh);
+}
+
+function turnCrop(c, dir) {
+  // A quarter turn of the picture turns its crop with it.
+  return dir > 0 ? { x: 1 - c.y - c.h, y: c.x, w: c.h, h: c.w } : { x: c.y, y: 1 - c.x - c.w, w: c.h, h: c.w };
+}
+
+function rotatePicture(dir) {
+  if (!canRender()) return;
+  $('orientation').value = rotateOrientation(+$('orientation').value || 1, dir);
+  if (cropState.editing) cropState.rect = turnCrop(cropState.rect, dir);
+  else setCropValues(turnCrop(cropValues(), dir));
+  geometryChanged();
+}
+
+$('rotate-left').onclick = () => rotatePicture(-1);
+$('rotate-right').onclick = () => rotatePicture(1);
+$('flip-h').onclick = () => {
+  if (!canRender()) return;
+  $('orientation').value = flipOrientation(+$('orientation').value || 1);
+  const flip = (c) => ({ ...c, x: 1 - c.x - c.w });
+  if (cropState.editing) cropState.rect = flip(cropState.rect);
+  else setCropValues(flip(cropValues()));
+  geometryChanged();
+};
+$('straighten').oninput = () => {
+  showSliderValue($('straighten'));
+  if (state.lastImage) draw(state.lastImage);
+};
+$('straighten').onchange = geometryChanged;
+$('crop-aspect').onchange = () => {
+  if (cropState.editing) {
+    cropState.rect = constrainCrop(cropState.rect);
+    positionCropBox();
+  } else {
+    setCropValues(constrainCrop(cropValues()));
+    geometryChanged();
+  }
+};
+$('geometry-reset').onclick = () => {
+  $('orientation').value = 1;
+  $('straighten').value = 0;
+  $('crop-aspect').value = 'free';
+  showSliderValue($('straighten'));
+  setCropValues(FULL_CROP);
+  if (cropState.editing) cropState.rect = { ...FULL_CROP };
+  geometryChanged();
+  if (cropState.editing) positionCropBox();
+};
+
+function startCrop() {
+  if (!canRender() || state.mode !== 'camera' || cropState.editing) return;
+  if (state.playing) setPlaying(false);
+  cropState.editing = true;
+  cropState.saved = cropValues();
+  cropState.rect = cropValues();
+  $('crop-btn').setAttribute('aria-pressed', 'true');
+  $('crop-btn').textContent = 'Done';
+  viewer.classList.add('cropping');
+  $('crop-box').hidden = false;
+  if (state.lastImage) draw(state.lastImage);
+  positionCropBox();
+}
+
+function finishCrop(keep) {
+  if (!cropState.editing) return;
+  cropState.editing = false;
+  if (keep) setCropValues(cropState.rect);
+  $('crop-btn').setAttribute('aria-pressed', 'false');
+  $('crop-btn').textContent = 'Crop';
+  viewer.classList.remove('cropping');
+  $('crop-box').hidden = true;
+  if (keep) geometryChanged();
+  else if (state.lastImage) draw(state.lastImage);
+}
+
+$('crop-btn').onclick = () => (cropState.editing ? finishCrop(true) : startCrop());
+
+// The frame over the picture, in the viewer's coordinates.
+function positionCropBox() {
+  if (!cropState.editing) return;
+  const box = $('crop-box');
+  const left = parseFloat(canvas.style.left) || 0;
+  const top = parseFloat(canvas.style.top) || 0;
+  const w = parseFloat(canvas.style.width) || canvas.width;
+  const h = parseFloat(canvas.style.height) || canvas.height;
+  const c = cropState.rect;
+  box.style.left = `${left + c.x * w}px`;
+  box.style.top = `${top + c.y * h}px`;
+  box.style.width = `${c.w * w}px`;
+  box.style.height = `${c.h * h}px`;
+}
+
+const MIN_CROP = 0.05;
+
+$('crop-box').addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const handle = e.target.dataset.h || 'move';
+  cropState.drag = { handle, x: e.clientX, y: e.clientY, start: { ...cropState.rect } };
+  $('crop-box').setPointerCapture(e.pointerId);
+});
+
+$('crop-box').addEventListener('pointermove', (e) => {
+  const d = cropState.drag;
+  if (!d) return;
+  const w = parseFloat(canvas.style.width) || canvas.width;
+  const h = parseFloat(canvas.style.height) || canvas.height;
+  const dx = (e.clientX - d.x) / w;
+  const dy = (e.clientY - d.y) / h;
+  const s = d.start;
+  let { x, y } = s;
+  let r = s.x + s.w;
+  let b = s.y + s.h;
+  if (d.handle === 'move') {
+    x = Math.min(1 - s.w, Math.max(0, s.x + dx));
+    y = Math.min(1 - s.h, Math.max(0, s.y + dy));
+    cropState.rect = { x, y, w: s.w, h: s.h };
+  } else {
+    if (d.handle.includes('w')) x = Math.min(r - MIN_CROP, Math.max(0, s.x + dx));
+    if (d.handle.includes('e')) r = Math.max(x + MIN_CROP, Math.min(1, r + dx));
+    if (d.handle.includes('n')) y = Math.min(b - MIN_CROP, Math.max(0, s.y + dy));
+    if (d.handle.includes('s')) b = Math.max(y + MIN_CROP, Math.min(1, b + dy));
+    let c = { x, y, w: r - x, h: b - y };
+    const ratio = aspectRatio();
+    if (ratio) {
+      // Keep the ratio: the dragged side leads, the edge opposite the
+      // handle stays where it is.
+      const [fw, fh] = frameSize();
+      const rn = (ratio * fh) / fw;
+      const sideOnly = d.handle.length === 1;
+      if (sideOnly && (d.handle === 'n' || d.handle === 's')) {
+        const nw = Math.min(1, c.h * rn);
+        const cx = s.x + s.w / 2;
+        c = { ...c, w: nw, x: Math.min(1 - nw, Math.max(0, cx - nw / 2)) };
+      } else {
+        let nh = c.w / rn;
+        let nw = c.w;
+        const maxH = d.handle.includes('n') ? b : 1 - y;
+        if (nh > maxH) {
+          nh = maxH;
+          nw = nh * rn;
+        }
+        const nx = d.handle.includes('w') ? r - nw : x;
+        if (sideOnly) {
+          const cy = s.y + s.h / 2;
+          const ny = Math.min(1 - nh, Math.max(0, cy - nh / 2));
+          c = { x: nx, y: ny, w: nw, h: nh };
+        } else {
+          c = { x: nx, y: d.handle.includes('n') ? b - nh : y, w: nw, h: nh };
+        }
+      }
+    }
+    cropState.rect = c;
+  }
+  positionCropBox();
+});
+
+for (const type of ['pointerup', 'pointercancel']) {
+  $('crop-box').addEventListener(type, () => {
+    cropState.drag = null;
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!cropState.editing || e.target.matches('input, select, textarea')) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    finishCrop(true);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    finishCrop(false);
+  }
+}, true);
+
 // ---------------------------------------------------------------- white balance eyedropper
 
 // Click the eyedropper, then something in the photo that should be neutral:
@@ -1542,8 +1832,9 @@ async function exportVideo() {
     const order = state.loop === 'pingpong'
       ? [...frames.keys(), ...[...frames.keys()].reverse().slice(1, -1)]
       : [...frames.keys(), ...frames.keys()];
-    const w = frames[0].width;
-    const h = frames[0].height;
+    const g = geometryFor(frames[0].width, frames[0].height);
+    const w = g ? g.width : frames[0].width;
+    const h = g ? g.height : frames[0].height;
     const up = Math.max(1, Math.round(1080 / Math.max(w, h)));
     const c = document.createElement('canvas');
     c.width = w * up;
@@ -1558,7 +1849,8 @@ async function exportVideo() {
     const done = new Promise((r) => { recorder.onstop = r; });
     recorder.start();
     for (let i = 0; i < order.length; i++) {
-      cctx.drawImage(frames[order[i]], 0, 0, c.width, c.height);
+      if (g) drawGeometry(cctx, frames[order[i]], g, up);
+      else cctx.drawImage(frames[order[i]], 0, 0, c.width, c.height);
       showProgress('Recording video', i / order.length);
       await new Promise((r) => setTimeout(r, 1000 / state.fps));
     }
@@ -1770,8 +2062,6 @@ async function applySettings() {
     },
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
-    // Test hook: ?cpu renders without the GPU.
-    gpu: !new URLSearchParams(location.search).has('cpu'),
     defringe: {
       on: $('fringe-on').checked,
       auto: $('fringe-auto').checked,
@@ -1976,6 +2266,7 @@ function showSliderValue(input) {
   if (input.id === 'ev') out.textContent = `${sign}${Math.abs(v).toFixed(2)} EV`;
   else if (input.id === 'focus') out.textContent = `${sign}${Math.abs(v).toFixed(2)}`;
   else if (input.id === 'tilt-rotation') out.textContent = `${v}°`;
+  else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'wb-temperature') out.textContent = `${v} K`;
   else if (input.id === 'sharp-radius') out.textContent = v.toFixed(1);
   else if (input.parentElement.closest('.details-panel')) out.textContent = `${v}`;

@@ -75,6 +75,11 @@
       <div id="drop-zone" class="viewer">
         <canvas id="view"></canvas>
         <canvas id="spread-overlay" hidden></canvas>
+        <div id="crop-box" class="crop-box" hidden>
+          <div class="crop-grid"></div>
+          <span data-h="nw"></span><span data-h="n"></span><span data-h="ne"></span><span data-h="e"></span>
+          <span data-h="se"></span><span data-h="s"></span><span data-h="sw"></span><span data-h="w"></span>
+        </div>
         <div id="placeholder" class="placeholder">
           <p>Drop a Lytro <code>.LFR</code> or <code>.LFP</code> file here.</p>
         </div>
@@ -113,6 +118,43 @@
       <details class="panel">
         <summary><h2>Info</h2></summary>
         <dl id="info"></dl>
+      </details>
+
+      <details class="panel geometry-panel" data-panel="camera">
+        <summary><h2>Crop</h2></summary>
+        <div class="row geometry-row">
+          <button id="rotate-left" type="button" class="icon-only" title="Rotate left" aria-label="Rotate left">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 10V5m0 5h5M4.6 9.5A8 8 0 1 1 6 17"/></svg>
+          </button>
+          <button id="rotate-right" type="button" class="icon-only" title="Rotate right" aria-label="Rotate right">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M20 10V5m0 5h-5m4.4-.5A8 8 0 1 0 18 17"/></svg>
+          </button>
+          <button id="flip-h" type="button" class="icon-only" title="Flip horizontally" aria-label="Flip horizontally">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M12 3v18M9 7 3 17h6zM15 7l6 10h-6z"/></svg>
+          </button>
+          <span class="spacer"></span>
+          <button id="crop-btn" type="button" aria-pressed="false" title="Drag the corners or edges of the frame on the picture (Enter to finish, Esc to cancel)">Crop</button>
+        </div>
+        <label>Straighten <output for="straighten" data-for="straighten">0.0°</output>
+          <input id="straighten" type="range" min="-45" max="45" step="0.1" value="0" data-default="0">
+        </label>
+        <label>Aspect ratio
+          <select id="crop-aspect">
+            <option value="free">Free</option>
+            <option value="original">Original</option>
+            <option value="1">1 : 1</option>
+            <option value="1.25">5 : 4</option>
+            <option value="1.3333">4 : 3</option>
+            <option value="1.5">3 : 2</option>
+            <option value="1.7778">16 : 9</option>
+          </select>
+        </label>
+        <button id="geometry-reset" type="button" class="wide">Reset</button>
+        <input id="orientation" type="hidden" value="1">
+        <input id="crop-x" type="hidden" value="0">
+        <input id="crop-y" type="hidden" value="0">
+        <input id="crop-w" type="hidden" value="1">
+        <input id="crop-h" type="hidden" value="1">
       </details>
 
       <details class="panel color-panel">

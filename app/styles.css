@@ -423,3 +423,29 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .albums .more { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
 .albums li:hover .more ~ * , .albums li:hover .album:has(+ .more) .count { visibility: hidden; }
 .library #photos-title { margin-top: 16px; }
+
+/* Crop, straighten and orientation. */
+.geometry-row { align-items: center; margin: 2px 0 6px; }
+#crop-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.crop-box {
+  position: absolute; z-index: 3; cursor: move; touch-action: none;
+  outline: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+}
+.crop-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(to right, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.67% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.67% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.67% + 0.5px), transparent calc(66.67% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.67% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.67% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.67% + 0.5px), transparent calc(66.67% + 0.5px));
+}
+.crop-box [data-h] { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+.crop-box [data-h="n"], .crop-box [data-h="s"] { width: 22px; height: 6px; margin: -3px 0 0 -11px; }
+.crop-box [data-h="e"], .crop-box [data-h="w"] { width: 6px; height: 22px; margin: -11px 0 0 -3px; }
+.crop-box [data-h="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.crop-box [data-h="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.crop-box [data-h="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.crop-box [data-h="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.crop-box [data-h="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.crop-box [data-h="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.crop-box [data-h="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.crop-box [data-h="w"] { left: 0; top: 50%; cursor: ew-resize; }

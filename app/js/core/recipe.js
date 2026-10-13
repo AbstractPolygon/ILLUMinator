@@ -114,9 +114,6 @@ export function recipeToEdits(recipe, ctx = {}) {
   geometry['crop-y'] = top;
   geometry['crop-w'] = right - left || 1;
   geometry['crop-h'] = bottom - top || 1;
-  // Not shown yet: the crop and orientation controls are still to come.
-  if (left || top || right !== 1 || bottom !== 1 || geometry.straighten) unsupported.push('crop');
-  if (geometry.orientation !== 1) unsupported.push('orientation');
   if (r.viewReduceFlare) unsupported.push('reduce flare');
   if (r.viewFx && Array.isArray(r.viewFx.fxContainerSequence) && r.viewFx.fxContainerSequence.length) unsupported.push('effects');
   if (num(r.viewSharpenEdgeMasking, 0)) unsupported.push('sharpening edge masking');

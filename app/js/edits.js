@@ -7,7 +7,7 @@
 //   "format": "illuminator-edits", "version": 1, "modified": ISO date,
 //   "photo": { "id", "name" },
 //   "process": { control id: value, ... }, "camera": {...}, "details": {...},
-//   "defringe": {...}, "animation": {...}, "rendering": {...},
+//   "defringe": {...}, "animation": {...}, "rendering": {...}, "geometry": {...},
 //   "view": { "u", "v" }, "focusPoint": { "x", "y" }
 // }
 
@@ -27,6 +27,7 @@ export const EDIT_GROUPS = {
   defringe: ['fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
   rendering: ['detail', 'still-scale', 'still-passes'],
+  geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],
 };
 
 function readValue(el) {

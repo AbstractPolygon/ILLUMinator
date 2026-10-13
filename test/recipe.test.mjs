@@ -27,7 +27,7 @@ test('converts Lytro Desktop edits to ILLUMinator controls', () => {
   assert.equal(edits.geometry['crop-y'], 0.1);
   assert.ok(Math.abs(edits.geometry['crop-h'] - 0.9) < 1e-9);
   assert.equal(edits.geometry.orientation, 1);
-  assert.deepEqual(unsupported, ['crop']);
+  assert.deepEqual(unsupported, []);
 });
 
 test('recognizes Lytro Desktop edits files', () => {
