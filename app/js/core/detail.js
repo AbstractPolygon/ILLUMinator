@@ -7,7 +7,9 @@
 //      neighborhood (its RGB relative to brightness), keeping its own
 //      brightness
 //   3. sharpening: an unsharp mask on brightness; Detail 0 holds back strong
-//      edges (fewer halos), 100 sharpens everything equally
+//      edges (fewer halos), 100 sharpens everything equally; Masking limits
+//      it to edges (0 everywhere, 100 only the strongest edges), so smooth
+//      areas like skin and sky stay smooth
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
@@ -18,6 +20,7 @@ export function makeDetail(settings = {}) {
     amount: (s.amount || 0) / 100, // 0..1.5
     radius: s.radius || 1, // pixels, 0.5..3
     detail: (s.detail ?? 25) / 100, // 0..1
+    masking: (s.masking || 0) / 100, // 0..1
     luminance: (s.luminance || 0) / 100, // 0..1
     color: (s.color || 0) / 100, // 0..1
   };
@@ -39,6 +42,15 @@ export function sharpenWindow(p) {
 // Edge strength (in square-root brightness) beyond which Detail 0 stops
 // adding sharpening.
 export const HALO_LIMIT = 0.03;
+
+// Edge mask for sharpening from the brightness gradient g (square-root
+// brightness per pixel): 1 everywhere at Masking 0, only strong edges at 1.
+export function edgeMask(g, masking) {
+  if (!(masking > 0)) return 1;
+  const t = 0.06 * masking;
+  const x = Math.min(1, Math.max(0, (g - 0.5 * t) / t));
+  return x * x * (3 - 2 * x);
+}
 
 function sharpenDelta(diff, p) {
   const limited = Math.max(-HALO_LIMIT, Math.min(HALO_LIMIT, diff));
@@ -161,7 +173,13 @@ export function applyDetail(rgb, w, h, p) {
         let s = 0;
         for (let i = -r; i <= r; i++) s += T[Math.min(h - 1, Math.max(0, y + i)) * w + x] * g[i + r];
         const i0 = y * w + x;
-        S3[i0] = Math.max(0, S2[i0] + sharpenDelta(S2[i0] - s / gs, p));
+        let mask = 1;
+        if (p.masking > 0) {
+          const gx = S2[y * w + Math.min(w - 1, x + 1)] - S2[y * w + Math.max(0, x - 1)];
+          const gy = S2[Math.min(h - 1, y + 1) * w + x] - S2[Math.max(0, y - 1) * w + x];
+          mask = edgeMask(0.5 * Math.hypot(gx, gy), p.masking);
+        }
+        S3[i0] = Math.max(0, S2[i0] + mask * sharpenDelta(S2[i0] - s / gs, p));
       }
     }
   }

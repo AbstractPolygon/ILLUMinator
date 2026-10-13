@@ -22,10 +22,11 @@ const FRINGES = ['purple', 'green', 'red', 'blue'];
 export const EDIT_GROUPS = {
   process: ['awb', 'wb-temperature', 'wb-tint', 'ev', 'tone-contrast', 'tone-highlights', 'tone-shadows', 'tone-whites',
     'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`),
+    'ccm-mode', ...Array.from({ length: 9 }, (_, i) => `ccm-${i}`),
     'curve-points', 'curve-highlights', 'curve-lights', 'curve-darks', 'curve-shadows'],
   camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'highlights'],
-  details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
-  defringe: ['fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
+  details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'sharp-masking', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
+  defringe: ['flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
   rendering: ['detail', 'still-scale', 'still-passes'],
   geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],

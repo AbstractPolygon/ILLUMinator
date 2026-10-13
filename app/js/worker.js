@@ -17,6 +17,7 @@ import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
+import { estimateVeil, subtractVeil } from './core/flare.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
@@ -110,7 +111,12 @@ function updateColor() {
   const ccm = colorMatrix(lf.cam, s);
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
-  state.baseExposure = autoExposure(center, state.matrix);
+  // Reduce flare: the veil is measured once on the center view.
+  const { outW, outH } = state.sampler;
+  state.veil = s.flare && s.flare.on ? estimateVeil(center, outW, outH) : null;
+  state.veilAmount = state.veil ? s.flare.amount : 0;
+  if (state.gpu) state.gpu.setVeil(state.veil);
+  state.baseExposure = autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
 
@@ -119,6 +125,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
 function toPixels(rgb, w, h) {
   rgb = applyDetail(rgb, w, h, state.detail);
+  rgb = subtractVeil(rgb, w, h, state.veil, state.veilAmount);
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look);
@@ -161,6 +168,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     exposure: state.baseExposure * Math.pow(2, state.settings.ev),
     fringe: state.settings.defringe,
     look: state.look,
+    veilAmount: state.veil ? state.veilAmount : 0,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
@@ -226,7 +234,7 @@ function summary() {
   const { cam } = lf;
   return {
     ...base,
-    cam: { model: cam.model, make: cam.make, firmware: cam.firmware, width: cam.width, height: cam.height, bits: cam.bits, upperLeft: cam.upperLeft, capture: cam.capture, hasCcm: !!cam.ccm },
+    cam: { model: cam.model, make: cam.make, firmware: cam.firmware, width: cam.width, height: cam.height, bits: cam.bits, upperLeft: cam.upperLeft, capture: cam.capture, hasCcm: !!cam.ccm, ccm: cam.ccm ? Array.from(cam.ccm) : null },
     grid: lf.grid,
     metadataGrid: lf.metadataGrid,
     gridQuality: lf.gridQuality,
@@ -626,7 +634,7 @@ async function whiteBalanceAt({ x, y }) {
     rgb = pp.linear(pp.images[0]);
     w = pp.width;
     h = pp.height;
-    matrix = colorMatrix({ ccm: null }, { ...state.settings, useCcm: false });
+    matrix = colorMatrix({ ccm: null }, { ...state.settings, useCcm: false, ccm: null });
   } else {
     requireRaw();
     rgb = render(0, 0);
@@ -779,7 +787,7 @@ function updateProcessedColor() {
   const asShot = asShotKelvin();
   const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
   const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
-  const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false });
+  const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
   state.matrix = sat.map((v, i) => v * auto[i % 3] * manual[i % 3]);
   state.baseExposure = 1;
   state.look = makeLook(s);

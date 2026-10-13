@@ -1219,8 +1219,10 @@ const viewer = $('drop-zone');
 const MAX_SCALE = 16;
 
 function fitScale() {
-  const vw = viewer.clientWidth;
-  const vh = viewer.clientHeight;
+  // While cropping, leave room around the picture for the frame's handles.
+  const margin = cropState.editing ? 48 : 0;
+  const vw = Math.max(1, viewer.clientWidth - margin);
+  const vh = Math.max(1, viewer.clientHeight - margin);
   return Math.min(vw / canvas.width, vh / canvas.height) || 1;
 }
 
@@ -1687,14 +1689,12 @@ $('straighten').oninput = () => {
   if (state.lastImage) draw(state.lastImage);
 };
 $('straighten').onchange = geometryChanged;
+// Choosing an aspect ratio opens the crop frame to adjust.
 $('crop-aspect').onchange = () => {
-  if (cropState.editing) {
-    cropState.rect = constrainCrop(cropState.rect);
-    positionCropBox();
-  } else {
-    setCropValues(constrainCrop(cropValues()));
-    geometryChanged();
-  }
+  if (!cropState.editing) startCrop();
+  if (!cropState.editing) return;
+  cropState.rect = constrainCrop(cropState.rect);
+  positionCropBox();
 };
 $('geometry-reset').onclick = () => {
   $('orientation').value = 1;
@@ -1718,7 +1718,7 @@ function startCrop() {
   viewer.classList.add('cropping');
   $('crop-box').hidden = false;
   if (state.lastImage) draw(state.lastImage);
-  positionCropBox();
+  layoutCanvas();
 }
 
 function finishCrop(keep) {
@@ -1731,6 +1731,7 @@ function finishCrop(keep) {
   $('crop-box').hidden = true;
   if (keep) geometryChanged();
   else if (state.lastImage) draw(state.lastImage);
+  layoutCanvas();
 }
 
 $('crop-btn').onclick = () => (cropState.editing ? finishCrop(true) : startCrop());
@@ -1757,13 +1758,65 @@ $('crop-box').addEventListener('pointerdown', (e) => {
   e.preventDefault();
   e.stopPropagation();
   const handle = e.target.dataset.h || 'move';
-  cropState.drag = { handle, x: e.clientX, y: e.clientY, start: { ...cropState.rect } };
+  const c = cropState.rect;
+  if (handle === 'move' && c.w > 0.995 && c.h > 0.995) {
+    // Nothing to move yet: draw a crop from here instead.
+    const rect = canvas.getBoundingClientRect();
+    cropState.drag = {
+      handle: 'draw',
+      ax: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      ay: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    };
+  } else {
+    cropState.drag = { handle, x: e.clientX, y: e.clientY, start: { ...c } };
+  }
   $('crop-box').setPointerCapture(e.pointerId);
 });
+
+// Dragging on the picture outside the frame draws a new one.
+canvas.addEventListener('pointerdown', (e) => {
+  if (!cropState.editing || e.button !== 0) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const ax = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const ay = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+  cropState.drag = { handle: 'draw', ax, ay, moved: false };
+  $('crop-box').setPointerCapture(e.pointerId);
+});
+
+function drawCrop(d, e) {
+  const rect = canvas.getBoundingClientRect();
+  const bx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const by = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+  let w = Math.max(MIN_CROP, Math.abs(bx - d.ax));
+  let h = Math.max(MIN_CROP, Math.abs(by - d.ay));
+  const ratio = aspectRatio();
+  if (ratio) {
+    // The ratio holds; the longer drag direction leads.
+    const [fw, fh] = frameSize();
+    const rn = (ratio * fh) / fw;
+    if (w / h > rn) h = w / rn;
+    else w = h * rn;
+    const maxW = bx >= d.ax ? 1 - d.ax : d.ax;
+    const maxH = by >= d.ay ? 1 - d.ay : d.ay;
+    const k = Math.min(1, maxW / w, maxH / h);
+    w *= k;
+    h *= k;
+  }
+  const x = bx >= d.ax ? d.ax : d.ax - w;
+  const y = by >= d.ay ? d.ay : d.ay - h;
+  cropState.rect = { x: Math.max(0, x), y: Math.max(0, y), w: Math.min(w, 1), h: Math.min(h, 1) };
+}
 
 $('crop-box').addEventListener('pointermove', (e) => {
   const d = cropState.drag;
   if (!d) return;
+  if (d.handle === 'draw') {
+    d.moved = true;
+    drawCrop(d, e);
+    positionCropBox();
+    return;
+  }
   const w = parseFloat(canvas.style.width) || canvas.width;
   const h = parseFloat(canvas.style.height) || canvas.height;
   const dx = (e.clientX - d.x) / w;
@@ -1833,6 +1886,25 @@ document.addEventListener('keydown', (e) => {
     finishCrop(false);
   }
 }, true);
+
+// ---------------------------------------------------------------- color matrix
+
+// Camera: the matrix in the photo's metadata; None: camera RGB as is;
+// Custom: editable, starting from the camera's.
+function showColorMatrix() {
+  $('ccm-grid').hidden = $('ccm-mode').value !== 'custom';
+}
+
+$('ccm-mode').onchange = () => {
+  if ($('ccm-mode').value === 'custom') {
+    const cam = state.info && state.info.cam && state.info.cam.ccm;
+    const m = cam || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    m.forEach((v, i) => { $(`ccm-${i}`).value = +v.toFixed(3); });
+  }
+  showColorMatrix();
+  applySettings();
+};
+for (let i = 0; i < 9; i++) $(`ccm-${i}`).addEventListener('input', () => applySettingsSoon());
 
 // ---------------------------------------------------------------- tone curve
 
@@ -2131,17 +2203,21 @@ async function applySettings() {
     wb: { kelvin: +$('wb-temperature').value, tint: +$('wb-tint').value },
     tone: Object.fromEntries(TONES.map((k) => [k, $(`tone-${k}`).value / 100])),
     curve: { points: parsePoints($('curve-points').value), regions: curveRegions() },
+    useCcm: $('ccm-mode').value !== 'none',
+    ccm: $('ccm-mode').value === 'custom' ? Array.from({ length: 9 }, (_, i) => +$(`ccm-${i}`).value || 0) : null,
     mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
     depthSmoothing: $('depth-smooth').value / 100,
     details: {
       amount: +$('sharp-amount').value,
       radius: +$('sharp-radius').value,
       detail: +$('sharp-detail').value,
+      masking: +$('sharp-masking').value,
       luminance: +$('nr-luminance').value,
       color: +$('nr-color').value,
     },
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
+    flare: { on: $('flare-on').checked, amount: $('flare-amount').value / 100 },
     defringe: {
       on: $('fringe-on').checked,
       auto: $('fringe-auto').checked,
@@ -2232,6 +2308,8 @@ async function restoreEdits(info) {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
     $('pivot').disabled = !$('pivot-on').checked;
     curve.draw();
+    showColorMatrix();
+    $('flare-amount').disabled = !$('flare-on').checked;
     resetTemperature(info, { keep: !!saved });
     state.camera = { ...view };
     state.focusPoint = { ...focusPoint };
@@ -2377,6 +2455,14 @@ for (const input of document.querySelectorAll('.color-panel input[type=range], .
   });
 }
 
+$('flare-on').onchange = () => {
+  $('flare-amount').disabled = !$('flare-on').checked;
+  applySettings();
+};
+$('flare-amount').oninput = () => {
+  showSliderValue($('flare-amount'));
+  applySettingsSoon();
+};
 for (const id of ['awb', 'mv-on', 'detail', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;

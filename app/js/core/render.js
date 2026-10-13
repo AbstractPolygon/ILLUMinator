@@ -371,8 +371,10 @@ function srgbTable() {
 }
 const SRGB = srgbTable();
 
+// settings.ccm (9 values, rows of output RGB from camera RGB) replaces the
+// camera's own matrix; useCcm false uses none.
 export function colorMatrix(cam, settings) {
-  const m = settings.useCcm && cam.ccm ? cam.ccm : IDENTITY;
+  const m = Array.isArray(settings.ccm) && settings.ccm.length === 9 ? settings.ccm : settings.useCcm && cam.ccm ? cam.ccm : IDENTITY;
   const sat = settings.saturation;
   // Saturation around Rec.709 luminance, applied after the camera matrix.
   const lr = 0.2126 * (1 - sat);

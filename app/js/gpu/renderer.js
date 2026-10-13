@@ -399,7 +399,9 @@ uniform float uRadius;
 uniform int uWindow;
 uniform float uDetail;
 uniform float uHalo;
+uniform float uMasking;
 out vec4 outColor;
+float aAt(ivec2 q, ivec2 size) { return texelFetch(uSrc, clamp(q, ivec2(0), size - 1), 0).a; }
 void main() {
   ivec2 size = textureSize(uSrc, 0);
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -419,7 +421,14 @@ void main() {
     }
     float diff = s - sum / wsum;
     float limited = clamp(diff, -uHalo, uHalo);
-    s = max(0.0, s + 1.5 * uAmount * (diff * uDetail + limited * (1.0 - uDetail)));
+    float mask = 1.0;
+    if (uMasking > 0.0) {
+      // Same as edgeMask in core/detail.js.
+      vec2 g = vec2(aAt(p + ivec2(1, 0), size) - aAt(p - ivec2(1, 0), size), aAt(p + ivec2(0, 1), size) - aAt(p - ivec2(0, 1), size));
+      float t = 0.06 * uMasking;
+      mask = smoothstep(0.0, 1.0, clamp((0.5 * length(g) - 0.5 * t) / t, 0.0, 1.0));
+    }
+    s = max(0.0, s + mask * 1.5 * uAmount * (diff * uDetail + limited * (1.0 - uDetail)));
   }
   outColor = vec4(max(c.rgb * (s * s), vec3(0.0)), 1.0);
 }`;
@@ -433,6 +442,8 @@ uniform sampler2D uSrc;
 uniform mat3 uMatrix;
 uniform float uExposure;
 uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
+uniform sampler2D uVeil;   // flare veil per tile (core/flare.js), linear
+uniform float uVeilAmount;
 uniform int uFringeOn;
 uniform int uFringeRadius;
 uniform float uFringeThreshold;
@@ -444,7 +455,11 @@ uniform int uCurveOn;
 uniform float uCurve[65];  // tone curve table (core/curve.js)
 out vec4 outColor;
 
-vec3 colorAt(ivec2 q) { return uMatrix * texelFetch(uSrc, q, 0).rgb; }
+vec3 colorAt(ivec2 q) {
+  vec3 c = texelFetch(uSrc, q, 0).rgb;
+  if (uVeilAmount > 0.0) c = max(c - uVeilAmount * texture(uVeil, (vec2(q) + 0.5) / vec2(textureSize(uSrc, 0))).rgb, vec3(0.0));
+  return uMatrix * c;
+}
 
 float hueOf(vec3 c) {
   float mx = max(c.r, max(c.g, c.b));
@@ -1134,6 +1149,7 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uWindow, sharpenWindow(p));
     gl.uniform1f(P.u.uDetail, p.detail);
     gl.uniform1f(P.u.uHalo, HALO_LIMIT);
+    gl.uniform1f(P.u.uMasking, p.masking || 0);
     this.draw();
     return out;
   }
@@ -1245,7 +1261,20 @@ export class GpuRenderer {
   // Color matrix, defringing, exposure and sRGB, drawn to the canvas and
   // handed over as an ImageBitmap. fringe: defringe settings
   // { on, radius, threshold, colors: [[amount, hue] x 4] }.
-  present(src, w, h, { matrix, exposure, fringe, look = null }) {
+  // Flare veil (core/flare.js) for present, or null.
+  setVeil(veil) {
+    const gl = this.gl;
+    if (this.veilTex) gl.deleteTexture(this.veilTex);
+    this.veilTex = null;
+    if (!veil) return;
+    const { tilesX: w, tilesY: h, data } = veil;
+    this.veilTex = this.texture(w, h, gl.RGBA16F, gl.LINEAR);
+    const rgba = new Float32Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) rgba.set([data[3 * i], data[3 * i + 1], data[3 * i + 2], 1], 4 * i);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, rgba);
+  }
+
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0 }) {
     const gl = this.gl;
     const P = this.programs.present;
     this.canvas.width = w;
@@ -1257,6 +1286,10 @@ export class GpuRenderer {
     this.bindTex(1, src);
     gl.uniformMatrix3fv(P.u.uMatrix, true, matrix);
     gl.uniform1f(P.u.uExposure, exposure);
+    const veil = veilAmount > 0 && this.veilTex;
+    gl.uniform1f(P.u.uVeilAmount, veil ? veilAmount : 0);
+    gl.uniform1i(P.u.uVeil, 2);
+    this.bindTex(2, veil ? this.veilTex : src);
     const f = (fringe && fringe.colors) || [];
     const on = !!(fringe && fringe.on) && f.some(([amount]) => amount > 0);
     gl.uniform1i(P.u.uFringeOn, on ? 1 : 0);

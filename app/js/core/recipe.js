@@ -95,11 +95,13 @@ export function recipeToEdits(recipe, ctx = {}) {
   details['sharp-amount'] = clamp(num(r.viewSharpness2, 25), 0, 150);
   details['sharp-radius'] = clamp(num(r.viewSharpenRadius, 1), 0.5, 3);
   details['sharp-detail'] = clamp(num(r.viewSharpenDetail, 25), 0, 100);
+  details['sharp-masking'] = clamp(num(r.viewSharpenEdgeMasking, 0), 0, 100);
   details['nr-luminance'] = Math.round(clamp(num(r.viewLuminanceNoiseReduction, 50) * 0.4, 0, 100));
   details['nr-color'] = Math.round(clamp(num(r.viewColorNoiseReduction, 50) * 0.4, 0, 100));
 
   // Optics: Lytro's defringe finds the colors itself, like our Auto. Its
   // radius is in pixels of its full size render (about 2450 wide).
+  defringe['flare-on'] = !!r.viewReduceFlare;
   defringe['fringe-on'] = !!r.viewDefringe;
   defringe['fringe-auto'] = !!r.viewDefringe;
   defringe['fringe-radius'] = Math.round(clamp((num(r.viewDefringeRadius, 5.5) * viewWidth) / 2450 * 2, 1, 6));
@@ -119,9 +121,7 @@ export function recipeToEdits(recipe, ctx = {}) {
   geometry['crop-y'] = top;
   geometry['crop-w'] = right - left || 1;
   geometry['crop-h'] = bottom - top || 1;
-  if (r.viewReduceFlare) unsupported.push('reduce flare');
   if (r.viewFx && Array.isArray(r.viewFx.fxContainerSequence) && r.viewFx.fxContainerSequence.length) unsupported.push('effects');
-  if (num(r.viewSharpenEdgeMasking, 0)) unsupported.push('sharpening edge masking');
 
   return {
     edits: {
