@@ -20,7 +20,7 @@ How carefully the depth map is measured is set in [[Rendering]] (*High quality d
 
 ## Tilt
 
-Tilts the plane of focus, like a tilt-shift lens: *Tilt* is the amount, *Rotation* the direction.
+Tilts the plane of focus, like a tilt-shift lens: *Tilt* is the amount, *Rotation* the direction. *Enabled* turns the tilt off and on without losing the settings.
 
 ## Perspective
 

@@ -28,6 +28,7 @@ Albums are listed at the top of the left sidebar.
 - **Add photos:** drag photos from the list or the grid onto an album, or use **•••** on a photo and tick albums.
 - **Remove from an album:** **•••** on the photo, untick the album.
 - **Rename or delete an album:** **•••** next to the album. Deleting an album keeps its photos in the library.
+- **Export an album:** **•••** next to the album → *Export album…* saves one `.zip` with the album's original photos, their edits, Lytro Desktop edits and thumbnails. Import that file (the *Import* button, or drop it on the window) in another library, such as the desktop app's after using the browser version, and the photos join that library with their edits and the album is made again.
 - **Delete a photo:** **•••** on the photo → *Delete from library…*. In the desktop app its folder goes to the trash.
 
 Photos you open while an album is selected are added to that album too.
