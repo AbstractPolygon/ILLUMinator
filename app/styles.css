@@ -291,3 +291,6 @@ button.wide { display: block; width: 100%; }
 .setting .path.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 /* Divider lines between the right sidebar's sections. */
 .controls > .panel + .panel { border-top: 1px solid var(--line); padding-top: 6px; }
+/* A dropdown under its label, with room before the next control. */
+label select { display: block; margin-top: 4px; }
+label:has(select) { margin-bottom: 10px; }
