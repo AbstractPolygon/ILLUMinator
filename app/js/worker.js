@@ -458,7 +458,8 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
 // its refocused position. With the aperture closed every depth is kept sharp
 // (each lens uses the depth under it); otherwise the picture is refocused at
 // `alpha` with detail where it is in focus and smooth blur elsewhere.
-async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0 }) {
+// `masks`: an animation frame's local adjustment settings (see resolveMasks).
+async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null }) {
   requireRaw();
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
@@ -480,12 +481,12 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
-    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, pxPerUnit: 14 * scale, masks: { focus: alpha, view: viewOf(u, v) } }, { id, type: 'result' });
+    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
     return undefined;
   }
   if (dof > 0) progress('Applying depth of field', 1);
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
-  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, view: viewOf(u, v) });
+  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) });
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }

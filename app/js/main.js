@@ -3913,6 +3913,47 @@ function savePng() {
   canvas.toBlob((blob) => download(blob, `${baseName()}.png`), 'image/png');
 }
 
+// The crop, rotation and this frame's pivot, pan and zoom, for frame i of
+// the animation (an image w x h), or null when there is nothing to apply.
+function frameGeometry(i, w, h) {
+  const s = {
+    ...((state.framePivots && state.framePivots[i]) || null),
+    orientation: +$('orientation').value || 1,
+    angle: +$('straighten').value,
+    crop: cropValues(),
+  };
+  return isIdentity(s) ? null : geometry(w, h, s);
+}
+
+// Each frame of the animation rendered at full resolution (Rendering >
+// Full resolution: Scale and Detail recovery), with that frame's camera and
+// local adjustment settings. Kept as JPEGs: a hundred full resolution
+// frames would not fit in memory as pixels.
+async function fullResFrames(n) {
+  const req = animationRequest();
+  const a = req.args;
+  const list = req.type === 'frames'
+    ? a.path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? a.alpha, aperture: f.aperture ?? a.aperture, dof: f.dof ?? a.dof, bokeh: a.bokeh, masks: f.masks || null }))
+    : a.alphas.map((alpha) => ({ u: a.u, v: a.v, alpha, aperture: a.aperture, dof: a.dof, bokeh: a.bokeh }));
+  const scale = +$('still-scale').value;
+  const passes = +$('still-passes').value;
+  const out = [];
+  for (let i = 0; i < Math.min(n, list.length); i++) {
+    const { promise } = engine.job('superRes', 'superres', { ...list[i], scale, passes }, {
+      onProgress: (_, p) => showProgress(`Rendering frame ${i + 1} of ${n} at full resolution`, (i + (p || 0)) / n),
+    });
+    const msg = await promise;
+    if (!msg || !(msg.pixels || msg.bitmap)) throw new Error('Full resolution rendering was stopped');
+    const img = toImageData(msg);
+    const c = new OffscreenCanvas(img.width, img.height);
+    const g = c.getContext('2d');
+    if (img instanceof ImageData) g.putImageData(img, 0, 0);
+    else g.drawImage(img, 0, 0);
+    out.push({ blob: await c.convertToBlob({ type: 'image/jpeg', quality: 0.95 }), width: img.width, height: img.height });
+  }
+  return out;
+}
+
 async function exportVideo() {
   $('webm-btn').disabled = true;
   try {
@@ -3922,9 +3963,12 @@ async function exportVideo() {
     const order = state.loop === 'pingpong'
       ? [...frames.keys(), ...[...frames.keys()].reverse().slice(1, -1)]
       : [...frames.keys(), ...frames.keys()];
-    const g = geometryFor(frames[0].width, frames[0].height);
-    const w = g ? g.width : frames[0].width;
-    const h = g ? g.height : frames[0].height;
+    // Full resolution on: every frame rendered again from the whole sensor.
+    const full = state.fullResMode && state.info && state.info.hasRaw ? await fullResFrames(frames.length) : null;
+    const size = full ? full[0] : frames[0];
+    const g0 = frameGeometry(0, size.width, size.height);
+    const w = g0 ? g0.width : size.width;
+    const h = g0 ? g0.height : size.height;
     // Enlarged to the chosen Video size (long side), in even pixels for the
     // encoder; the bitrate follows the size.
     const target = +$('video-size').value || 1080;
@@ -3941,17 +3985,28 @@ async function exportVideo() {
     const chunks = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     const done = new Promise((r) => { recorder.onstop = r; });
+    // Frames go out on the frame rate's beat, however long one takes to
+    // prepare (a full resolution frame is decoded first).
+    const t0 = performance.now();
     recorder.start();
-    for (let i = 0; i < order.length; i++) {
-      if (g) drawGeometry(cctx, frames[order[i]], g, c.width / w);
-      else cctx.drawImage(frames[order[i]], 0, 0, c.width, c.height);
-      showProgress('Recording video', i / order.length);
-      await new Promise((r) => setTimeout(r, 1000 / state.fps));
+    for (let n = 0; n < order.length; n++) {
+      const i = order[n];
+      const img = full ? await createImageBitmap(full[i].blob) : frames[i];
+      const g = frameGeometry(i, img.width, img.height);
+      const wait = t0 + (n * 1000) / state.fps - performance.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (g) drawGeometry(cctx, img, g, c.width / g.width);
+      else cctx.drawImage(img, 0, 0, c.width, c.height);
+      if (full) img.close();
+      showProgress('Recording video', n / order.length);
     }
+    await new Promise((r) => setTimeout(r, 1000 / state.fps));
     recorder.stop();
     await done;
     const ext = mime.includes('mp4') ? 'mp4' : 'webm';
     download(new Blob(chunks, { type: mime }), `${baseName()}-${$('anim').value}.${ext}`);
+  } catch (err) {
+    showError(err);
   } finally {
     hideProgress();
     $('webm-btn').disabled = false;
