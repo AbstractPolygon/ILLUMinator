@@ -8,7 +8,7 @@
   --accent-text: #1a1406;
   --slider-track: 2px;
   --slider-thumb: 10px;
-  --slider-height: 14px;
+  --slider-height: 12px;
   color-scheme: dark;
 }
 
@@ -130,6 +130,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: 
 #view.pannable { cursor: grab; }
 #view.panning { cursor: grabbing; }
 #view.hidden { visibility: hidden; }
+.version { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
 #spread-overlay { position: absolute; pointer-events: none; opacity: 0.5; }
 .placeholder { position: absolute; color: var(--muted); text-align: center; padding: 20px; }
 
@@ -150,7 +151,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: 
 .zoom button { padding: 6px 9px; min-width: 32px; }
 #zoom-label { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
 
-label { display: block; margin: 8px 0; font-size: 13px; }
+label { display: block; margin: 4px 0; font-size: 13px; }
 label input[type=range] { display: block; width: 100%; }
 label.check { display: flex; gap: 8px; align-items: center; }
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -215,7 +216,7 @@ input[type=range] {
   -webkit-appearance: none;
   appearance: none;
   height: var(--slider-height);
-  margin: 2px 0;
+  margin: 0;
   padding: 0;
   background: transparent;
   border: 0;

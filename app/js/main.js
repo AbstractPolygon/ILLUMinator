@@ -1,3 +1,4 @@
+import { VERSION } from './version.js';
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail } from './core/lfp.js';
 import { openFiles, pickCameraFolder, isLightFieldName, download, native, NativeFile } from './platform.js';
@@ -1362,6 +1363,7 @@ document.addEventListener('drop', (e) => {
 
 canvas.classList.add('hidden');
 setMode('camera');
+$('version').textContent = VERSION;
 
 // Desktop app: show the photos already imported, and announce cameras as
 // they are plugged in.
