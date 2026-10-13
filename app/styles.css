@@ -490,6 +490,9 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .mask-name { flex: 1; text-align: left; background: none; border: 0; padding: 4px 6px; font-size: 12.5px; }
 .mask-fx-title { margin: 8px 0 4px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .mask-del { padding: 4px 6px; color: var(--muted); }
+.mask-rename { padding: 4px 6px; color: var(--muted); }
+.mask-rename:hover { color: var(--text); }
+.mask-list li input[type=text] { flex: 1; min-width: 0; margin: 2px; padding: 3px 6px; font-size: 12.5px; }
 .mask-del:hover { color: #ff8a80; }
 .mask-delete { margin-top: 8px; color: #ff8a80; }
 

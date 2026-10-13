@@ -8,7 +8,7 @@ Masks that change part of the picture. A photo can have up to 16. The buttons ne
 - **Gradient:** a graduated filter: full effect on one side of a line through *Center X/Y* at an *Angle*, fading to none over *Width*.
 - **Depth:** uses the light field's depth: full effect between a *Near* and a *Far* depth (negative is nearer than the camera's focus), fading over *Feather*. *Follow focus* moves the range with the focus, so it keeps the same distance from it, also when the focus is animated.
 
-Click a mask in the list to edit it, the trash button to delete it (you are asked first).
+Click a mask in the list to edit it, the pencil (or a double-click on its name) to rename it, and the trash button to delete it (you are asked first). A mask's name is also the name of its group in the keyframe editor.
 
 - *Enabled* turns a mask off without losing it. A disabled mask shows only *Enabled* and *Delete mask*, and its keyframes are hidden in the keyframe editor.
 - *Invert* swaps inside and outside.

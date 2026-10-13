@@ -311,9 +311,9 @@ function renderGrid(photos, album) {
 }
 
 // An inline text field in place of `li`'s contents (new album, rename).
-function editName(li, value, onDone) {
+function editName(li, value, onDone, label = 'Album name') {
   const input = Object.assign(document.createElement('input'), { type: 'text', value, maxLength: 80 });
-  input.setAttribute('aria-label', 'Album name');
+  input.setAttribute('aria-label', label);
   li.replaceChildren(input);
   let done = false;
   const finish = (ok) => {
@@ -2043,11 +2043,15 @@ function setMasks(masks, { final = true } = {}) {
   if (final) scheduleSave();
 }
 
+// A mask's name: the one given to it (or its living filter's), else its
+// kind and number.
 function maskLabel(m, i) {
+  if (m.name) return m.name;
   const same = getMasks().slice(0, i + 1).filter((x) => x.kind === m.kind).length;
   return `${MASK_NAMES[m.kind]} ${same}`;
 }
 
+const PENCIL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg>';
 const TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
 
 function deleteMask(i) {
@@ -2092,6 +2096,24 @@ function renderMasks() {
       renderMasks();
       applySettingsSoon();
     };
+    name.title = 'Double-click to rename';
+    const rename = () => editName(li, maskLabel(m, i), (text) => {
+      if (text) {
+        const list = getMasks();
+        if (list[i]) list[i].name = text;
+        setMasks(list);
+      }
+      renderMasks();
+      renderTimeline();
+    }, 'Mask name');
+    name.ondblclick = rename;
+    const edit = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-rename', title: 'Rename' });
+    edit.innerHTML = PENCIL_ICON;
+    edit.setAttribute('aria-label', `Rename ${maskLabel(m, i)}`);
+    edit.onclick = (e) => {
+      e.stopPropagation();
+      rename();
+    };
     const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', title: 'Delete mask' });
     del.innerHTML = TRASH_ICON;
     del.setAttribute('aria-label', `Delete ${maskLabel(m, i)}`);
@@ -2099,7 +2121,7 @@ function renderMasks() {
       e.stopPropagation();
       askDeleteMask(i, del);
     };
-    li.append(name, del);
+    li.append(name, edit, del);
     return li;
   }));
   // Masks belong to a photo: none can be added until one is open.
