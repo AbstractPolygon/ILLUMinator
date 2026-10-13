@@ -29,6 +29,11 @@ jobs:
         run: |
           git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki-repo
           rsync -a --exclude README.md wiki/ wiki-repo/
+          # The sidebar and footer are optional: without one here, the wiki
+          # goes back to GitHub's default.
+          for f in _Sidebar.md _Footer.md; do
+            [ -f "wiki/$f" ] || rm -f "wiki-repo/$f"
+          done
           version=$(node -p "require('./package.json').version")
           sed -i "s/{{version}}/${version}/g" wiki-repo/*.md
           cd wiki-repo
