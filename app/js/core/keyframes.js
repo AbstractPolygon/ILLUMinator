@@ -9,6 +9,8 @@
 //   zoom      1..3
 //   panX      -1..1 (earlier versions kept one 'pan' track of [x, y])
 //   panY      -1..1
+//   pivot     the Pivot depth slider (-100..100): a keyframed pivot is a
+//             custom pivot
 // ease: { type: 'auto' | 'linear' | 'smooth' | 'in' | 'out' | 'hold' | 'custom',
 //         bezier: [x1, y1, x2, y2] } (custom: a cubic Bezier from (0, 0) to
 //         (1, 1) through those handles; y may leave 0..1 to overshoot).
@@ -16,7 +18,7 @@
 // clamped handles: the speed carries through each keyframe, flattening at
 // highs, lows and the ends, without overshooting.
 
-export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY'];
+export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY', 'pivot'];
 // Besides those, 'mask:<id>:<attr>': a setting of local adjustment <id>
 // (its strength, a shape setting or an effect; see core/local.js).
 export const isMaskTrack = (k) => /^mask:[\w-]+:[a-z]+$/.test(k);

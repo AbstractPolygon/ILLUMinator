@@ -20,7 +20,7 @@ With *Animate: Keyframes*, the keyframe editor opens under the play bar. Drag it
 
 **Tracks.** Every setting that can be animated has a track, in groups that open and close:
 
-- *Camera:* aperture, depth of field, focus, viewpoint, zoom, pan X and pan Y.
+- *Camera:* aperture, depth of field, focus, viewpoint, zoom, pan X, pan Y and pivot depth (a keyframed pivot is a custom pivot, see [[Camera]]).
 - One group for each local adjustment, named after the living filter that made it (or the mask): its strength, shape and every effect. These groups start closed.
 
 A group's summary row shows a diamond wherever the group has keyframes; dragging one moves every keyframe at that time.

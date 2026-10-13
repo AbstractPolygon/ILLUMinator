@@ -942,7 +942,7 @@ function ensureAnimation() {
   state.animKey = key;
   state.frames = new Array(req.type === 'frames' ? req.args.path.length : req.args.alphas.length);
   state.framePivots = withPivotZoom(req.type === 'frames'
-    ? req.args.path.map((f) => pivotFor(f.u, f.v, f.alpha ?? req.args.alpha, f.aperture ?? req.args.aperture))
+    ? req.args.path.map((f) => pivotFor(f.u, f.v, f.alpha ?? req.args.alpha, f.aperture ?? req.args.aperture, f.pivot ?? null))
     : req.args.alphas.map((alpha) => pivotFor(req.args.u, req.args.v, alpha, req.args.aperture)));
   if (req.framing) state.framePivots = state.framePivots.map((p, i) => combineMotion(p, req.framing[i]));
   // Zoomed frames are drawn into a canvas this much larger, so the zoom is
@@ -1535,6 +1535,7 @@ $('pivot').oninput = () => {
   if (state.lastImage) draw(state.lastImage);
 };
 $('pivot').onchange = () => {
+  autoKey();
   invalidateAnimation();
   geometryChanged();
 };
@@ -1655,9 +1656,12 @@ function setCropValues(c) {
 // against the viewpoint (and zooming in a little so no edge shows).
 // Positions move by (depth - still depth) x viewpoint offset, in lens
 // spacings: one view pixel at 1x resolution.
-function pivotFor(u, v, alpha, aperture) {
-  if (!$('pivot-on').checked || !state.info || !state.info.hasRaw || state.depthShown) return null;
-  const pivot = 1.6 * $('pivot').value / 100;
+// `depth`: an animation's Pivot depth for this frame (a custom pivot even
+// with Custom pivot off), or null for the slider's.
+function pivotFor(u, v, alpha, aperture, depth = null) {
+  const keyed = Number.isFinite(depth);
+  if ((!keyed && !$('pivot-on').checked) || !state.info || !state.info.hasRaw || state.depthShown) return null;
+  const pivot = 1.6 * (keyed ? depth : +$('pivot').value) / 100;
   const still = aperture > 0 ? alpha : 0;
   const k = +$('detail').value;
   const { width: W, height: H } = state.info;
@@ -2182,7 +2186,7 @@ function localSettings() {
 // to move, click to select (and show), Delete to remove; the selected one
 // sets the curve to the next. Framing (zoom and pan) is applied when the
 // picture is drawn, like the pivot.
-const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', panX: 'Pan X', panY: 'Pan Y' };
+const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', panX: 'Pan X', panY: 'Pan Y', pivot: 'Pivot depth' };
 
 // Every setting of a local adjustment (living filters included) has a
 // track too: 'mask:<id>:<attr>'.
@@ -2329,6 +2333,7 @@ function currentValue(k) {
     case 'view': return [state.camera.u, state.camera.v];
     case 'zoom': return +$('frame-zoom').value / 100;
     case 'panX': return +$('frame-pan-x').value / 100;
+    case 'pivot': return +$('pivot').value;
     default: return +$('frame-pan-y').value / 100;
   }
 }
@@ -2358,6 +2363,12 @@ function applyValue(k, v) {
     $('focus').value = v;
   } else if (k === 'view') {
     state.camera = { u: v[0], v: v[1] };
+  } else if (k === 'pivot') {
+    // A keyframed pivot is a custom pivot.
+    $('pivot-on').checked = true;
+    $('pivot').disabled = $('pivot-on').disabled;
+    $('pivot').value = Math.round(v);
+    showSliderValue($('pivot'));
   } else if (k === 'zoom') {
     $('frame-zoom').value = Math.round(v * 100);
     showSliderValue($('frame-zoom'));
@@ -3061,7 +3072,7 @@ function keyframeFrames() {
     const lens = apertureFor(v.aperture ?? live.aperture);
     const depth = v.depth ?? live.depth;
     const view = v.view ?? [state.camera.u, state.camera.v];
-    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50), masks });
+    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50), masks, pivot: v.pivot ?? null });
     const z = v.zoom ?? +$('frame-zoom').value / 100;
     const panX = v.panX ?? +$('frame-pan-x').value / 100;
     const panY = v.panY ?? +$('frame-pan-y').value / 100;
@@ -3086,6 +3097,7 @@ const CHANNELS = [
   { k: 'zoom', c: 0, name: 'Zoom', color: '#fff176' },
   { k: 'panX', c: 0, name: 'Pan X', color: '#f48fb1' },
   { k: 'panY', c: 0, name: 'Pan Y', color: '#aed581' },
+  { k: 'pivot', c: 0, name: 'Pivot depth', color: '#90caf9' },
 ];
 const channelId = (ch) => `${ch.k}.${ch.c}`;
 const MASK_COLORS = ['#ff8a65', '#4db6ac', '#9575cd', '#e0e0e0', '#81c784', '#64b5f6', '#ffd54f', '#f06292', '#a1887f', '#90a4ae', '#ce93d8'];
@@ -3141,6 +3153,7 @@ function channelLimits(ch) {
     case 'focus': return [-2, 2];
     case 'view': return [-r, r];
     case 'zoom': return [1, 3];
+    case 'pivot': return [-100, 100];
     default: return [-1, 1];
   }
 }
