@@ -267,6 +267,82 @@
         </details>
       </details>
 
+      <details class="panel local-panel" data-panel="camera">
+        <summary><h2>Local Adjustments</h2></summary>
+        <div class="row mask-add">
+          <button id="mask-add-radial" type="button" title="An ellipse: full effect inside, fading out">+ Radial</button>
+          <button id="mask-add-linear" type="button" title="A graduated filter: full effect on one side of a line, fading to none">+ Gradient</button>
+          <button id="mask-add-depth" type="button" title="By depth: full effect between a near and a far depth">+ Depth</button>
+        </div>
+        <ul id="mask-list" class="mask-list"></ul>
+        <div id="mask-editor" hidden>
+          <div class="row check-row">
+            <label class="check"><input id="mask-on" type="checkbox" checked> Enabled</label>
+            <label class="check"><input id="mask-invert" type="checkbox"> Invert</label>
+            <label class="check"><input id="mask-show" type="checkbox"> Show mask</label>
+          </div>
+          <div id="mask-shape-radial" class="mask-shape">
+            <label>Center X <output data-for="mr-x" for="mr-x">50</output>
+              <input id="mr-x" type="range" min="0" max="100" step="1" value="50" data-default="50">
+            </label>
+            <label>Center Y <output data-for="mr-y" for="mr-y">50</output>
+              <input id="mr-y" type="range" min="0" max="100" step="1" value="50" data-default="50">
+            </label>
+            <label>Width <output data-for="mr-w" for="mr-w">25</output>
+              <input id="mr-w" type="range" min="2" max="100" step="1" value="25" data-default="25">
+            </label>
+            <label>Height <output data-for="mr-h" for="mr-h">25</output>
+              <input id="mr-h" type="range" min="2" max="100" step="1" value="25" data-default="25">
+            </label>
+            <label>Feather <output data-for="mr-feather" for="mr-feather">50</output>
+              <input id="mr-feather" type="range" min="0" max="100" step="1" value="50" data-default="50">
+            </label>
+          </div>
+          <div id="mask-shape-linear" class="mask-shape" hidden>
+            <label>Center X <output data-for="ml-x" for="ml-x">50</output>
+              <input id="ml-x" type="range" min="0" max="100" step="1" value="50" data-default="50">
+            </label>
+            <label>Center Y <output data-for="ml-y" for="ml-y">50</output>
+              <input id="ml-y" type="range" min="0" max="100" step="1" value="50" data-default="50">
+            </label>
+            <label>Angle <output data-for="ml-angle" for="ml-angle">90</output>
+              <input id="ml-angle" type="range" min="-180" max="180" step="1" value="90" data-default="90">
+            </label>
+            <label>Fade <output data-for="ml-width" for="ml-width">30</output>
+              <input id="ml-width" type="range" min="2" max="100" step="1" value="30" data-default="30">
+            </label>
+          </div>
+          <div id="mask-shape-depth" class="mask-shape" hidden>
+            <label title="Depth where the effect starts (negative is nearer than the camera&#8217;s focus)">Near <output data-for="md-near" for="md-near">-30</output>
+              <input id="md-near" type="range" min="-160" max="160" step="1" value="-30" data-default="-30">
+            </label>
+            <label>Far <output data-for="md-far" for="md-far">30</output>
+              <input id="md-far" type="range" min="-160" max="160" step="1" value="30" data-default="30">
+            </label>
+            <label>Feather <output data-for="md-feather" for="md-feather">20</output>
+              <input id="md-feather" type="range" min="1" max="100" step="1" value="20" data-default="20">
+            </label>
+          </div>
+          <h3 class="mask-fx-title">Effect</h3>
+            <label>Exposure <output data-for="mx-exposure" for="mx-exposure">0</output>
+              <input id="mx-exposure" type="range" min="-200" max="200" step="5" value="0" data-default="0">
+            </label>
+            <label>Contrast <output data-for="mx-contrast" for="mx-contrast">0</output>
+              <input id="mx-contrast" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+            </label>
+            <label>Saturation <output data-for="mx-saturation" for="mx-saturation">0</output>
+              <input id="mx-saturation" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+            </label>
+            <label>Temperature <output data-for="mx-temperature" for="mx-temperature">0</output>
+              <input id="mx-temperature" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+            </label>
+            <label>Tint <output data-for="mx-tint" for="mx-tint">0</output>
+              <input id="mx-tint" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+            </label>
+        </div>
+        <input id="local-masks" type="hidden" value="[]" data-text>
+      </details>
+
       <details class="panel" data-panel="camera">
         <summary><h2>Camera</h2></summary>
         <details class="subpanel">

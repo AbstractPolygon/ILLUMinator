@@ -445,6 +445,16 @@ uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
 uniform sampler2D uVeil;   // flare veil per tile (core/flare.js), linear
 uniform float uVeilAmount;
 uniform vec4 uLens;        // core/lens.js: k, zoom, vignetting, start (0 0 0 0: off)
+// Local adjustments (core/local.js).
+uniform int uMaskCount;
+uniform int uMaskKind[4];  // 0 radial, 1 linear, 2 depth
+uniform vec4 uMaskShape[4];
+uniform vec4 uMaskExtra[4]; // feather (radial), -, -, invert
+uniform vec4 uMaskFx[4];   // exposure, contrast, saturation, temperature
+uniform vec4 uMaskFx2[4];  // tint
+uniform int uMaskShow;
+uniform highp sampler2D uDepth;
+uniform int uDepthOn;
 uniform int uFringeOn;
 uniform int uFringeRadius;
 uniform float uFringeThreshold;
@@ -543,6 +553,49 @@ vec3 applyLook(vec3 c) {
   return c;
 }
 
+float maskWeight(int i, vec2 n, float aspect) {
+  int kind = uMaskKind[i];
+  vec4 s = uMaskShape[i];
+  float w = 0.0;
+  if (kind == 0) {
+    float d = length((n - s.xy) / max(s.zw, vec2(1e-4)));
+    w = 1.0 - smoothstep(1.0 - min(0.999, uMaskExtra[i].x), 1.0, d);
+  } else if (kind == 1) {
+    float a = radians(s.z);
+    float t = ((n.x - s.x) * aspect * cos(a) + (n.y - s.y) * sin(a)) / max(1e-4, s.w) + 0.5;
+    w = 1.0 - smoothstep(0.0, 1.0, t);
+  } else if (kind == 2) {
+    if (uDepthOn == 0) return 0.0;
+    ivec2 dsz = textureSize(uDepth, 0);
+    float d = texelFetch(uDepth, clamp(ivec2(n * vec2(dsz)), ivec2(0), dsz - 1), 0).r;
+    float f = max(1e-4, s.z);
+    w = smoothstep(s.x - f, s.x, d) * (1.0 - smoothstep(s.y, s.y + f, d));
+  }
+  return uMaskExtra[i].w > 0.5 ? 1.0 - w : w;
+}
+
+// Same as applyEffects / applyLocal in core/local.js.
+vec3 applyLocal(vec3 c, vec2 n, float aspect) {
+  for (int i = 0; i < 4; i++) {
+    if (i >= uMaskCount) break;
+    float w = maskWeight(i, n, aspect);
+    if (w > 0.0) {
+      vec4 fx = uMaskFx[i];
+      c *= exp2(fx.x * w);
+      c.r *= 1.0 + 0.25 * fx.w * w;
+      c.b *= 1.0 - 0.25 * fx.w * w;
+      c.g *= 1.0 - 0.15 * uMaskFx2[i].x * w;
+      float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      if (fx.y != 0.0 && y > 1e-6) c *= pow(y / 0.18, fx.y * w * 0.6);
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = l + (c - l) * max(0.0, 1.0 + fx.z * w);
+      c = max(c, vec3(0.0));
+    }
+    if (i == uMaskShow) c = vec3(c.r * (1.0 - 0.5 * w) + 0.4 * w, c.g * (1.0 - 0.5 * w), c.b * (1.0 - 0.5 * w));
+  }
+  return c;
+}
+
 float srgb(float v) {
   v = clamp(v, 0.0, 1.0);
   return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
@@ -581,6 +634,7 @@ void main() {
   }
   c *= uExposure;
   if (uLookOn == 1) c = applyLook(c);
+  if (uMaskCount > 0) c = applyLocal(c, (vec2(p) + 0.5) / vec2(size), float(size.x) / float(size.y));
   outColor = vec4(srgb(c.r), srgb(c.g), srgb(c.b), 1.0);
 }`;
 
@@ -1305,7 +1359,7 @@ export class GpuRenderer {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, rgba);
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null }) {
     const gl = this.gl;
     const P = this.programs.present;
     this.canvas.width = w;
@@ -1319,6 +1373,18 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uExposure, exposure);
     const veil = veilAmount > 0 && this.veilTex;
     gl.uniform1f(P.u.uVeilAmount, veil ? veilAmount : 0);
+    gl.uniform1i(P.u.uMaskCount, local ? local.count : 0);
+    if (local) {
+      gl.uniform1iv(P.u.uMaskKind, local.kinds);
+      gl.uniform4fv(P.u.uMaskShape, local.shape);
+      gl.uniform4fv(P.u.uMaskExtra, local.extra);
+      gl.uniform4fv(P.u.uMaskFx, local.fx);
+      gl.uniform4fv(P.u.uMaskFx2, local.fx2);
+      gl.uniform1i(P.u.uMaskShow, local.show);
+    }
+    gl.uniform1i(P.u.uDepthOn, local && this.depthTex ? 1 : 0);
+    gl.uniform1i(P.u.uDepth, 3);
+    this.bindTex(3, this.depthTex || src);
     gl.uniform4f(P.u.uLens, lens ? lens.k : 0, lens ? lens.zoom : 1, lens ? lens.vig : 0, lens ? lens.start : 0);
     gl.uniform1i(P.u.uVeil, 2);
     this.bindTex(2, veil ? this.veilTex : src);

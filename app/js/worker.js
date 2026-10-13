@@ -19,6 +19,7 @@ import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
+import { parseMasks, activeMasks, packMasks } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
@@ -110,6 +111,11 @@ function updateColor() {
   state.look = makeLook(s);
   state.detail = makeDetail(s);
   state.lens = lensParams(s.lens);
+  // Local adjustments: the masks that change something (or the one shown).
+  const masks = parseMasks(s.local && s.local.masks);
+  const show = s.local && s.local.show >= 0 && masks[s.local.show] ? s.local.show : -1;
+  state.masks = masks.filter((m, i) => i === show || activeMasks([m]).length);
+  state.maskShow = show >= 0 ? state.masks.indexOf(masks[show]) : -1;
   const ccm = colorMatrix(lf.cam, s);
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
@@ -124,6 +130,13 @@ function updateColor() {
 
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
+// Local adjustments for a w x h picture (core/local.js), or null.
+function localFor(w, h) {
+  if (!state.masks || !state.masks.length) return null;
+  const d = state.depth && state.sampler ? { depth: state.depth.alpha, dw: state.sampler.outW, dh: state.sampler.outH } : {};
+  return { masks: state.masks, w, h, show: state.maskShow, ...d };
+}
+
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
 function toPixels(rgb, w, h) {
   rgb = applyDetail(rgb, w, h, state.detail);
@@ -131,7 +144,8 @@ function toPixels(rgb, w, h) {
   rgb = applyLens(rgb, w, h, state.lens);
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
-  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look);
+  const local = localFor(w, h);
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look, local);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
   const srgb = new Float32Array(rgb.length);
@@ -143,7 +157,7 @@ function toPixels(rgb, w, h) {
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, state.look);
+  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, state.look, local);
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -173,6 +187,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     look: state.look,
     veilAmount: state.veil ? state.veilAmount : 0,
     lens: state.lens,
+    local: state.masks && state.masks.length ? { ...packMasks(state.masks), show: state.maskShow } : null,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
@@ -485,11 +500,13 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
   return undefined;
 }
 
-async function settings({ settings: s }) {
+async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   Object.assign(state.settings, s);
   if (smoothingChanged && !detailChanged) applyDepthSmoothing();
+  // A depth mask needs the depth map.
+  if (state.lf && state.lf.raw && !state.depth && parseMasks(s.local && s.local.masks).some((m) => m.kind === 'depth')) await ensureDepth(id);
   if (state.pp) {
     updateColor();
     return summary();

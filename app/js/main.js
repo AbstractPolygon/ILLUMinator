@@ -8,6 +8,7 @@ import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
+import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
 import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 
@@ -1907,6 +1908,119 @@ $('ccm-mode').onchange = () => {
 };
 for (let i = 0; i < 9; i++) $(`ccm-${i}`).addEventListener('input', () => applySettingsSoon());
 
+// ---------------------------------------------------------------- local adjustments
+
+// Masks (core/local.js) kept as JSON in a hidden field, so they are saved
+// with the photo's edits like every other control. The editor shows the
+// selected mask.
+const MASK_NAMES = { radial: 'Radial', linear: 'Gradient', depth: 'Depth' };
+const SHAPE_SLIDERS = {
+  radial: { x: ['mr-x', 100], y: ['mr-y', 100], w: ['mr-w', 100], h: ['mr-h', 100], feather: ['mr-feather', 100] },
+  linear: { x: ['ml-x', 100], y: ['ml-y', 100], angle: ['ml-angle', 1], width: ['ml-width', 100] },
+  depth: { near: ['md-near', 100], far: ['md-far', 100], feather: ['md-feather', 100] },
+};
+const FX_SLIDERS = { exposure: 'mx-exposure', contrast: 'mx-contrast', saturation: 'mx-saturation', temperature: 'mx-temperature', tint: 'mx-tint' };
+let maskSel = -1;
+
+function getMasks() {
+  return parseMasks($('local-masks').value);
+}
+
+function setMasks(masks, { final = true } = {}) {
+  $('local-masks').value = JSON.stringify(masks);
+  applySettingsSoon();
+  if (final) scheduleSave();
+}
+
+function maskLabel(m, i) {
+  const same = getMasks().slice(0, i + 1).filter((x) => x.kind === m.kind).length;
+  return `${MASK_NAMES[m.kind]} ${same}`;
+}
+
+function renderMasks() {
+  const masks = getMasks();
+  if (maskSel >= masks.length) maskSel = masks.length - 1;
+  $('mask-list').replaceChildren(...masks.map((m, i) => {
+    const li = document.createElement('li');
+    li.className = i === maskSel ? 'current' : '';
+    if (!m.on) li.classList.add('off');
+    const name = Object.assign(document.createElement('button'), { type: 'button', className: 'mask-name', textContent: maskLabel(m, i) });
+    name.onclick = () => {
+      maskSel = i;
+      renderMasks();
+      applySettingsSoon();
+    };
+    const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', textContent: '×', title: 'Delete mask' });
+    del.setAttribute('aria-label', `Delete ${maskLabel(m, i)}`);
+    del.onclick = () => {
+      const list = getMasks();
+      list.splice(i, 1);
+      if (maskSel >= i) maskSel = Math.max(list.length ? 0 : -1, maskSel - 1);
+      setMasks(list);
+      renderMasks();
+    };
+    li.append(name, del);
+    return li;
+  }));
+  for (const kind of Object.keys(MASK_NAMES)) $(`mask-add-${kind}`).disabled = masks.length >= MAX_MASKS;
+  const m = masks[maskSel];
+  $('mask-editor').hidden = !m;
+  if (!m) {
+    $('mask-show').checked = false;
+    return;
+  }
+  for (const kind of Object.keys(SHAPE_SLIDERS)) $(`mask-shape-${kind}`).hidden = kind !== m.kind;
+  for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) $(id).value = Math.round(m[key] * k);
+  for (const [key, id] of Object.entries(FX_SLIDERS)) $(id).value = Math.round(m.fx[key] * 100);
+  $('mask-on').checked = m.on;
+  $('mask-invert').checked = m.invert;
+  for (const input of document.querySelectorAll('.local-panel input[type=range]')) showSliderValue(input);
+}
+
+// Editor controls -> the selected mask.
+function maskFromEditor(final) {
+  const masks = getMasks();
+  const m = masks[maskSel];
+  if (!m) return;
+  for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) m[key] = +$(id).value / k;
+  for (const [key, id] of Object.entries(FX_SLIDERS)) m.fx[key] = +$(id).value / 100;
+  m.on = $('mask-on').checked;
+  m.invert = $('mask-invert').checked;
+  setMasks(masks, { final });
+  if (final) renderMasks();
+}
+
+for (const kind of Object.keys(MASK_NAMES)) {
+  $(`mask-add-${kind}`).onclick = () => {
+    const masks = getMasks();
+    if (masks.length >= MAX_MASKS) return;
+    masks.push(defaultMask(kind));
+    maskSel = masks.length - 1;
+    $('mask-show').checked = true;
+    setMasks(masks);
+    renderMasks();
+  };
+}
+
+for (const input of document.querySelectorAll('.local-panel input[type=range]')) {
+  input.addEventListener('input', () => {
+    showSliderValue(input);
+    maskFromEditor(false);
+  });
+  input.addEventListener('change', () => maskFromEditor(true));
+  input.addEventListener('dblclick', () => {
+    input.value = input.dataset.default;
+    showSliderValue(input);
+    maskFromEditor(true);
+  });
+}
+for (const id of ['mask-on', 'mask-invert']) $(id).addEventListener('change', () => maskFromEditor(true));
+$('mask-show').addEventListener('change', () => applySettingsSoon());
+
+function localSettings() {
+  return { masks: $('local-masks').value, show: $('mask-show').checked ? maskSel : -1 };
+}
+
 // ---------------------------------------------------------------- tone curve
 
 const CURVE_REGIONS = ['shadows', 'darks', 'lights', 'highlights'];
@@ -2237,6 +2351,7 @@ async function applySettings() {
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
     flare: { on: $('flare-on').checked, amount: $('flare-amount').value / 100 },
+    local: localSettings(),
     lens: { distortion: +$('lens-distortion').value, vignetting: +$('lens-vignetting').value, midpoint: +$('lens-midpoint').value },
     defringe: {
       on: $('fringe-on').checked,
@@ -2260,7 +2375,9 @@ async function applySettings() {
   $('fringe-radius-label').textContent = `${settings.defringe.radius} px`;
   showFringeHues();
   if (!canRender()) return;
-  const info = await engine.request('settings', { settings });
+  // Progress shows when a setting needs work first (a depth mask measures depth).
+  const info = await engine.request('settings', { settings }, { onProgress: showProgress });
+  hideProgress();
   if (info) state.info = { ...state.info, ...info };
   showAutoFringe();
   showResolutionSizes();
@@ -2331,6 +2448,9 @@ async function restoreEdits(info) {
     showColorMatrix();
     $('flare-amount').disabled = !$('flare-on').checked;
     showAnimationEnabled();
+    maskSel = getMasks().length ? 0 : -1;
+    $('mask-show').checked = false;
+    renderMasks();
     resetTemperature(info, { keep: !!saved });
     state.camera = { ...view };
     state.focusPoint = { ...focusPoint };
@@ -2448,6 +2568,10 @@ function showSliderValue(input) {
   else if (input.id === 'focus') out.textContent = `${sign}${Math.abs(v).toFixed(2)}`;
   else if (input.id === 'tilt-rotation') out.textContent = `${v}°`;
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
+  else if (input.id === 'ml-angle') out.textContent = `${v}°`;
+  else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
+  else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;
+  else if (input.closest('.mask-shape')) out.textContent = `${v}`;
   else if (input.id === 'wb-temperature') out.textContent = `${v} K`;
   else if (input.id === 'sharp-radius') out.textContent = v.toFixed(1);
   else if (input.parentElement.closest('.details-panel')) out.textContent = `${v}`;

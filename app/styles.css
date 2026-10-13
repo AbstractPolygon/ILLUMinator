@@ -456,3 +456,13 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 /* Custom color matrix: output rows, camera columns. */
 .ccm-grid { display: grid; grid-template-columns: 14px repeat(3, minmax(0, 1fr)); gap: 4px; align-items: center; margin: 2px 0 8px; font-size: 11.5px; color: var(--muted); text-align: center; }
 .ccm-grid input { width: 100%; min-width: 0; padding: 3px 4px; background: #0f1114; border: 1px solid var(--line); border-radius: 4px; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Local adjustments. */
+.mask-add { margin: 2px 0 8px; }
+.mask-add button { flex: 1; padding: 5px 6px; font-size: 12.5px; }
+.mask-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.mask-list li { display: flex; align-items: center; border-radius: 5px; border: 1px solid transparent; }
+.mask-list li.current { border-color: var(--accent); }
+.mask-list li.off .mask-name { color: var(--muted); text-decoration: line-through; }
+.mask-name { flex: 1; text-align: left; background: none; border: 0; padding: 4px 6px; font-size: 12.5px; }
+.mask-fx-title { margin: 8px 0 4px; font-size: 12.5px; font-weight: 500; color: var(--muted); }

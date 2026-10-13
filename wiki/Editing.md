@@ -34,6 +34,16 @@ Focus clicks, the white balance picker, exports and animations all follow the cr
 
 **Color Matrix.** How the camera's colors become screen colors: *Camera* (the matrix the camera recorded), *None* (the sensor's colors as they are) or *Custom*, an editable 3 × 3 matrix that starts from the camera's (rows are output red, green and blue; columns camera red, green and blue).
 
+## Local Adjustments
+
+Up to four masks, each with its own effect: *Exposure*, *Contrast*, *Saturation*, *Temperature* and *Tint*.
+
+- **+ Radial:** an ellipse (*Center X/Y*, *Width*, *Height*), full effect inside and fading out over *Feather*.
+- **+ Gradient:** a graduated filter: full effect on one side of a line through *Center X/Y* at an *Angle*, fading to none over *Fade*.
+- **+ Depth:** uses the light field's depth: full effect between a *Near* and a *Far* depth (negative is nearer than the camera's focus), fading over *Feather*. Brighten a subject, darken or desaturate the background, and so on.
+
+Click a mask in the list to edit it, × to delete it. *Enabled* turns it off without losing it, *Invert* swaps inside and outside, and *Show mask* tints what it covers red while you adjust it.
+
 ## Camera
 
 The light field controls.

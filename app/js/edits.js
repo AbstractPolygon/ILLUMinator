@@ -29,6 +29,7 @@ export const EDIT_GROUPS = {
   defringe: ['lens-distortion', 'lens-vignetting', 'lens-midpoint', 'flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim-on', 'anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
   rendering: ['detail', 'still-scale', 'still-passes'],
+  local: ['local-masks'],
   geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],
 };
 

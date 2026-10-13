@@ -6,6 +6,7 @@
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
 
+import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
 
@@ -415,12 +416,15 @@ export function autoExposure(rgb, matrix) {
 
 // Linear camera RGB -> sRGB RGBA bytes. `look`: the per-pixel color
 // adjustments from makeLook (core/color.js), applied after exposure.
-export function toneMap(rgb, matrix, exposure, out, look = null) {
+// `local`: local adjustments (core/local.js) { masks, w, h, depth, dw, dh,
+// show } for a w x h picture, or null.
+export function toneMap(rgb, matrix, exposure, out, look = null, local = null) {
   const n = rgb.length / 3;
   const px = out || new Uint8ClampedArray(n * 4);
-  const scale = look ? 1 : 4096;
+  const scale = look || local ? 1 : 4096;
   const m = matrix.map((v) => v * exposure * scale);
   const p = [0, 0, 0];
+  const aspect = local ? local.w / local.h : 1;
   for (let i = 0, o = 0; i < rgb.length; i += 3, o += 4) {
     const r = rgb[i];
     const g = rgb[i + 1];
@@ -428,11 +432,21 @@ export function toneMap(rgb, matrix, exposure, out, look = null) {
     let R = m[0] * r + m[1] * g + m[2] * b;
     let G = m[3] * r + m[4] * g + m[5] * b;
     let B = m[6] * r + m[7] * g + m[8] * b;
-    if (look) {
+    if (look || local) {
       p[0] = R;
       p[1] = G;
       p[2] = B;
-      applyLook(p, look);
+      if (look) applyLook(p, look);
+      if (local) {
+        const k = i / 3;
+        const x = k % local.w;
+        const y = (k - x) / local.w;
+        const nx = (x + 0.5) / local.w;
+        const ny = (y + 0.5) / local.h;
+        let d = null;
+        if (local.depth) d = local.depth[Math.min(local.dh - 1, Math.floor(ny * local.dh)) * local.dw + Math.min(local.dw - 1, Math.floor(nx * local.dw))];
+        applyLocal(p, local.masks, nx, ny, aspect, d, local.show);
+      }
       R = p[0] * 4096;
       G = p[1] * 4096;
       B = p[2] * 4096;
