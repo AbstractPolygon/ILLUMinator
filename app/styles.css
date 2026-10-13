@@ -200,7 +200,7 @@ dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
   user-select: none;
 }
 .subpanel > summary::-webkit-details-marker { display: none; }
-.subpanel > summary h3 { margin: 0; font-size: 12.5px; font-weight: 600; }
+.subpanel > summary h3 { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .subpanel > summary::after {
   content: '';
   width: 5px;
