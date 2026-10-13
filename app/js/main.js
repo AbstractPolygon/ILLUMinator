@@ -835,6 +835,21 @@ function showsCamera() {
   return state.mode === 'camera' && !state.fullRes && !state.depthShown && !state.showingFrames;
 }
 
+// While a slider or the picture is dragged the camera view renders a quicker
+// draft (strong blur at half size); the full picture follows on release.
+const drag = { on: false, drafted: false };
+document.addEventListener('pointerdown', (e) => {
+  if (e.button === 0 && (e.target === canvas || (e.target.matches && e.target.matches('input[type=range]')))) drag.on = true;
+}, true);
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(type, () => {
+    if (!drag.on) return;
+    drag.on = false;
+    if (drag.drafted && showsCamera()) renderCamera();
+    drag.drafted = false;
+  }, true);
+}
+
 // Live camera view. Requests are coalesced: while one renders, only the
 // latest settings are kept for the next.
 async function renderCamera() {
@@ -851,9 +866,13 @@ async function renderCamera() {
       hideProgress();
       if (img && showsCamera()) draw(img);
     } else {
-      const msg = await engine.request('view', cameraParams(), { onProgress: showProgress });
+      const draft = drag.on;
+      const msg = await engine.request('view', { ...cameraParams(), draft }, { onProgress: showProgress });
       hideProgress();
-      if (msg && (msg.pixels || msg.bitmap) && showsCamera()) draw(toImageData(msg));
+      if (msg && (msg.pixels || msg.bitmap) && showsCamera()) {
+        draw(toImageData(msg));
+        if (draft) drag.drafted = true;
+      }
     }
   } catch (err) {
     showError(err);

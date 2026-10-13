@@ -297,14 +297,24 @@ const MAX_TAPS = 512;
 // spread into discs or hexagons (bokeh). Points behind this pixel only reach
 // it within its own blur, so blurred background does not bleed over sharp
 // foreground edges.
+// Each pixel looks only as far as the largest blur around it reaches
+// (uTiles: per 8 x 8 tile, the largest blur radius within reach), so sharp
+// areas far from strong blur cost little. uPass 1 renders the picture at
+// half size; uPass 2 then uses that for pixels that are themselves strongly
+// blurred (at least uHalfFrom pixels), where half size looks the same.
+const DOF_TILE = 8;
 const DOF_GATHER = `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D uPrep;
+uniform sampler2D uTiles;
+uniform sampler2D uHalf;
 uniform int uTaps;
 uniform float uMaxR;
-uniform int uShape;   // 0 smooth, 1 circle, 2 hexagon
-uniform float uLod;   // mip level matching the spacing between taps
+uniform float uReach;  // how far past its radius a blur still counts
+uniform int uShape;    // 0 smooth, 1 circle, 2 hexagon
+uniform int uPass;     // 0 full size, 1 half size, 2 full size with half size
+uniform float uHalfFrom;
 out vec4 outColor;
 
 float shapeDist(vec2 o) {
@@ -324,22 +334,26 @@ float weightFor(float dist, float r) {
   return inside / (r * r);
 }
 
-void main() {
-  ivec2 p = ivec2(gl_FragCoord.xy);
-  ivec2 size = textureSize(uPrep, 0);
-  vec4 c = texelFetch(uPrep, p, 0);
+// The gathered color at full size pixel position pf (pixel centers at
+// integers), whose own prepared value is c.
+vec3 gather(vec2 pf, vec4 c, ivec2 size) {
   float rc = abs(c.a);
   vec3 sum = c.rgb * weightFor(0.0, rc);
   float wsum = weightFor(0.0, rc);
+  ivec2 t = clamp(ivec2(pf) / ${DOF_TILE}, ivec2(0), textureSize(uTiles, 0) - 1);
+  float maxR = min(uMaxR, texelFetch(uTiles, t, 0).r * uReach + 1.0);
+  if (maxR < 0.75) return c.rgb;
+  int taps = clamp(int(maxR * maxR * 1.2 + 0.5), 16, uTaps);
+  // Each tap stands for the area between taps: read the pre-averaged
+  // (mipmapped) image at that scale, so large blurs are smooth, not grainy.
+  float lod = max(0.0, log2(maxR * sqrt(3.14159265 / float(taps))) + 0.5);
   for (int i = 0; i < ${MAX_TAPS}; i++) {
-    if (i >= uTaps) break;
-    float rr = sqrt((float(i) + 0.5) / float(uTaps)) * uMaxR;
+    if (i >= taps) break;
+    float rr = sqrt((float(i) + 0.5) / float(taps)) * maxR;
     float th = float(i) * 2.39996323;
     vec2 o = rr * vec2(cos(th), sin(th));
-    // Each tap stands for the area between taps: read the pre-averaged
-    // (mipmapped) image at that scale, so large blurs are smooth, not grainy.
-    vec2 qf = clamp(vec2(p) + o, vec2(0.0), vec2(size - 1));
-    vec4 s = textureLod(uPrep, (qf + 0.5) / vec2(size), uLod);
+    vec2 qf = clamp(pf + o, vec2(0.0), vec2(size - 1));
+    vec4 s = textureLod(uPrep, (qf + 0.5) / vec2(size), lod);
     float rq = abs(s.a);
     float dist = shapeDist(o);
     // Behind this pixel: only within this pixel's own blur.
@@ -348,7 +362,78 @@ void main() {
     sum += s.rgb * w;
     wsum += w;
   }
-  outColor = vec4(sum / max(wsum, 1e-9), 1.0);
+  return sum / max(wsum, 1e-9);
+}
+
+void main() {
+  ivec2 size = textureSize(uPrep, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  if (uPass == 1) {
+    // Half size: one pixel per 2 x 2 block, at the block's center.
+    ivec2 q = min(p * 2, size - 1);
+    vec4 c = texelFetch(uPrep, q, 0);
+    outColor = vec4(gather(vec2(p * 2) + 0.5, c, size), c.a);
+    return;
+  }
+  vec4 c = texelFetch(uPrep, p, 0);
+  if (uPass == 2 && abs(c.a) >= uHalfFrom) {
+    // Upsample the half size result, preferring samples blurred like this
+    // pixel (so foreground and background stay apart at their edges).
+    ivec2 hs = textureSize(uHalf, 0);
+    vec2 h = (vec2(p) + 0.5) * 0.5 - 0.5;
+    ivec2 h0 = ivec2(floor(h));
+    vec2 f = h - vec2(h0);
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        ivec2 hq = clamp(h0 + ivec2(i, j), ivec2(0), hs - 1);
+        vec4 s = texelFetch(uHalf, hq, 0);
+        float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+        w *= exp(-abs(s.a - c.a) / max(1.0, 0.25 * abs(c.a)));
+        sum += s.rgb * w;
+        wsum += w;
+      }
+    }
+    if (wsum > 1e-4) {
+      outColor = vec4(sum / wsum, 1.0);
+      return;
+    }
+  }
+  outColor = vec4(gather(vec2(p), c, size), 1.0);
+}`;
+
+// Largest blur radius in each 8 x 8 tile (uPass 0), then the largest within
+// uRadius tiles along uDir (uPass 1, twice), so each tile knows how far the
+// blur around it reaches.
+const DOF_TILES = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform int uPass;
+uniform ivec2 uDir;
+uniform int uRadius;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  float m = 0.0;
+  if (uPass == 0) {
+    for (int y = 0; y < ${DOF_TILE}; y++) {
+      for (int x = 0; x < ${DOF_TILE}; x++) {
+        ivec2 q = p * ${DOF_TILE} + ivec2(x, y);
+        if (q.x < size.x && q.y < size.y) m = max(m, abs(texelFetch(uSrc, q, 0).a));
+      }
+    }
+  } else {
+    for (int k = -16; k <= 16; k++) {
+      if (k < -uRadius || k > uRadius) continue;
+      ivec2 q = p + uDir * k;
+      if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
+      m = max(m, texelFetch(uSrc, q, 0).r);
+    }
+  }
+  outColor = vec4(m, 0.0, 0.0, 0.0);
 }`;
 
 // Details, pass 1 (core/detail.js): luminance noise reduction (bilateral
@@ -1167,6 +1252,7 @@ export class GpuRenderer {
       refocus: program(gl, REFOCUS_PASS),
       dofPrep: program(gl, DOF_PREP),
       dofGather: program(gl, DOF_GATHER),
+      dofTiles: program(gl, DOF_TILES),
       merge: program(gl, MERGE_PASS),
       detailNr: program(gl, DETAIL_NR),
       detailSharpen: program(gl, DETAIL_SHARPEN),
@@ -1800,7 +1886,9 @@ export class GpuRenderer {
 
   // Synthetic depth of field with bokeh. `strength`: blur radius in pixels
   // of this image per unit of focus difference. Returns the result texture.
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0 }) {
+  // `draft`: quicker, for previews while dragging: more of the blur at half
+  // size and fewer taps.
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, draft = false }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -1828,16 +1916,61 @@ export class GpuRenderer {
     const [lo, hi] = this.depthRange;
     const reach = Math.abs(tilt[0]) + Math.abs(tilt[1]);
     const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread));
-    const taps = Math.max(32, Math.min(MAX_TAPS, Math.round(maxR * maxR * 1.2)));
+    const taps = Math.max(32, Math.min(draft ? 160 : MAX_TAPS, Math.round(maxR * maxR * 1.2)));
+    const shapeId = shape === 'hexagon' ? 2 : shape === 'circle' ? 1 : 0;
+    // How far past its own radius a blur still adds light (the smooth shape
+    // fades out gradually; a hexagon's corners reach past its radius).
+    const blurReach = shapeId === 0 ? 1.5 : shapeId === 2 ? 1.16 : 1;
+
+    // Largest blur within reach of each tile.
+    const tw = Math.ceil(w / DOF_TILE);
+    const th = Math.ceil(h / DOF_TILE);
+    const tiles = this.scratch32(tw, th, 'dofTiles');
+    const tilesTmp = this.scratch32(tw, th, 'dofTilesTmp');
+    P = this.programs.dofTiles;
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    gl.uniform1i(P.u.uPass, 0);
+    this.target(tiles, tw, th);
+    this.bindTex(1, prep);
+    this.draw();
+    gl.uniform1i(P.u.uPass, 1);
+    gl.uniform1i(P.u.uRadius, Math.min(16, Math.ceil((maxR * blurReach + 1) / DOF_TILE)));
+    this.target(tilesTmp, tw, th);
+    this.bindTex(1, tiles);
+    gl.uniform2i(P.u.uDir, 1, 0);
+    this.draw();
+    this.target(tiles, tw, th);
+    this.bindTex(1, tilesTmp);
+    gl.uniform2i(P.u.uDir, 0, 1);
+    this.draw();
+
     P = this.programs.dofGather;
-    this.target(out, w, h);
     gl.useProgram(P.p);
     gl.uniform1i(P.u.uPrep, 1);
     this.bindTex(1, prep);
+    gl.uniform1i(P.u.uTiles, 3);
+    this.bindTex(3, tiles);
     gl.uniform1i(P.u.uTaps, taps);
     gl.uniform1f(P.u.uMaxR, Math.max(1, maxR));
-    gl.uniform1f(P.u.uLod, Math.max(0, Math.log2(Math.max(1, maxR) * Math.sqrt(Math.PI / taps)) + 0.5));
-    gl.uniform1i(P.u.uShape, shape === 'hexagon' ? 2 : shape === 'circle' ? 1 : 0);
+    gl.uniform1f(P.u.uReach, blurReach);
+    gl.uniform1i(P.u.uShape, shapeId);
+    // Strong blur: render the strongly blurred pixels at half size.
+    const halfFrom = draft ? 1.5 : 6;
+    const half = maxR > 2 * halfFrom ? this.scratch(Math.ceil(w / 2), Math.ceil(h / 2), 'dofHalf') : null;
+    gl.uniform1i(P.u.uHalf, 2);
+    if (half) {
+      this.target(half, Math.ceil(w / 2), Math.ceil(h / 2));
+      gl.uniform1i(P.u.uPass, 1);
+      this.bindTex(2, prep);
+      this.draw();
+      this.bindTex(2, half);
+    } else {
+      this.bindTex(2, tiles);
+    }
+    gl.uniform1i(P.u.uPass, half ? 2 : 0);
+    gl.uniform1f(P.u.uHalfFrom, halfFrom);
+    this.target(out, w, h);
     this.draw();
     return out;
   }

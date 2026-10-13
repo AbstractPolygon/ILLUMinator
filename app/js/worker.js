@@ -183,7 +183,7 @@ function toPixels(rgb, w, h, ctx) {
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
 // unit of `dof`, for this image's size. `keep`: keep the picture as it is
 // before the color pass, so color changes can redraw it (see view()).
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null }, message) {
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false }, message) {
   const gpu = state.gpu;
   if (dof > 0 && (await ensureDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
@@ -196,6 +196,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       spread: bokeh.spread,
       smooth: bokeh.smooth,
       clip: state.dev.clip,
+      draft,
     });
   }
   if (state.detail) tex = gpu.details(tex, w, h, state.detail);
@@ -526,7 +527,8 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 
 // One picture for the interactive camera: a single view when the aperture
 // is closed, otherwise refocused at `alpha` through an aperture around (u, v).
-async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
+// `draft`: a quicker picture while the user drags (see main.js).
+async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft = false }) {
   if (state.pp) return processedView({ id, u, v, alpha, aperture, dof, bokeh });
   requireRaw();
   if (state.gpu) {
@@ -537,7 +539,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     // picture instead of rendering it again.
     if (dof > 0 && !(await ensureDepth(id))) return { cancelled: true };
     const packed = packedMasks(masks);
-    const key = JSON.stringify([state.gen, u, v, alpha, aperture, dof, bokeh || null, state.settings.mvDenoise, state.detail, packed && packed.spatial ? packed : null]);
+    const key = JSON.stringify([state.gen, u, v, alpha, aperture, dof, dof > 0 && draft, bokeh || null, state.settings.mvDenoise, state.detail, packed && packed.spatial ? packed : null]);
     if (state.kept && state.kept.key === key) {
       finishGpu(state.kept.tex, outW, outH, packed, { id, type: 'result' });
       return undefined;
@@ -549,7 +551,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     } else {
       tex = await singleView(id, u, v);
     }
-    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key }, { id, type: 'result' });
+    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key, draft }, { id, type: 'result' });
     return undefined;
   }
   let rgb;
