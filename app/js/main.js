@@ -1473,6 +1473,9 @@ $('settings-btn').onclick = async () => {
 };
 $('settings-dialog').addEventListener('close', () => $('settings-btn').setAttribute('aria-expanded', 'false'));
 
+// The About window shows the top bar's logo.
+$('about-title').prepend(document.querySelector('.toolbar h1 .logo').cloneNode(true));
+
 $('about-btn').onclick = () => {
   $('about-version').textContent = VERSION;
   $('about-btn').setAttribute('aria-expanded', 'true');
@@ -1767,6 +1770,8 @@ async function applySettings() {
     },
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
+    // Test hook: ?cpu renders without the GPU.
+    gpu: !new URLSearchParams(location.search).has('cpu'),
     defringe: {
       on: $('fringe-on').checked,
       auto: $('fringe-auto').checked,

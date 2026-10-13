@@ -335,7 +335,9 @@ button.wide { display: block; width: 100%; }
 #about-dialog .links a { color: var(--text); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
 #about-dialog .links a:hover { text-decoration-color: var(--text); }
 #about-dialog .credits h3 { margin: 4px 0 4px; font-size: 13px; }
-#about-dialog h2 { display: flex; align-items: baseline; gap: 6px; }
+/* Same as the top bar: the logo left of the app name. */
+#about-dialog h2 { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: bold; letter-spacing: 0.02em; color: var(--text); }
+#about-dialog h2 .logo { width: 22px; height: 22px; flex: none; }
 a.button {
   display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 6px;
   background: #262a31; border: 1px solid var(--line); color: var(--text); text-decoration: none;
