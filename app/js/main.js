@@ -2427,8 +2427,15 @@ function renderTimeline() {
 // The least height that still shows every track (or every channel of the
 // Curves view), with the timeline's scrollbar when there is one.
 function minTimelineHeight() {
-  if (!$('tl-grid').hidden) tlContent.keys = $('tl-grid').scrollHeight;
-  if (!$('tl-curves').hidden) tlContent.channels = $('tl-channels').scrollHeight;
+  // Where the last row ends (the lists stretch to fill the editor, so their
+  // own heights say nothing).
+  const contentHeight = (el) => {
+    const last = el.lastElementChild;
+    if (!last) return 0;
+    return last.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop;
+  };
+  if (!$('tl-grid').hidden) tlContent.keys = Math.ceil(contentHeight($('tl-grid')));
+  if (!$('tl-curves').hidden) tlContent.channels = Math.ceil(contentHeight($('tl-channels')));
   const scroll = $('tl-scroll');
   const extra = scroll.hidden ? 0 : scroll.offsetHeight + 4;
   return Math.max(tlContent.keys, tlContent.channels, 100) + extra;
