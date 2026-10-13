@@ -9,7 +9,11 @@ import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
-import { TRACKS, PRESETS, FPS as KEY_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier } from './core/keyframes.js';
+import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount } from './core/keyframes.js';
+
+// Frames a second of animations: for playback, keyframe times and video
+// (the Frame rate setting).
+let KEY_FPS = DEFAULT_FPS;
 import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 
@@ -34,7 +38,7 @@ const state = {
   index: 0,
   direction: 1,
   playing: false,
-  fps: 24,
+  fps: DEFAULT_FPS,
   lastTick: 0,
   still: null, // ImageData of the full resolution render
   fullResMode: false, // the Full resolution checkbox
@@ -967,16 +971,23 @@ function invalidateAnimation() {
   updateFrameLabel();
 }
 
+// The play bar's readout: current frame of all frames, and the time of the
+// length (shown whenever the animation is on).
 function updateFrameLabel() {
   const n = state.frames.length;
-  if (!n || !state.showingFrames) {
+  const animOn = $('anim-on').checked && state.mode === 'camera' && state.info;
+  if (!animOn && (!n || !state.showingFrames)) {
     if (!state.fullRes) $('frame-label').textContent = '';
     return;
   }
+  const keyframes = $('anim').value === 'keyframes';
+  const total = n || (keyframes ? frameCount(anim, KEY_FPS) : Math.max(1, +$('frames').value));
+  const index = n && state.showingFrames ? state.index : keyframes ? Math.round((state.keyTime || 0) * KEY_FPS) : 0;
+  const i = Math.min(total - 1, Math.max(0, index));
   const ready = state.frames.filter(Boolean).length;
-  const val = state.frameValues[state.index];
-  $('frame-label').textContent = `${state.index + 1}/${n}` +
-    (ready < n ? ` (rendering ${ready})` : '') +
+  const val = state.showingFrames ? state.frameValues[state.index] : undefined;
+  $('frame-label').textContent = `Frame ${i + 1} / ${total} · ${(i / KEY_FPS).toFixed(2)} / ${((total - 1) / KEY_FPS).toFixed(2)} s` +
+    (n && ready < n ? ` (rendering ${ready})` : '') +
     (val !== undefined ? ` · focus ${val.toFixed(2)}` : '');
   if (typeof updatePlayhead === 'function') updatePlayhead();
 }
@@ -2215,11 +2226,43 @@ function selectedKey() {
 
 const fmtTime = (t) => `${t.toFixed(2)} s`;
 
+// The part of the animation the timeline shows: from `start`, `span`
+// seconds wide (span 0: all of it).
+const tlView = { start: 0, span: 0 };
+
+function viewWindow() {
+  const len = anim.length;
+  const span = tlView.span > 0 ? Math.min(len, tlView.span) : len;
+  const start = Math.min(Math.max(0, tlView.start), len - span);
+  tlView.start = start;
+  return { start, span };
+}
+
+// Zooms the timeline by `factor` (> 1 zooms in) around time `at`.
+function zoomTimeline(factor, at) {
+  const len = anim.length;
+  const { start, span } = viewWindow();
+  const next = Math.min(len, Math.max(4 / KEY_FPS, span / factor));
+  const pivot = at ?? Math.min(start + span, Math.max(start, playheadTime()));
+  tlView.span = next >= len ? 0 : next;
+  tlView.start = pivot - ((pivot - start) / span) * next;
+  renderTimeline();
+}
+
+// Tick spacing that gives at most about ten labels.
+function tickStep(span) {
+  return [1 / KEY_FPS, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30].find((s) => span / s <= 10) || 60;
+}
+
 // Moves the playhead without redrawing the timeline (while playing).
 function updatePlayhead() {
   if ($('timeline').hidden) return;
   const head = playheadTime();
-  for (const el of $('tl-grid').querySelectorAll('.tl-playhead')) el.style.left = `${(100 * head) / anim.length}%`;
+  const { start, span } = viewWindow();
+  for (const el of $('tl-grid').querySelectorAll('.tl-playhead')) {
+    el.style.left = `${(100 * (head - start)) / span}%`;
+    el.hidden = head < start - 1e-6 || head > start + span + 1e-6;
+  }
   $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(anim.length)}`;
 }
 
@@ -2233,16 +2276,23 @@ function renderTimeline() {
   if (!on) return;
   const grid = $('tl-grid');
   const len = anim.length;
-  const pos = (t) => `${(100 * t) / len}%`;
+  const { start, span } = viewWindow();
+  const pos = (t) => `${(100 * (t - start)) / span}%`;
+  const inView = (t) => t >= start - 1e-6 && t <= start + span + 1e-6;
   const head = playheadTime();
   const rows = [];
-  // Ruler: a tick each second (or each 5 s for long animations).
-  const step = len > 20 ? 5 : 1;
+  const step = tickStep(span);
+  const digits = step < 0.1 ? 2 : step < 1 ? 2 : 0;
   const ruler = Object.assign(document.createElement('div'), { className: 'tl-ruler' });
-  for (let t = 0; t <= len + 1e-6; t += step) {
-    ruler.append(Object.assign(document.createElement('span'), { className: 'tl-tick', textContent: `${t}s`, style: `left:${pos(t)}` }));
+  for (let n = Math.ceil(start / step - 1e-6); n * step <= start + span + 1e-6; n++) {
+    const t = n * step;
+    // The last label would hang off the end.
+    const label = t > start + span * 0.94 ? '' : `${+t.toFixed(digits)}s`;
+    ruler.append(Object.assign(document.createElement('span'), { className: 'tl-tick', textContent: label, style: `left:${pos(t)}` }));
   }
-  ruler.append(Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` }));
+  const rulerHead = Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` });
+  rulerHead.hidden = !inView(head);
+  ruler.append(rulerHead);
   ruler.onpointerdown = (e) => seekTimeline(e, ruler);
   rows.push(Object.assign(document.createElement('div'), { className: 'tl-label' }), ruler);
   for (const k of TRACKS) {
@@ -2251,7 +2301,7 @@ function renderTimeline() {
     add.setAttribute('aria-label', `Add a ${TRACK_NAMES[k].toLowerCase()} keyframe`);
     add.onclick = () => {
       const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
-      setKey(anim, k, t, currentValue(k));
+      setKey(anim, k, t, currentValue(k), KEY_FPS);
       keySel = { k, t };
       saveAnimation();
     };
@@ -2261,6 +2311,7 @@ function renderTimeline() {
       if (e.target === track) seekTimeline(e, track);
     };
     for (const key of anim.tracks[k]) {
+      if (!inView(key.t)) continue;
       const d = Object.assign(document.createElement('span'), { className: 'tl-key', style: `left:${pos(key.t)}` });
       if (keySel && keySel.k === k && Math.abs(keySel.t - key.t) < 1e-6) d.classList.add('selected');
       if (key.ease.type === 'hold') d.classList.add('hold');
@@ -2268,7 +2319,9 @@ function renderTimeline() {
       d.onpointerdown = (e) => dragKey(e, k, key, track);
       track.append(d);
     }
-    track.append(Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` }));
+    const trackHead = Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` });
+    trackHead.hidden = !inView(head);
+    track.append(trackHead);
     rows.push(label, track);
   }
   grid.replaceChildren(...rows);
@@ -2279,11 +2332,18 @@ function renderTimeline() {
   $('tl-curve').hidden = !(sel && sel.ease.type === 'custom');
   if (sel && sel.ease.type === 'custom') drawCurve();
   $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(len)}`;
+  $('tl-zoom-label').textContent = span >= len ? 'All' : `${Math.round((100 * len) / span)}%`;
+  const scroll = $('tl-scroll');
+  scroll.hidden = span >= len;
+  scroll.max = String(Math.max(0, len - span));
+  scroll.step = String(1 / KEY_FPS);
+  scroll.value = String(start);
 }
 
 function timeAt(e, el) {
   const r = el.getBoundingClientRect();
-  const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * anim.length;
+  const { start, span } = viewWindow();
+  const t = Math.min(anim.length, Math.max(0, start + ((e.clientX - r.left) / r.width) * span));
   return Math.round(t * KEY_FPS) / KEY_FPS;
 }
 
@@ -2344,9 +2404,37 @@ function deleteSelectedKey() {
 }
 
 $('tl-delete').onclick = deleteSelectedKey;
+$('tl-zoom-in').onclick = () => zoomTimeline(2);
+$('tl-zoom-out').onclick = () => zoomTimeline(0.5);
+$('tl-zoom-label').onclick = () => {
+  tlView.span = 0;
+  renderTimeline();
+};
+$('tl-scroll').oninput = () => {
+  tlView.start = +$('tl-scroll').value;
+  renderTimeline();
+};
+// Ctrl / ⌘ + wheel zooms around the pointer; Shift + wheel (or a sideways
+// swipe) scrolls along the animation.
+$('tl-grid').addEventListener('wheel', (e) => {
+  const track = e.target.closest('.tl-track, .tl-ruler');
+  if (!track) return;
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    const r = track.getBoundingClientRect();
+    const { start, span } = viewWindow();
+    zoomTimeline(e.deltaY < 0 ? 1.25 : 0.8, start + ((e.clientX - r.left) / r.width) * span);
+  } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    e.preventDefault();
+    const { span } = viewWindow();
+    const d = e.shiftKey ? e.deltaY || e.deltaX : e.deltaX;
+    tlView.start += (d / 400) * span;
+    renderTimeline();
+  }
+}, { passive: false });
 $('tl-key-all').onclick = () => {
   const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
-  for (const k of TRACKS) setKey(anim, k, t, currentValue(k));
+  for (const k of TRACKS) setKey(anim, k, t, currentValue(k), KEY_FPS);
   saveAnimation();
 };
 $('tl-ease').onchange = () => {
@@ -2482,7 +2570,7 @@ function keyframeFrames() {
   const live = { aperture: F_STOPS[+$('fstop').value] ?? 2, depth: +$('dof-depth').value, focus: +$('focus').value };
   const path = [];
   const frames = [];
-  for (const v of sample(anim)) {
+  for (const v of sample(anim, KEY_FPS)) {
     const lens = apertureFor(v.aperture ?? live.aperture);
     const depth = v.depth ?? live.depth;
     const view = v.view ?? [state.camera.u, state.camera.v];
@@ -2493,6 +2581,45 @@ function keyframeFrames() {
   }
   return { path, framing: frames };
 }
+
+// ---------------------------------------------------------------- frame rate
+
+const FPS_PRESETS = ['23.976', '24', '25', '29.97', '30', '48', '50', '59.94', '60'];
+
+// Shows the frame rate setting (#fps) in the preset list, or as custom.
+function showFrameRate() {
+  const fps = Math.min(240, Math.max(1, +$('fps').value || DEFAULT_FPS));
+  const preset = FPS_PRESETS.find((p) => Math.abs(+p - fps) < 1e-3);
+  if (!state.customFps || !preset) $('fps-preset').value = preset || 'custom';
+  $('fps-custom').hidden = $('fps-preset').value !== 'custom';
+  KEY_FPS = fps;
+  state.fps = fps;
+}
+
+function setFrameRate(fps) {
+  // A viewpoint path or focus sweep keeps its length in seconds.
+  const seconds = +$('frames').value / KEY_FPS;
+  $('fps').value = String(+(+fps).toFixed(3));
+  showFrameRate();
+  $('frames').value = Math.max(2, Math.round(seconds * KEY_FPS));
+  scheduleSave();
+  animationSettingsChanged();
+  showAnimationLength();
+  renderTimeline();
+  updateFrameLabel();
+}
+
+$('fps-preset').onchange = () => {
+  const v = $('fps-preset').value;
+  state.customFps = v === 'custom';
+  if (state.customFps) {
+    $('fps-custom').hidden = false;
+    $('fps').focus();
+    return;
+  }
+  setFrameRate(+v);
+};
+$('fps').onchange = () => setFrameRate(Math.min(240, Math.max(1, +$('fps').value || DEFAULT_FPS)));
 
 // ---------------------------------------------------------------- 3D
 
@@ -3100,6 +3227,8 @@ async function restoreEdits(info) {
     curve.draw();
     showColorMatrix();
     $('flare-amount').disabled = !$('flare-on').checked;
+    state.customFps = false;
+    showFrameRate();
     showAnimationEnabled();
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;

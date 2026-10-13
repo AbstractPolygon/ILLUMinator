@@ -106,15 +106,15 @@ export function valueAt(anim, k, t) {
   return mix(k, a.v, b.v, easeFunction(a.ease)(x));
 }
 
-export function frameCount(anim) {
-  return Math.max(1, Math.round(anim.length * FPS) + 1);
+export function frameCount(anim, fps = FPS) {
+  return Math.max(1, Math.round(anim.length * fps) + 1);
 }
 
 // Values of every track at every frame: [{ aperture, depth, ... }] (missing
-// tracks undefined).
-export function sample(anim) {
-  const n = frameCount(anim);
-  return Array.from({ length: n }, (_, i) => Object.fromEntries(TRACKS.map((k) => [k, valueAt(anim, k, i / FPS)])));
+// tracks undefined), at `fps` frames a second.
+export function sample(anim, fps = FPS) {
+  const n = frameCount(anim, fps);
+  return Array.from({ length: n }, (_, i) => Object.fromEntries(TRACKS.map((k) => [k, valueAt(anim, k, i / fps)])));
 }
 
 export function hasKeys(anim) {
@@ -122,9 +122,9 @@ export function hasKeys(anim) {
 }
 
 // Sets (or replaces) the keyframe of track k at time t.
-export function setKey(anim, k, t, v) {
+export function setKey(anim, k, t, v, fps = FPS) {
   const keys = anim.tracks[k];
-  const at = keys.findIndex((key) => Math.abs(key.t - t) < 0.5 / FPS);
+  const at = keys.findIndex((key) => Math.abs(key.t - t) < 0.5 / fps);
   if (at >= 0) keys[at] = { ...keys[at], v };
   else keys.push({ t, v, ease: defaultEase() });
   keys.sort((x, y) => x.t - y.t);

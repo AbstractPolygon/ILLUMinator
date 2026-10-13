@@ -128,9 +128,17 @@
             </select>
           </label>
           <span id="tl-time" class="hint tl-time"></span>
+          <div class="zoom tl-zoom" role="group" aria-label="Timeline zoom">
+            <button id="tl-zoom-out" type="button" title="Zoom the timeline out (Ctrl + wheel)" aria-label="Zoom the timeline out">−</button>
+            <button id="tl-zoom-label" type="button" title="Show the whole animation">All</button>
+            <button id="tl-zoom-in" type="button" title="Zoom the timeline in (Ctrl + wheel)" aria-label="Zoom the timeline in">+</button>
+          </div>
         </div>
         <div class="tl-main">
-          <div id="tl-grid" class="tl-grid"></div>
+          <div class="tl-grid-wrap">
+            <div id="tl-grid" class="tl-grid"></div>
+            <input id="tl-scroll" class="tl-scroll" type="range" min="0" max="0" value="0" aria-label="Scroll the timeline" hidden>
+          </div>
           <div id="tl-curve" class="tl-curve" hidden>
             <canvas id="tl-curve-canvas" class="tl-curve-canvas" width="150" height="150" role="img" aria-label="Curve to the next keyframe" title="Drag the two handles to shape the curve"></canvas>
           </div>
@@ -534,6 +542,23 @@
         <summary><h2>Animation</h2></summary>
         <label class="check"><input id="anim-on" type="checkbox"> Enabled</label>
         <fieldset id="anim-controls" class="plain" disabled>
+        <label title="Frames a second, for playback, keyframes and exported video">Frame rate
+          <select id="fps-preset">
+            <option value="23.976">23.976 fps (film, NTSC)</option>
+            <option value="24" selected>24 fps (film)</option>
+            <option value="25">25 fps (PAL)</option>
+            <option value="29.97">29.97 fps (NTSC)</option>
+            <option value="30">30 fps</option>
+            <option value="48">48 fps</option>
+            <option value="50">50 fps (PAL)</option>
+            <option value="59.94">59.94 fps (NTSC)</option>
+            <option value="60">60 fps</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </label>
+        <label id="fps-custom" class="fps-custom" hidden>Custom
+          <input id="fps" type="number" min="1" max="240" step="0.001" value="24" data-default="24" aria-label="Custom frame rate in frames a second"> fps
+        </label>
         <label>Animate
           <select id="anim">
             <option value="viewpoint">Viewpoint</option>
