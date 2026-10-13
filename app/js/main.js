@@ -2130,7 +2130,9 @@ function localSettings() {
 // picture is drawn, like the pivot.
 const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', pan: 'Pan' };
 let anim = emptyAnimation();
-let keySel = null; // { k, t }
+let keySel = null; // { k, t }: the main selected keyframe
+// Every selected keyframe (keySel's among them).
+const tlSel = new Set();
 // The Curves view of the keyframe editor (see drawCurves).
 const tlCurves = { on: false, hidden: new Set(), hits: [] };
 // Heights of the tracks and channel list, for minTimelineHeight.
@@ -2162,7 +2164,7 @@ function loadAnimation() {
   } else {
     anim = parseAnimation($('anim-keys').value);
   }
-  keySel = null;
+  clearSelection();
   showAnimationLength();
   renderTimeline();
 }
@@ -2280,7 +2282,7 @@ function autoKey() {
   for (const k of TRACKS) {
     if (!base || sameValue(k, base[k], now[k])) continue;
     setKey(anim, k, t, now[k], KEY_FPS);
-    keySel = { k, t };
+    selectAt(k, t, added);
     added = true;
   }
   if (added) saveAnimation();
@@ -2292,6 +2294,48 @@ $('tl-autokey').onchange = () => {
 function playheadTime() {
   if (state.showingFrames && state.frames.length) return (state.drawFrame ?? state.index) / KEY_FPS;
   return Math.min(anim.length, state.keyTime || 0);
+}
+
+function clearSelection() {
+  tlSel.clear();
+  keySel = null;
+}
+
+// Selects a keyframe (`add`: keeping the others selected).
+function selectKey(k, key, add = false) {
+  if (!add) tlSel.clear();
+  tlSel.add(key);
+  keySel = { k, t: key.t };
+}
+
+function selectAt(k, t, add = false) {
+  const key = anim.tracks[k].find((x) => Math.abs(x.t - t) < 1e-6);
+  if (key) selectKey(k, key, add);
+}
+
+// The selected keyframes: [{ k, key }].
+function selectedKeys() {
+  const out = [];
+  for (const k of TRACKS) for (const key of anim.tracks[k]) if (tlSel.has(key)) out.push({ k, key });
+  return out;
+}
+
+const isSelected = (k, key) => tlSel.has(key) || (keySel && keySel.k === k && Math.abs(keySel.t - key.t) < 1e-6);
+
+// Moves the selected keyframes `items` ({ k, key, t0 }) by dt seconds,
+// all together: kept within the animation and clear of other keyframes.
+function moveKeys(items, dt) {
+  const t0s = items.map((i) => i.t0);
+  dt = Math.min(anim.length - Math.max(...t0s), Math.max(-Math.min(...t0s), dt));
+  dt = Math.round(dt * KEY_FPS) / KEY_FPS;
+  const moving = new Set(items.map((i) => i.key));
+  const next = items.map((i) => Math.round((i.t0 + dt) * KEY_FPS) / KEY_FPS);
+  const blocked = items.some((i, n) => anim.tracks[i.k].some((o) => !moving.has(o) && Math.abs(o.t - next[n]) < 0.5 / KEY_FPS));
+  if (blocked) return;
+  items.forEach((i, n) => {
+    i.key.t = next[n];
+  });
+  for (const k of new Set(items.map((i) => i.k))) anim.tracks[k].sort((a, b) => a.t - b.t);
 }
 
 function selectedKey() {
@@ -2377,18 +2421,19 @@ function renderTimeline() {
     add.onclick = () => {
       const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
       setKey(anim, k, t, currentValue(k), KEY_FPS);
-      keySel = { k, t };
+      selectAt(k, t);
       saveAnimation();
     };
     label.append(add, document.createTextNode(TRACK_NAMES[k]));
     const track = Object.assign(document.createElement('div'), { className: 'tl-track' });
     track.onpointerdown = (e) => {
-      if (e.target === track) seekTimeline(e, track);
+      if (e.target === track) boxSelectKeys(e, track);
     };
     for (const key of anim.tracks[k]) {
       if (!inView(key.t)) continue;
       const d = Object.assign(document.createElement('span'), { className: 'tl-key', style: `left:${pos(key.t)}` });
-      if (keySel && keySel.k === k && Math.abs(keySel.t - key.t) < 1e-6) d.classList.add('selected');
+      if (isSelected(k, key)) d.classList.add('selected');
+      d.tlKey = { k, key };
       if (key.ease.type === 'hold') d.classList.add('hold');
       d.title = `${TRACK_NAMES[k]} at ${fmtTime(key.t)}`;
       d.onpointerdown = (e) => dragKey(e, k, key, track);
@@ -2401,7 +2446,7 @@ function renderTimeline() {
   }
   grid.replaceChildren(...rows);
   const sel = selectedKey();
-  $('tl-delete').disabled = !sel;
+  $('tl-delete').disabled = !sel && !tlSel.size;
   $('tl-ease').disabled = !sel;
   if (sel) $('tl-ease').value = sel.ease.type;
   // The Curves view shows the handles on the curve itself.
@@ -2459,18 +2504,7 @@ function seekTimeline(e, el, box) {
     const t = timeAt(ev, r);
     if (t === last) return;
     last = t;
-    state.keyTime = t;
-    if (state.playing) setPlaying(false);
-    if (state.frames.length) {
-      const i = Math.min(state.frames.length - 1, Math.round(t * KEY_FPS));
-      state.showingFrames = true;
-      state.index = i;
-      showFrame(i);
-    } else {
-      previewAt(t);
-    }
-    renderTimeline();
-    updateFrameLabel();
+    seekTo(t);
   };
   const up = () => {
     window.removeEventListener('pointermove', seek);
@@ -2482,23 +2516,104 @@ function seekTimeline(e, el, box) {
   seek(e);
 }
 
-// Drag a keyframe along its track; a click without moving selects it and
-// shows its value.
+// Moves the playhead to time t.
+function seekTo(t) {
+  state.keyTime = t;
+  if (state.playing) setPlaying(false);
+  if (state.frames.length) {
+    const i = Math.min(state.frames.length - 1, Math.round(t * KEY_FPS));
+    state.showingFrames = true;
+    state.index = i;
+    showFrame(i);
+  } else {
+    previewAt(t);
+  }
+  renderTimeline();
+  updateFrameLabel();
+}
+
+// Drag on an empty part of a track: select the keyframes in a box (Shift
+// adds to the selection). A click without dragging moves the playhead
+// there and clears the selection.
+function boxSelectKeys(e, track) {
+  e.preventDefault();
+  const grid = $('tl-grid');
+  const r = track.getBoundingClientRect();
+  const x0 = e.clientX;
+  const y0 = e.clientY;
+  const base = e.shiftKey ? [...tlSel] : [];
+  let box = null;
+  const move = (ev) => {
+    if (!box && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+    const g = grid.getBoundingClientRect();
+    if (!box) {
+      box = Object.assign(document.createElement('div'), { className: 'tl-box' });
+      grid.append(box);
+    }
+    const left = Math.min(x0, ev.clientX);
+    const right = Math.max(x0, ev.clientX);
+    const top = Math.min(y0, ev.clientY);
+    const bottom = Math.max(y0, ev.clientY);
+    Object.assign(box.style, { left: `${left - g.left}px`, top: `${top - g.top + grid.scrollTop}px`, width: `${right - left}px`, height: `${bottom - top}px` });
+    tlSel.clear();
+    for (const key of base) tlSel.add(key);
+    keySel = null;
+    for (const el of grid.querySelectorAll('.tl-key')) {
+      const b = el.getBoundingClientRect();
+      const cx = (b.left + b.right) / 2;
+      const cy = (b.top + b.bottom) / 2;
+      const inside = cx >= left && cx <= right && cy >= top && cy <= bottom;
+      if (inside) tlSel.add(el.tlKey.key);
+      el.classList.toggle('selected', tlSel.has(el.tlKey.key));
+    }
+  };
+  const up = (ev) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (box) {
+      box.remove();
+      const first = selectedKeys()[0];
+      keySel = first ? { k: first.k, t: first.key.t } : null;
+      renderTimeline();
+    } else {
+      if (!e.shiftKey) clearSelection();
+      seekTo(timeAt(ev, r));
+      if (!state.frames.length) scheduleSave();
+    }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+// Drag a keyframe along its track (with every other selected keyframe); a
+// click without moving selects just it and shows its value. Shift-click
+// adds it to the selection or takes it out.
 function dragKey(e, k, key, track) {
   e.preventDefault();
   e.stopPropagation();
+  if (e.shiftKey) {
+    if (tlSel.has(key)) {
+      tlSel.delete(key);
+      const first = selectedKeys()[0];
+      keySel = first ? { k: first.k, t: first.key.t } : null;
+    } else {
+      selectKey(k, key, true);
+    }
+    renderTimeline();
+    return;
+  }
+  if (!tlSel.has(key)) selectKey(k, key);
+  else keySel = { k, t: key.t };
   const startX = e.clientX;
   const r = track.getBoundingClientRect();
+  const t0 = key.t;
+  const items = selectedKeys().map((i) => ({ ...i, t0: i.key.t }));
   let moved = false;
-  keySel = { k, t: key.t };
   const move = (ev) => {
     if (!moved && Math.abs(ev.clientX - startX) < 3) return;
     moved = true;
-    const t = timeAt(ev, r);
-    if (anim.tracks[k].some((other) => other !== key && Math.abs(other.t - t) < 0.5 / KEY_FPS)) return;
-    key.t = t;
-    keySel = { k, t };
-    anim.tracks[k].sort((a, b) => a.t - b.t);
+    moveKeys(items, timeAt(ev, r) - t0);
+    keySel = { k, t: key.t };
     renderTimeline();
   };
   const up = () => {
@@ -2507,6 +2622,7 @@ function dragKey(e, k, key, track) {
     if (moved) {
       saveAnimation();
     } else {
+      selectKey(k, key);
       state.keyTime = key.t;
       showValue(k, key.v);
       renderTimeline();
@@ -2519,9 +2635,9 @@ function dragKey(e, k, key, track) {
 
 function deleteSelectedKey() {
   const sel = selectedKey();
-  if (!sel) return;
-  anim.tracks[keySel.k] = anim.tracks[keySel.k].filter((key) => key !== sel);
-  keySel = null;
+  if (!sel && !tlSel.size) return;
+  for (const k of TRACKS) anim.tracks[k] = anim.tracks[k].filter((key) => key !== sel && !tlSel.has(key));
+  clearSelection();
   saveAnimation();
 }
 
@@ -2561,17 +2677,30 @@ $('tl-key-all').onclick = () => {
 };
 $('tl-ease').onchange = () => {
   const sel = selectedKey();
-  if (!sel) return;
+  const list = new Set([...selectedKeys().map((i) => i.key), ...(sel ? [sel] : [])]);
+  if (!list.size) return;
   const type = $('tl-ease').value;
-  // A custom curve starts from the one chosen before.
-  if (type === 'custom' && sel.ease.type !== 'custom' && PRESETS[sel.ease.type]) sel.ease.bezier = [...PRESETS[sel.ease.type]];
-  sel.ease.type = type;
+  for (const key of list) {
+    // A custom curve starts from the one chosen before.
+    if (type === 'custom' && key.ease.type !== 'custom' && PRESETS[key.ease.type]) key.ease.bezier = [...PRESETS[key.ease.type]];
+    key.ease.type = type;
+  }
   saveAnimation();
 };
 document.addEventListener('keydown', (e) => {
-  if (!keySel || $('timeline').hidden) return;
+  if ($('timeline').hidden) return;
   // Not while typing (sliders, checkboxes and buttons may keep the focus).
   if (e.target.matches('textarea, select, input:not([type=range], [type=checkbox], [type=radio], [type=button])')) return;
+  // Ctrl / ⌘ + A: select every keyframe.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && state.mode === 'camera') {
+    e.preventDefault();
+    for (const k of TRACKS) for (const key of anim.tracks[k]) tlSel.add(key);
+    const first = selectedKeys()[0];
+    keySel = first ? { k: first.k, t: first.key.t } : null;
+    renderTimeline();
+    return;
+  }
+  if (!keySel && !tlSel.size) return;
   if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
     deleteSelectedKey();
@@ -2861,7 +2990,7 @@ function drawCurves() {
       const x = xOf(key.t);
       const y = yOf(channelValue(ch, key.v));
       if (x < -6 || x > cssW + 6) continue;
-      const on = key === sel;
+      const on = key === sel || tlSel.has(key);
       if (on) {
         // Selected: a bright ring around a white key.
         g.fillStyle = '#ff9f1a';
@@ -2906,6 +3035,16 @@ function drawCurves() {
         tlCurves.hits.push({ x: hx, y: hy, ch, key: sel, handle: hd, range: [lo, hi] });
       }
     }
+  }
+  if (tlCurves.box) {
+    const b = tlCurves.box;
+    g.fillStyle = 'rgba(200, 205, 213, 0.08)';
+    g.strokeStyle = 'rgba(200, 205, 213, 0.7)';
+    g.setLineDash([4, 3]);
+    g.lineWidth = 1;
+    g.fillRect(b.x, b.y, b.w, b.h);
+    g.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h);
+    g.setLineDash([]);
   }
   // Playhead.
   const head = playheadTime();
@@ -3083,7 +3222,9 @@ $('tl-plot').addEventListener('pointerdown', (e) => {
     }
   }
   if (!hit) {
-    seekTimeline(e, c, r);
+    // Along the time labels: scrub. Elsewhere: box select.
+    if (py < 18) seekTimeline(e, c, r);
+    else boxSelectCurves(e, r);
     return;
   }
   if (hit.handle) {
@@ -3092,26 +3233,38 @@ $('tl-plot').addEventListener('pointerdown', (e) => {
   }
   e.preventDefault();
   const { ch, key } = hit;
+  if (e.shiftKey) {
+    if (tlSel.has(key)) {
+      tlSel.delete(key);
+      const first = selectedKeys()[0];
+      keySel = first ? { k: first.k, t: first.key.t } : null;
+    } else {
+      selectKey(ch.k, key, true);
+    }
+    renderTimeline();
+    return;
+  }
   const id = channelId(ch);
   const startX = e.clientX;
   const startY = e.clientY;
-  const y0 = channelValue(ch, key.v);
   const top = 18;
   const bottom = r.height - 6;
   // The value scale stays put while dragging.
   tlCurves.drag = { id, range: hit.range };
-  keySel = { k: ch.k, t: key.t };
+  if (!tlSel.has(key)) selectKey(ch.k, key);
+  else keySel = { k: ch.k, t: key.t };
+  const t0 = key.t;
+  // Every selected keyframe moves in time; those on this curve also move
+  // up or down by the same amount.
+  const items = selectedKeys().map((i) => ({ ...i, t0: i.key.t, y0: i.k === ch.k ? channelValue(ch, i.key.v) : null }));
   let moved = false;
   const move = (ev) => {
     if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 3) return;
     moved = true;
-    const t = timeAt(ev, r);
-    if (!anim.tracks[ch.k].some((other) => other !== key && Math.abs(other.t - t) < 0.5 / KEY_FPS)) {
-      key.t = t;
-      anim.tracks[ch.k].sort((a, b) => a.t - b.t);
-    }
+    moveKeys(items, timeAt(ev, r) - t0);
     const [lo, hi] = hit.range;
-    setChannelValue(ch, key, y0 - ((ev.clientY - startY) / (bottom - top)) * (hi - lo));
+    const dy = -((ev.clientY - startY) / (bottom - top)) * (hi - lo);
+    for (const i of items) if (i.y0 !== null) setChannelValue(ch, i.key, i.y0 + dy);
     keySel = { k: ch.k, t: key.t };
     renderTimeline();
   };
@@ -3122,6 +3275,7 @@ $('tl-plot').addEventListener('pointerdown', (e) => {
     if (moved) {
       saveAnimation();
     } else {
+      selectKey(ch.k, key);
       state.keyTime = key.t;
       showValue(ch.k, key.v);
     }
@@ -3134,6 +3288,47 @@ $('tl-plot').addEventListener('pointerdown', (e) => {
 window.addEventListener('resize', () => {
   if (tlCurves.on && !$('timeline').hidden) drawCurves();
 });
+
+// Box select in the Curves view (Shift adds); a click without dragging
+// moves the playhead and clears the selection.
+function boxSelectCurves(e, r) {
+  e.preventDefault();
+  const c = $('tl-plot');
+  const cr = c.getBoundingClientRect();
+  const x0 = e.clientX - cr.left;
+  const y0 = e.clientY - cr.top;
+  const base = e.shiftKey ? [...tlSel] : [];
+  const move = (ev) => {
+    const x1 = ev.clientX - cr.left;
+    const y1 = ev.clientY - cr.top;
+    if (!tlCurves.box && Math.hypot(x1 - x0, y1 - y0) < 4) return;
+    const b = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+    tlCurves.box = b;
+    tlSel.clear();
+    for (const key of base) tlSel.add(key);
+    for (const h of tlCurves.hits) {
+      if (h.handle) continue;
+      if (h.x >= b.x && h.x <= b.x + b.w && h.y >= b.y && h.y <= b.y + b.h) tlSel.add(h.key);
+    }
+    const first = selectedKeys()[0];
+    keySel = first ? { k: first.k, t: first.key.t } : null;
+    drawCurves();
+  };
+  const up = (ev) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (tlCurves.box) {
+      tlCurves.box = null;
+      renderTimeline();
+    } else {
+      if (!e.shiftKey) clearSelection();
+      seekTo(timeAt(ev, r));
+      if (!state.frames.length) scheduleSave();
+    }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
 
 // ---------------------------------------------------------------- frame rate
 
