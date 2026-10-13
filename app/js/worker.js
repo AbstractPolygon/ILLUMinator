@@ -19,7 +19,7 @@ import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
-import { parseMasks, activeMasks, packMasks } from './core/local.js';
+import { parseMasks, activeMasks, packMasks, resolveMasks } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
@@ -130,21 +130,22 @@ function updateColor() {
 
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
-// Local adjustments for a w x h picture (core/local.js), or null.
-function localFor(w, h) {
+// Local adjustments for a w x h picture (core/local.js), or null. `ctx`:
+// { focus, overrides } of this picture (see resolveMasks).
+function localFor(w, h, ctx) {
   if (!state.masks || !state.masks.length) return null;
   const d = state.depth && state.sampler ? { depth: state.depth.alpha, dw: state.sampler.outW, dh: state.sampler.outH } : {};
-  return { masks: state.masks, w, h, show: state.maskShow, ...d };
+  return { masks: resolveMasks(state.masks, ctx), w, h, show: state.maskShow, ...d };
 }
 
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
-function toPixels(rgb, w, h) {
+function toPixels(rgb, w, h, ctx) {
   rgb = applyDetail(rgb, w, h, state.detail);
   rgb = subtractVeil(rgb, w, h, state.veil, state.veilAmount);
   rgb = applyLens(rgb, w, h, state.lens);
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
-  const local = localFor(w, h);
+  const local = localFor(w, h, ctx);
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look, local);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = state.matrix;
@@ -164,7 +165,7 @@ function toPixels(rgb, w, h) {
 // field and bokeh, then color, defringing and tone mapping) and posts it as
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
 // unit of `dof`, for this image's size.
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit }, message) {
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha } }, message) {
   const gpu = state.gpu;
   if (dof > 0 && (await ensureDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
@@ -187,7 +188,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     look: state.look,
     veilAmount: state.veil ? state.veilAmount : 0,
     lens: state.lens,
-    local: state.masks && state.masks.length ? { ...packMasks(state.masks), show: state.maskShow } : null,
+    local: state.masks && state.masks.length ? { ...packMasks(resolveMasks(state.masks, masks)), show: state.maskShow } : null,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
@@ -197,8 +198,8 @@ function viewPxPerUnit() {
   return 14 * state.settings.detail;
 }
 
-function frameMessage(id, index, rgb) {
-  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH);
+function frameMessage(id, index, rgb, ctx) {
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, ctx);
   post({ id, type: 'frame', index, width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
 }
 
@@ -311,7 +312,7 @@ async function open({ id, bytes, synthetic }) {
 // and blur, or with any of them per frame ({ u, v, alpha, aperture, dof },
 // for keyframed animations).
 async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }) {
-  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh }));
+  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh, masks: f.masks || null }));
   if (state.pp) return processedFrames({ id, job, kind: 'frames', list });
   requireRaw();
   state.jobs.frames = job;
@@ -322,12 +323,12 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
     const f = list[i];
     if (state.gpu) {
       const tex = f.aperture > 0 ? state.gpu.refocusTo(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh, pxPerUnit: viewPxPerUnit() }, { id, type: 'frame', index: i });
+      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks } }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
     const rgb = f.aperture > 0 ? refocusRGB(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, bokeh));
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, bokeh), { focus: f.alpha, overrides: f.masks });
     await tick();
   }
   return { done: true };
@@ -431,7 +432,7 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
       continue;
     }
     const rgb = refocusRGB(alphas[i], opts);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh));
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, alphas[i], dof, 1, bokeh), { focus: alphas[i] });
     await tick();
   }
   return { done: true };
@@ -468,7 +469,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   }
   if (dof > 0) progress('Applying depth of field', 1);
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
-  const pixels = toPixels(rgb, sr.width, sr.height);
+  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha });
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
@@ -497,7 +498,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh }) {
     rgb = await singleView(id, u, v);
   }
   rgb = await withDepthOfField(id, rgb, state.sampler.outW, state.sampler.outH, alpha, dof, 1, bokeh);
-  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH);
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, { focus: alpha });
   post({ id, type: 'result', width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }

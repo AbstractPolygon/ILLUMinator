@@ -542,6 +542,15 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-key.selected { background: #ff9f1a; box-shadow: 0 0 0 1.5px #fff; z-index: 1; }
 .tl-key.hold { border-radius: 0; background: var(--muted); }
 .tl-key.hold.selected { background: #ff9f1a; }
+.tl-label.tl-sub { padding-left: 14px; }
+.tl-label.tl-group { color: var(--text); font-weight: 600; gap: 2px; }
+.tl-group-name { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-chevron { display: inline-flex; align-items: center; justify-content: center; padding: 0 2px; background: none; border: 0; color: var(--muted); }
+.tl-chevron svg { transition: transform 0.12s; }
+.open > .tl-chevron svg { transform: rotate(90deg); }
+.tl-track.tl-summary { background: #1b1f24; }
+.tl-key.tl-sum { background: var(--muted); }
+.tl-channel-group { color: var(--text); font-weight: 600; cursor: pointer; gap: 2px; }
 .tl-box { position: absolute; border: 1px dashed rgba(200, 205, 213, 0.7); background: rgba(200, 205, 213, 0.08); pointer-events: none; z-index: 3; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid #e5534b; pointer-events: none; }
 .tl-curve { flex: none; }

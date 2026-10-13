@@ -9,7 +9,7 @@ import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
 import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
-import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier } from './core/keyframes.js';
+import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
 // (the Frame rate setting).
@@ -2021,11 +2021,22 @@ const TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden=
 function deleteMask(i) {
   const list = getMasks();
   if (!list[i]) return;
+  // Its animation goes with it.
+  const prefix = `mask:${list[i].id}:`;
+  let keyed = false;
+  for (const k of Object.keys(anim.tracks)) {
+    if (!k.startsWith(prefix)) continue;
+    keyed = keyed || anim.tracks[k].length > 0;
+    delete anim.tracks[k];
+  }
   list.splice(i, 1);
   if (maskSel >= i) maskSel = Math.max(list.length ? 0 : -1, maskSel - 1);
   if (!list.length) $('mask-show').checked = false;
   setMasks(list);
   renderMasks();
+  clearSelection();
+  if (keyed) saveAnimation();
+  else renderTimeline();
 }
 
 // Asks before deleting mask i, in a small menu by `anchor`.
@@ -2073,6 +2084,8 @@ function renderMasks() {
   for (const [key, id] of Object.entries(FX_SLIDERS)) $(id).value = Math.round(m.fx[key] * 100);
   $('mask-on').checked = m.on;
   $('mask-invert').checked = m.invert;
+  $('mx-strength').value = Math.round((m.strength ?? 1) * 100);
+  $('mask-follow').checked = !!m.follow;
   for (const input of document.querySelectorAll('.local-panel input[type=range]')) showSliderValue(input);
 }
 
@@ -2085,8 +2098,17 @@ function maskFromEditor(final) {
   for (const [key, id] of Object.entries(FX_SLIDERS)) m.fx[key] = +$(id).value / 100;
   m.on = $('mask-on').checked;
   m.invert = $('mask-invert').checked;
+  m.strength = +$('mx-strength').value / 100;
+  // Following the focus from where it is now.
+  const follow = $('mask-follow').checked;
+  if (follow && !m.follow) m.anchor = +$('focus').value;
+  m.follow = follow;
   setMasks(masks, { final });
-  if (final) renderMasks();
+  if (final) {
+    renderMasks();
+    autoKey();
+    renderTimeline();
+  }
 }
 
 for (const kind of Object.keys(MASK_NAMES)) {
@@ -2113,7 +2135,7 @@ for (const input of document.querySelectorAll('.local-panel input[type=range]'))
     maskFromEditor(true);
   });
 }
-for (const id of ['mask-on', 'mask-invert']) $(id).addEventListener('change', () => maskFromEditor(true));
+for (const id of ['mask-on', 'mask-invert', 'mask-follow']) $(id).addEventListener('change', () => maskFromEditor(true));
 $('mask-show').addEventListener('change', () => applySettingsSoon());
 $('mask-delete').onclick = () => askDeleteMask(maskSel, $('mask-delete'));
 
@@ -2131,6 +2153,69 @@ function localSettings() {
 // sets the curve to the next. Framing (zoom and pan) is applied when the
 // picture is drawn, like the pivot.
 const TRACK_NAMES = { aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', pan: 'Pan' };
+
+// Every setting of a local adjustment (living filters included) has a
+// track too: 'mask:<id>:<attr>'.
+const MASK_FX = ['exposure', 'contrast', 'saturation', 'temperature', 'tint'];
+const MASK_SHAPE = { radial: ['x', 'y', 'w', 'h', 'feather'], linear: ['x', 'y', 'angle', 'width'], depth: ['near', 'far', 'feather'] };
+const MASK_ATTR_NAMES = {
+  strength: 'Strength', exposure: 'Exposure', contrast: 'Contrast', saturation: 'Saturation', temperature: 'Temperature', tint: 'Tint',
+  x: 'Center X', y: 'Center Y', w: 'Width', h: 'Height', feather: 'Feather', angle: 'Angle', width: 'Width', near: 'Near', far: 'Far',
+};
+const MASK_LIMITS = { strength: [0, 1], exposure: [-2, 2], x: [0, 1], y: [0, 1], w: [0.01, 1], h: [0.01, 1], feather: [0, 1], angle: [-180, 180], width: [0.01, 1], near: [-1.6, 1.6], far: [-1.6, 1.6] };
+const maskAttrs = (m) => ['strength', ...MASK_SHAPE[m.kind], ...MASK_FX];
+
+function parseMaskTrack(k) {
+  const [, id, attr] = k.split(':');
+  return { id, attr };
+}
+
+function maskAttr(m, a) {
+  if (MASK_FX.includes(a)) return m.fx[a];
+  return a === 'strength' ? m.strength ?? 1 : m[a];
+}
+
+function setMaskAttr(m, a, v) {
+  const [lo, hi] = MASK_LIMITS[a] || [-1, 1];
+  v = Math.min(hi, Math.max(lo, v));
+  if (MASK_FX.includes(a)) m.fx[a] = v;
+  else m[a] = v;
+}
+
+// The tracks in groups: Camera, then one for each local adjustment, named
+// after the living filter that made it (or the mask).
+function trackGroups() {
+  const groups = [{ id: 'camera', name: 'Camera', tracks: [...TRACKS] }];
+  getMasks().forEach((m, i) => groups.push({ id: m.id, name: m.name || maskLabel(m, i), tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) }));
+  for (const g of groups) for (const k of g.tracks) if (!anim.tracks[k]) anim.tracks[k] = [];
+  return groups;
+}
+
+function tracks() {
+  return trackGroups().flatMap((g) => g.tracks);
+}
+
+// Camera starts open, each adjustment's group closed (they have many tracks).
+const tlGroups = { closed: new Set(), opened: new Set() };
+const groupCollapsed = (id) => (id === 'camera' ? tlGroups.closed.has(id) : !tlGroups.opened.has(id));
+
+function toggleGroup(id) {
+  const set = id === 'camera' ? tlGroups.closed : tlGroups.opened;
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
+  renderTimeline();
+}
+
+function trackName(k) {
+  return isMaskTrack(k) ? MASK_ATTR_NAMES[parseMaskTrack(k).attr] || k : TRACK_NAMES[k];
+}
+
+// With the group's name, for tooltips.
+function trackTitle(k) {
+  if (!isMaskTrack(k)) return TRACK_NAMES[k];
+  const g = trackGroups().find((x) => x.tracks.includes(k));
+  return `${g ? g.name : 'Mask'} ${trackName(k).toLowerCase()}`;
+}
 let anim = emptyAnimation();
 let keySel = null; // { k, t }: the main selected keyframe
 // Every selected keyframe (keySel's among them).
@@ -2200,6 +2285,11 @@ function combineMotion(a, b) {
 }
 
 function currentValue(k) {
+  if (isMaskTrack(k)) {
+    const { id, attr } = parseMaskTrack(k);
+    const m = getMasks().find((x) => x.id === id);
+    return m ? maskAttr(m, attr) : 0;
+  }
   switch (k) {
     case 'aperture': return F_STOPS[+$('fstop').value] ?? 2;
     case 'depth': return +$('dof-depth').value;
@@ -2213,6 +2303,16 @@ function currentValue(k) {
 // Shows a keyframe's value in the controls (and the picture).
 // Sets the control behind track k to v.
 function applyValue(k, v) {
+  if (isMaskTrack(k)) {
+    const { id, attr } = parseMaskTrack(k);
+    const masks = getMasks();
+    const m = masks.find((x) => x.id === id);
+    if (!m) return;
+    setMaskAttr(m, attr, v);
+    setMasks(masks, { final: false });
+    if (masks.indexOf(m) === maskSel) renderMasks();
+    return;
+  }
   if (k === 'aperture') {
     let best = 0;
     F_STOPS.forEach((n, i) => { if (Math.abs(Math.log(n / v)) < Math.abs(Math.log(F_STOPS[best] / v))) best = i; });
@@ -2247,7 +2347,7 @@ function showValue(k, v) {
 // Shows the animation's settings at time t (no frames rendered yet).
 function previewAt(t) {
   let any = false;
-  for (const k of TRACKS) {
+  for (const k of tracks()) {
     const v = valueAt(anim, k, t);
     if (v === undefined) continue;
     applyValue(k, v);
@@ -2271,7 +2371,7 @@ function sameValue(k, a, b) {
 }
 
 function currentValues() {
-  return Object.fromEntries(TRACKS.map((k) => [k, currentValue(k)]));
+  return Object.fromEntries(tracks().map((k) => [k, currentValue(k)]));
 }
 
 function autoKey() {
@@ -2281,8 +2381,8 @@ function autoKey() {
   if (!$('tl-autokey').checked || !keyframesOn() || state.mode !== 'camera' || state.restoring) return;
   const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
   let added = false;
-  for (const k of TRACKS) {
-    if (!base || sameValue(k, base[k], now[k])) continue;
+  for (const k of tracks()) {
+    if (!base || base[k] === undefined || sameValue(k, base[k], now[k])) continue;
     setKey(anim, k, t, now[k], KEY_FPS);
     selectAt(k, t, added);
     added = true;
@@ -2318,7 +2418,7 @@ function selectAt(k, t, add = false) {
 // The selected keyframes: [{ k, key }].
 function selectedKeys() {
   const out = [];
-  for (const k of TRACKS) for (const key of anim.tracks[k]) if (tlSel.has(key)) out.push({ k, key });
+  for (const k of tracks()) for (const key of anim.tracks[k]) if (tlSel.has(key)) out.push({ k, key });
   return out;
 }
 
@@ -2387,6 +2487,68 @@ function updatePlayhead() {
   $('tl-time').textContent = `${fmtTime(head)} / ${fmtTime(anim.length)}`;
 }
 
+const CHEVRON_RIGHT = '<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// A group's heading: open / close it, key all its tracks, and a summary of
+// its keyframes (drag one to move every keyframe at that time).
+function groupRow(grp, { pos, inView, head }) {
+  const label = Object.assign(document.createElement('div'), { className: 'tl-label tl-group' });
+  if (!groupCollapsed(grp.id)) label.classList.add('open');
+  const toggle = Object.assign(document.createElement('button'), { type: 'button', className: 'tl-chevron', innerHTML: CHEVRON_RIGHT, title: groupCollapsed(grp.id) ? 'Show its tracks' : 'Hide its tracks' });
+  toggle.setAttribute('aria-expanded', String(!groupCollapsed(grp.id)));
+  toggle.onclick = () => toggleGroup(grp.id);
+  const name = Object.assign(document.createElement('span'), { className: 'tl-group-name', textContent: grp.name });
+  name.onclick = () => toggleGroup(grp.id);
+  const add = Object.assign(document.createElement('button'), { type: 'button', textContent: '◆', title: `Keyframe every ${grp.name} setting at the playhead` });
+  add.onclick = () => {
+    const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
+    tlSel.clear();
+    for (const k of grp.tracks) {
+      setKey(anim, k, t, currentValue(k), KEY_FPS);
+      selectAt(k, t, true);
+    }
+    saveAnimation();
+  };
+  label.append(toggle, add, name);
+  const track = Object.assign(document.createElement('div'), { className: 'tl-track tl-summary' });
+  track.onpointerdown = (e) => {
+    if (e.target === track) boxSelectKeys(e, track);
+  };
+  const times = new Map();
+  for (const k of grp.tracks) {
+    for (const key of anim.tracks[k]) {
+      const t = Math.round(key.t * KEY_FPS);
+      if (!times.has(t)) times.set(t, []);
+      times.get(t).push({ k, key });
+    }
+  }
+  for (const list of times.values()) {
+    const t = list[0].key.t;
+    if (!inView(t)) continue;
+    const d = Object.assign(document.createElement('span'), { className: 'tl-key tl-sum', style: `left:${pos(t)}` });
+    if (list.every((i) => isSelected(i.k, i.key))) d.classList.add('selected');
+    d.title = `${grp.name}: ${list.length} keyframe${list.length > 1 ? 's' : ''} at ${fmtTime(t)}`;
+    d.tlKeys = list;
+    d.onpointerdown = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.shiftKey) tlSel.clear();
+      for (const i of list) tlSel.add(i.key);
+      keySel = { k: list[0].k, t: list[0].key.t };
+      if (e.shiftKey) {
+        renderTimeline();
+        return;
+      }
+      dragKey(e, list[0].k, list[0].key, track, { keep: true });
+    };
+    track.append(d);
+  }
+  const playhead = Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` });
+  playhead.hidden = !inView(head);
+  track.append(playhead);
+  return [label, track];
+}
+
 function renderTimeline() {
   const on = keyframesOn() && state.mode === 'camera';
   if ($('timeline').hidden === on) {
@@ -2416,17 +2578,20 @@ function renderTimeline() {
   ruler.append(rulerHead);
   ruler.onpointerdown = (e) => seekTimeline(e, ruler);
   rows.push(Object.assign(document.createElement('div'), { className: 'tl-label' }), ruler);
-  for (const k of TRACKS) {
-    const label = Object.assign(document.createElement('div'), { className: 'tl-label' });
-    const add = Object.assign(document.createElement('button'), { type: 'button', textContent: '◆', title: `Keyframe ${TRACK_NAMES[k].toLowerCase()} at the playhead` });
-    add.setAttribute('aria-label', `Add a ${TRACK_NAMES[k].toLowerCase()} keyframe`);
+  for (const grp of trackGroups()) {
+    rows.push(...groupRow(grp, { pos, inView, head }));
+    if (groupCollapsed(grp.id)) continue;
+    for (const k of grp.tracks) {
+    const label = Object.assign(document.createElement('div'), { className: 'tl-label tl-sub' });
+    const add = Object.assign(document.createElement('button'), { type: 'button', textContent: '◆', title: `Keyframe ${trackTitle(k).toLowerCase()} at the playhead` });
+    add.setAttribute('aria-label', `Add a ${trackTitle(k).toLowerCase()} keyframe`);
     add.onclick = () => {
       const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
       setKey(anim, k, t, currentValue(k), KEY_FPS);
       selectAt(k, t);
       saveAnimation();
     };
-    label.append(add, document.createTextNode(TRACK_NAMES[k]));
+    label.append(add, document.createTextNode(trackName(k)));
     const track = Object.assign(document.createElement('div'), { className: 'tl-track' });
     track.onpointerdown = (e) => {
       if (e.target === track) boxSelectKeys(e, track);
@@ -2437,7 +2602,7 @@ function renderTimeline() {
       if (isSelected(k, key)) d.classList.add('selected');
       d.tlKey = { k, key };
       if (key.ease.type === 'hold') d.classList.add('hold');
-      d.title = `${TRACK_NAMES[k]} at ${fmtTime(key.t)}`;
+      d.title = `${trackTitle(k)} at ${fmtTime(key.t)}`;
       d.onpointerdown = (e) => dragKey(e, k, key, track);
       track.append(d);
     }
@@ -2445,6 +2610,7 @@ function renderTimeline() {
     trackHead.hidden = !inView(head);
     track.append(trackHead);
     rows.push(label, track);
+  }
   }
   grid.replaceChildren(...rows);
   const sel = selectedKey();
@@ -2565,8 +2731,9 @@ function boxSelectKeys(e, track) {
       const cx = (b.left + b.right) / 2;
       const cy = (b.top + b.bottom) / 2;
       const inside = cx >= left && cx <= right && cy >= top && cy <= bottom;
-      if (inside) tlSel.add(el.tlKey.key);
-      el.classList.toggle('selected', tlSel.has(el.tlKey.key));
+      const keys = el.tlKeys ? el.tlKeys.map((i) => i.key) : [el.tlKey.key];
+      if (inside) for (const key of keys) tlSel.add(key);
+      el.classList.toggle('selected', keys.every((key) => tlSel.has(key)));
     }
   };
   const up = (ev) => {
@@ -2590,10 +2757,10 @@ function boxSelectKeys(e, track) {
 // Drag a keyframe along its track (with every other selected keyframe); a
 // click without moving selects just it and shows its value. Shift-click
 // adds it to the selection or takes it out.
-function dragKey(e, k, key, track) {
+function dragKey(e, k, key, track, { keep = false } = {}) {
   e.preventDefault();
   e.stopPropagation();
-  if (e.shiftKey) {
+  if (e.shiftKey && !keep) {
     if (tlSel.has(key)) {
       tlSel.delete(key);
       const first = selectedKeys()[0];
@@ -2624,7 +2791,7 @@ function dragKey(e, k, key, track) {
     if (moved) {
       saveAnimation();
     } else {
-      selectKey(k, key);
+      if (!keep) selectKey(k, key);
       state.keyTime = key.t;
       showValue(k, key.v);
       renderTimeline();
@@ -2638,7 +2805,7 @@ function dragKey(e, k, key, track) {
 function deleteSelectedKey() {
   const sel = selectedKey();
   if (!sel && !tlSel.size) return;
-  for (const k of TRACKS) anim.tracks[k] = anim.tracks[k].filter((key) => key !== sel && !tlSel.has(key));
+  for (const k of tracks()) anim.tracks[k] = anim.tracks[k].filter((key) => key !== sel && !tlSel.has(key));
   clearSelection();
   saveAnimation();
 }
@@ -2674,7 +2841,8 @@ $('tl-grid').parentElement.addEventListener('wheel', (e) => {
 }, { passive: false });
 $('tl-key-all').onclick = () => {
   const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
-  for (const k of TRACKS) setKey(anim, k, t, currentValue(k), KEY_FPS);
+  // Every track of the open groups.
+  for (const g of trackGroups()) if (!groupCollapsed(g.id)) for (const k of g.tracks) setKey(anim, k, t, currentValue(k), KEY_FPS);
   saveAnimation();
 };
 $('tl-ease').onchange = () => {
@@ -2696,7 +2864,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl / ⌘ + A: select every keyframe.
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && state.mode === 'camera') {
     e.preventDefault();
-    for (const k of TRACKS) for (const key of anim.tracks[k]) tlSel.add(key);
+    for (const k of tracks()) for (const key of anim.tracks[k]) tlSel.add(key);
     const first = selectedKeys()[0];
     keySel = first ? { k: first.k, t: first.key.t } : null;
     renderTimeline();
@@ -2831,11 +2999,20 @@ function keyframeFrames() {
   const live = { aperture: F_STOPS[+$('fstop').value] ?? 2, depth: +$('dof-depth').value, focus: +$('focus').value };
   const path = [];
   const frames = [];
+  const maskTracks = tracks().filter((k) => isMaskTrack(k) && anim.tracks[k].length);
   for (const v of sample(anim, KEY_FPS)) {
+    // Local adjustment settings this frame: { id: { attr: value } }.
+    let masks = null;
+    for (const k of maskTracks) {
+      if (v[k] === undefined) continue;
+      const { id, attr } = parseMaskTrack(k);
+      masks = masks || {};
+      (masks[id] = masks[id] || {})[attr] = v[k];
+    }
     const lens = apertureFor(v.aperture ?? live.aperture);
     const depth = v.depth ?? live.depth;
     const view = v.view ?? [state.camera.u, state.camera.v];
-    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50) });
+    path.push({ u: view[0], v: view[1], alpha: v.focus ?? live.focus, aperture: lens.aperture, dof: lens.dof * 4 ** (-depth / 50), masks });
     const z = v.zoom ?? +$('frame-zoom').value / 100;
     const pan = v.pan ?? [+$('frame-pan-x').value / 100, +$('frame-pan-y').value / 100];
     frames.push(framing(z, pan[0], pan[1]));
@@ -2861,6 +3038,17 @@ const CHANNELS = [
   { k: 'pan', c: 1, name: 'Pan Y', color: '#aed581' },
 ];
 const channelId = (ch) => `${ch.k}.${ch.c}`;
+const MASK_COLORS = ['#ff8a65', '#4db6ac', '#9575cd', '#e0e0e0', '#81c784', '#64b5f6', '#ffd54f', '#f06292', '#a1887f', '#90a4ae', '#ce93d8'];
+
+// The Curves view's channels, by group (a viewpoint or pan is two).
+function channelList() {
+  const out = [];
+  for (const grp of trackGroups()) {
+    if (grp.id === 'camera') out.push(...CHANNELS.map((ch) => ({ ...ch, group: grp })));
+    else grp.tracks.forEach((k, n) => out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[n % MASK_COLORS.length], group: grp }));
+  }
+  return out;
+}
 // Room at the plot's sides so keyframes at the ends show whole.
 const PLOT_PAD = 8;
 
@@ -2894,6 +3082,7 @@ function channelRange(ch) {
 
 // The limits each channel's value is kept within.
 function channelLimits(ch) {
+  if (isMaskTrack(ch.k)) return MASK_LIMITS[parseMaskTrack(ch.k).attr] || [-1, 1];
   const r = (state.info && state.info.radius) || 4.5;
   switch (ch.k) {
     case 'aperture': return [Math.log2(Math.min(...F_STOPS)), Math.log2(Math.max(...F_STOPS))];
@@ -2918,7 +3107,21 @@ function setChannelValue(ch, key, y) {
 }
 
 function renderChannels() {
-  const list = CHANNELS.map((ch) => {
+  const rows = [];
+  let group = null;
+  for (const ch of channelList()) {
+    if (ch.group !== group) {
+      group = ch.group;
+      const g = group;
+      const head = Object.assign(document.createElement('div'), { className: 'tl-channel tl-channel-group' });
+      if (!groupCollapsed(g.id)) head.classList.add('open');
+      const toggle = Object.assign(document.createElement('button'), { type: 'button', className: 'tl-chevron', innerHTML: CHEVRON_RIGHT });
+      toggle.setAttribute('aria-expanded', String(!groupCollapsed(g.id)));
+      head.append(toggle, document.createTextNode(g.name));
+      head.onclick = () => toggleGroup(g.id);
+      rows.push(head);
+    }
+    if (groupCollapsed(ch.group.id)) continue;
     const id = channelId(ch);
     const row = Object.assign(document.createElement('label'), { className: 'tl-channel' });
     if (!anim.tracks[ch.k].length) row.classList.add('empty');
@@ -2931,9 +3134,9 @@ function renderChannels() {
     const sw = Object.assign(document.createElement('span'), { className: 'tl-swatch' });
     sw.style.background = ch.color;
     row.append(box, sw, document.createTextNode(ch.name));
-    return row;
-  });
-  $('tl-channels').replaceChildren(...list);
+    rows.push(row);
+  }
+  $('tl-channels').replaceChildren(...rows);
 }
 
 function drawCurves() {
@@ -2971,9 +3174,9 @@ function drawCurves() {
   }
   tlCurves.hits = [];
   const sel = selectedKey();
-  for (const ch of CHANNELS) {
+  for (const ch of channelList()) {
     const keys = anim.tracks[ch.k];
-    if (!keys.length || tlCurves.hidden.has(channelId(ch))) continue;
+    if (!keys.length || groupCollapsed(ch.group.id) || tlCurves.hidden.has(channelId(ch))) continue;
     const [lo, hi] = tlCurves.drag && tlCurves.drag.id === channelId(ch) ? tlCurves.drag.range : channelRange(ch);
     const yOf = (y) => bottom - ((y - lo) / (hi - lo)) * (bottom - top);
     // The curve, sampled every two pixels.
@@ -3488,7 +3691,8 @@ $('stereo-baseline').oninput = () => showSliderValue($('stereo-baseline'));
 function livingFilter(name) {
   const f = +$('focus').value;
   const fx = (o) => ({ exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, ...o });
-  const depth = (near, far, feather, invert, effect) => ({ ...defaultMask('depth'), near, far, feather, invert, fx: fx(effect) });
+  // Depth filters follow the focus: animate it and they move with it.
+  const depth = (near, far, feather, invert, effect) => ({ ...defaultMask('depth'), near, far, feather, invert, follow: true, anchor: f, fx: fx(effect) });
   switch (name) {
     case 'pop': // in focus keeps its color, the rest goes gray
       return [depth(f - 0.25, f + 0.25, 0.2, true, { saturation: -1 })];
@@ -3505,6 +3709,9 @@ function livingFilter(name) {
 
 $('mask-filter').onchange = () => {
   const added = livingFilter($('mask-filter').value);
+  // Named after the filter (its group in the keyframe editor, too).
+  const name = ($('mask-filter').selectedOptions[0] || {}).textContent || '';
+  for (const m of added) m.name = name.trim();
   $('mask-filter').value = '';
   if (!added.length || !canRender()) return;
   const masks = getMasks();
@@ -3518,6 +3725,7 @@ $('mask-filter').onchange = () => {
   maskSel = masks.length - 1;
   setMasks(masks);
   renderMasks();
+  renderTimeline();
 };
 
 // ---------------------------------------------------------------- number fields
@@ -4140,6 +4348,7 @@ function showSliderValue(input) {
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
+  else if (input.id === 'mx-strength') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;
   else if (input.closest('.mask-shape')) out.textContent = `${v}`;

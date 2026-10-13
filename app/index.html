@@ -348,6 +348,9 @@
             <label class="check"><input id="mask-invert" type="checkbox"> Invert</label>
             <label class="check"><input id="mask-show" type="checkbox"> Show mask</label>
           </div>
+          <label title="How much of the mask's effect applies">Strength <output data-for="mx-strength" for="mx-strength">100%</output>
+            <input id="mx-strength" type="range" min="0" max="100" step="1" value="100" data-default="100">
+          </label>
           <div id="mask-shape-radial" class="mask-shape">
             <label>Center X <output data-for="mr-x" for="mr-x">50</output>
               <input id="mr-x" type="range" min="0" max="100" step="1" value="50" data-default="50">
@@ -389,6 +392,7 @@
             <label>Feather <output data-for="md-feather" for="md-feather">20</output>
               <input id="md-feather" type="range" min="1" max="100" step="1" value="20" data-default="20">
             </label>
+            <label class="check" title="Near and far move with the focus, keeping their distance from it (also when the focus is animated)"><input id="mask-follow" type="checkbox"> Follow focus</label>
           </div>
           <h3 class="mask-fx-title">Effect</h3>
             <label>Exposure <output data-for="mx-exposure" for="mx-exposure">0</output>

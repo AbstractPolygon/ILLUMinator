@@ -16,6 +16,14 @@
 // highs, lows and the ends, without overshooting.
 
 export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'pan'];
+// Besides those, 'mask:<id>:<attr>': a setting of local adjustment <id>
+// (its strength, a shape setting or an effect; see core/local.js).
+export const isMaskTrack = (k) => /^mask:[\w-]+:[a-z]+$/.test(k);
+
+// Every track the animation has.
+export function trackNames(anim) {
+  return [...TRACKS, ...Object.keys(anim.tracks).filter(isMaskTrack)];
+}
 export const FPS = 24;
 export const DEFAULT_LENGTH = 4;
 
@@ -42,7 +50,8 @@ export function parseAnimation(text) {
   const out = emptyAnimation();
   if (!a || typeof a !== 'object') return out;
   if (Number.isFinite(a.length) && a.length > 0) out.length = Math.min(120, a.length);
-  for (const k of TRACKS) {
+  const names = [...TRACKS, ...Object.keys((a.tracks && typeof a.tracks === 'object' && a.tracks) || {}).filter(isMaskTrack)];
+  for (const k of names) {
     const list = a.tracks && Array.isArray(a.tracks[k]) ? a.tracks[k] : [];
     out.tracks[k] = list
       .filter((key) => key && Number.isFinite(key.t) && (isVec(k) ? Array.isArray(key.v) && key.v.length === 2 : Number.isFinite(key.v)))
@@ -177,11 +186,12 @@ export function frameCount(anim, fps = FPS) {
 // tracks undefined), at `fps` frames a second.
 export function sample(anim, fps = FPS) {
   const n = frameCount(anim, fps);
-  return Array.from({ length: n }, (_, i) => Object.fromEntries(TRACKS.map((k) => [k, valueAt(anim, k, i / fps)])));
+  const names = trackNames(anim);
+  return Array.from({ length: n }, (_, i) => Object.fromEntries(names.map((k) => [k, valueAt(anim, k, i / fps)])));
 }
 
 export function hasKeys(anim) {
-  return TRACKS.some((k) => anim.tracks[k].length);
+  return trackNames(anim).some((k) => anim.tracks[k].length);
 }
 
 // Sets (or replaces) the keyframe of track k at time t.

@@ -34,3 +34,17 @@ test('effects apply by the mask weight', () => {
   applyLocal(outside, [m], 0.99, 0.99, 1.5, null);
   assert.equal(outside[0], 0.2);
 });
+
+test('animated settings, strength and follow focus resolve per picture', async () => {
+  const { resolveMasks } = await import('../app/js/core/local.js');
+  const m = { ...defaultMask('depth'), id: 'a', near: -0.2, far: 0.2, follow: true, anchor: 0.1, strength: 0.5, fx: { exposure: 1, contrast: 0, saturation: -1, temperature: 0, tint: 0 } };
+  const [r] = resolveMasks([m], { focus: 0.6 });
+  assert.ok(Math.abs(r.near - 0.3) < 1e-9 && Math.abs(r.far - 0.7) < 1e-9);
+  assert.equal(r.fx.exposure, 0.5);
+  assert.equal(r.fx.saturation, -0.5);
+  const [o] = resolveMasks([m], { focus: 0.1, overrides: { a: { strength: 1, exposure: 2, feather: 0.4 } } });
+  assert.equal(o.fx.exposure, 2);
+  assert.equal(o.feather, 0.4);
+  assert.equal(m.fx.exposure, 1); // the mask itself is left alone
+  assert.ok(parseMasks(JSON.stringify([{ kind: 'radial' }, { kind: 'depth' }])).map((x) => x.id).join() === 'm0,m1');
+});

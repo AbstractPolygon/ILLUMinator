@@ -10,14 +10,19 @@
 //           other, fading over `width`
 //   depth   { near, far, feather }    by the depth map (focus values): full
 //           effect between near and far, fading over `feather`
-// Each mask: { kind, on, invert, ...shape, fx: { exposure (EV), contrast,
-// saturation, temperature, tint (each -1..1) } }.
+// Each mask: { id, kind, on, invert, strength (0..1, scales the effects),
+// ...shape, fx: { exposure (EV), contrast, saturation, temperature, tint
+// (each -1..1) } }. A depth mask with `follow` set moves with the focus:
+// near and far shift by how far the focus is from `anchor`, the focus the
+// mask was made at.
 
 export const MAX_MASKS = 4;
 export const MASK_KINDS = ['radial', 'linear', 'depth'];
 
+const newId = () => Math.random().toString(36).slice(2, 10);
+
 export function defaultMask(kind) {
-  const base = { kind, on: true, invert: false, fx: { exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0 } };
+  const base = { id: newId(), kind, on: true, invert: false, strength: 1, follow: false, anchor: 0, fx: { exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0 } };
   if (kind === 'radial') return { ...base, x: 0.5, y: 0.5, w: 0.25, h: 0.25, feather: 0.5 };
   if (kind === 'linear') return { ...base, x: 0.5, y: 0.5, angle: 90, width: 0.3 };
   return { ...base, near: -0.3, far: 0.3, feather: 0.2 };
@@ -34,10 +39,35 @@ export function parseMasks(text) {
   return list
     .filter((m) => m && MASK_KINDS.includes(m.kind))
     .slice(0, MAX_MASKS)
-    .map((m) => {
+    .map((m, i) => {
       const d = defaultMask(m.kind);
-      return { ...d, ...m, fx: { ...d.fx, ...(m.fx || {}) } };
+      // Masks saved before ids existed are named by their place.
+      const id = typeof m.id === 'string' && m.id ? m.id : `m${i}`;
+      return { ...d, ...m, id, fx: { ...d.fx, ...(m.fx || {}) } };
     });
+}
+
+// The masks as one picture uses them: `overrides[id]` ({ attr: value },
+// an animation's values for this frame: strength, shape or effect) applied,
+// effects scaled by the strength, and depth masks that follow the focus
+// moved to `focus`.
+export function resolveMasks(masks, { focus = null, overrides = null } = {}) {
+  return (masks || []).map((m) => {
+    const out = { ...m, fx: { ...m.fx } };
+    for (const [a, v] of Object.entries((overrides && overrides[m.id]) || {})) {
+      if (!Number.isFinite(v)) continue;
+      if (a in out.fx) out.fx[a] = v;
+      else out[a] = v;
+    }
+    const s = Math.min(1, Math.max(0, out.strength ?? 1));
+    for (const k of Object.keys(out.fx)) out.fx[k] *= s;
+    if (out.kind === 'depth' && out.follow && Number.isFinite(focus)) {
+      const shift = focus - (out.anchor || 0);
+      out.near += shift;
+      out.far += shift;
+    }
+    return out;
+  });
 }
 
 // Masks that change something.
