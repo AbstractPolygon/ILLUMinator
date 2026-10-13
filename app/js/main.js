@@ -1032,8 +1032,13 @@ function updateFrameLabel() {
     return;
   }
   const keyframes = $('anim').value === 'keyframes';
-  const total = n || (keyframes ? frameCount(anim, KEY_FPS) : Math.max(1, +$('frames').value));
-  const index = n && state.showingFrames ? state.index : keyframes ? Math.round((state.keyTime || 0) * KEY_FPS) : 0;
+  const expected = keyframes ? frameCount(anim, KEY_FPS) : Math.max(1, +$($('anim').value === 'focus' ? 'steps' : 'frames').value);
+  // Keyframes without an animation yet render one frame: count the length.
+  const total = keyframes ? expected : n || expected;
+  // The play bar's slider spans the whole animation, rendered or not, so it
+  // can be dragged at once.
+  $('scrub').max = String(Math.max(0, expected - 1));
+  const index = n > 1 && state.showingFrames ? state.index : keyframes ? Math.round((state.keyTime || 0) * KEY_FPS) : 0;
   const i = Math.min(total - 1, Math.max(0, index));
   const ready = state.frames.filter(Boolean).length;
   const val = state.showingFrames ? state.frameValues[state.index] : undefined;
@@ -2765,7 +2770,7 @@ $('tl-autokey').onchange = () => {
 };
 
 function playheadTime() {
-  if (state.showingFrames && state.frames.length) return (state.drawFrame ?? state.index) / KEY_FPS;
+  if (state.showingFrames && state.frames.length > 1) return (state.drawFrame ?? state.index) / KEY_FPS;
   return Math.min(animLength(), state.keyTime || 0);
 }
 
@@ -3064,8 +3069,11 @@ function seekTo(t) {
     state.showingFrames = true;
     state.index = i;
     showFrame(i);
+    // The slider follows the time (an animation of one frame stays on it).
+    $('scrub').value = String(Math.round(t * KEY_FPS));
   } else {
     previewAt(t);
+    $('scrub').value = String(Math.round(t * KEY_FPS));
   }
   renderTimeline();
   updateFrameLabel();
@@ -4618,15 +4626,15 @@ function showLoop() {
 }
 showPlayIcon(false);
 showLoop();
+// Dragging the play bar's slider moves the playhead: a rendered frame
+// where there is one, the animation's settings there until then.
 $('scrub').oninput = () => {
-  if (!state.frames.length) ensureAnimation();
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
   state.playing = false;
   showPlayIcon(false);
-  state.showingFrames = true;
-  state.index = Math.min(+$('scrub').value, Math.max(0, state.frames.length - 1));
-  showFrame(state.index);
+  if (!state.frames.length) ensureAnimation();
+  seekTo(+$('scrub').value / KEY_FPS);
 };
 $('png-btn').onclick = savePng;
 $('webm-btn').onclick = exportVideo;
