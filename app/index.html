@@ -361,7 +361,7 @@
       <details class="panel">
         <summary><h2>Optics</h2></summary>
         <details class="subpanel" open>
-          <summary><h3>Defringe</h3></summary>
+          <summary><h3>Chromatic Aberration</h3></summary>
           <div class="row check-row">
             <label class="check"><input id="fringe-on" type="checkbox"> Enabled</label>
             <label class="check"><input id="fringe-auto" type="checkbox" disabled> Auto</label>
@@ -390,6 +390,18 @@
           </fieldset>
         </details>
         <details class="subpanel">
+          <summary><h3>Lens Correction</h3></summary>
+          <label title="Straightens lines the lens bends: negative for barrel distortion (lines bow outward), positive for pincushion">Distortion <output data-for="lens-distortion" for="lens-distortion">0</output>
+            <input id="lens-distortion" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label title="Brightens (or darkens) the corners the lens darkens">Vignetting <output data-for="lens-vignetting" for="lens-vignetting">0</output>
+            <input id="lens-vignetting" type="range" min="-100" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label title="How far from the middle the vignetting correction starts">Midpoint <output data-for="lens-midpoint" for="lens-midpoint">50</output>
+            <input id="lens-midpoint" type="range" min="0" max="100" step="1" value="50" data-default="50">
+          </label>
+        </details>
+        <details class="subpanel">
           <summary><h3>Flare</h3></summary>
           <label class="check" title="Removes the haze lens flare lays over the picture"><input id="flare-on" type="checkbox"> Reduce flare</label>
           <label>Amount <output data-for="flare-amount" for="flare-amount">70</output>
@@ -400,6 +412,8 @@
 
       <details class="panel" data-panel="camera">
         <summary><h2>Animation</h2></summary>
+        <label class="check"><input id="anim-on" type="checkbox"> Enabled</label>
+        <fieldset id="anim-controls" class="plain" disabled>
         <label>Animate
           <select id="anim">
             <option value="viewpoint">Viewpoint</option>
@@ -424,6 +438,7 @@
           <label>Far <input id="far" type="range" min="0" max="1.6" step="0.05" value="0.6"></label>
           <label>Steps <input id="steps" type="range" min="5" max="41" step="2" value="21"></label>
         </div>
+        </fieldset>
       </details>
 
       <details class="panel">

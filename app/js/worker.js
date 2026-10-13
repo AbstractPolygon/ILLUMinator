@@ -18,6 +18,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
+import { lensParams, applyLens } from './core/lens.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
 const state = {
@@ -108,6 +109,7 @@ function updateColor() {
   state.wbGains = auto.map((g, i) => g * manual[i]);
   state.look = makeLook(s);
   state.detail = makeDetail(s);
+  state.lens = lensParams(s.lens);
   const ccm = colorMatrix(lf.cam, s);
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
@@ -126,6 +128,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 function toPixels(rgb, w, h) {
   rgb = applyDetail(rgb, w, h, state.detail);
   rgb = subtractVeil(rgb, w, h, state.veil, state.veilAmount);
+  rgb = applyLens(rgb, w, h, state.lens);
   const exposure = state.baseExposure * Math.pow(2, state.settings.ev);
   const f = state.settings.defringe;
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, state.matrix, exposure, undefined, state.look);
@@ -169,6 +172,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
     fringe: state.settings.defringe,
     look: state.look,
     veilAmount: state.veil ? state.veilAmount : 0,
+    lens: state.lens,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }

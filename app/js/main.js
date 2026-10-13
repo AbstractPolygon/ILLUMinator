@@ -970,6 +970,7 @@ function tick(t) {
 requestAnimationFrame(tick);
 
 function setPlaying(p) {
+  if (p && !$('anim-on').checked) return;
   state.playing = p;
   $('play-btn').textContent = p ? 'Pause' : 'Play';
   if (p) {
@@ -1127,7 +1128,7 @@ function setMode(mode) {
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
-  for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera;
+  for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -2195,6 +2196,24 @@ function animationSettingsChanged() {
 }
 for (const id of ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps']) $(id).onchange = animationSettingsChanged;
 
+// Animation > Enabled: playing, scrubbing and video export.
+function showAnimationEnabled() {
+  const on = $('anim-on').checked;
+  $('anim-controls').disabled = !on;
+  const camera = state.mode === 'camera';
+  for (const id of ['play-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !on;
+}
+$('anim-on').onchange = () => {
+  if (!$('anim-on').checked) {
+    setPlaying(false);
+    if (state.showingFrames) {
+      backToCamera();
+      renderCamera();
+    }
+  }
+  showAnimationEnabled();
+};
+
 async function applySettings() {
   const settings = {
     ev: +$('ev').value,
@@ -2218,6 +2237,7 @@ async function applySettings() {
     color: { vibrance: $('vibrance').value / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, $(`hue-${k}`).value / 100])) },
     detail: +$('detail').value,
     flare: { on: $('flare-on').checked, amount: $('flare-amount').value / 100 },
+    lens: { distortion: +$('lens-distortion').value, vignetting: +$('lens-vignetting').value, midpoint: +$('lens-midpoint').value },
     defringe: {
       on: $('fringe-on').checked,
       auto: $('fringe-auto').checked,
@@ -2310,6 +2330,7 @@ async function restoreEdits(info) {
     curve.draw();
     showColorMatrix();
     $('flare-amount').disabled = !$('flare-on').checked;
+    showAnimationEnabled();
     resetTemperature(info, { keep: !!saved });
     state.camera = { ...view };
     state.focusPoint = { ...focusPoint };
@@ -2459,6 +2480,16 @@ $('flare-on').onchange = () => {
   $('flare-amount').disabled = !$('flare-on').checked;
   applySettings();
 };
+for (const id of ['lens-distortion', 'lens-vignetting', 'lens-midpoint']) {
+  $(id).oninput = () => {
+    showSliderValue($(id));
+    applySettingsSoon();
+  };
+  $(id).ondblclick = () => {
+    $(id).value = $(id).dataset.default;
+    $(id).oninput();
+  };
+}
 $('flare-amount').oninput = () => {
   showSliderValue($('flare-amount'));
   applySettingsSoon();

@@ -444,6 +444,7 @@ uniform float uExposure;
 uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
 uniform sampler2D uVeil;   // flare veil per tile (core/flare.js), linear
 uniform float uVeilAmount;
+uniform vec4 uLens;        // core/lens.js: k, zoom, vignetting, start (0 0 0 0: off)
 uniform int uFringeOn;
 uniform int uFringeRadius;
 uniform float uFringeThreshold;
@@ -455,9 +456,39 @@ uniform int uCurveOn;
 uniform float uCurve[65];  // tone curve table (core/curve.js)
 out vec4 outColor;
 
+// Bilinear between pixel centers (pos in pixels).
+vec3 srcAt(vec2 pos) {
+  ivec2 size = textureSize(uSrc, 0);
+  vec2 f = clamp(pos - 0.5, vec2(0.0), vec2(size) - 1.001);
+  ivec2 i = ivec2(floor(f));
+  vec2 a = f - vec2(i);
+  vec3 c00 = texelFetch(uSrc, i, 0).rgb;
+  vec3 c10 = texelFetch(uSrc, i + ivec2(1, 0), 0).rgb;
+  vec3 c01 = texelFetch(uSrc, i + ivec2(0, 1), 0).rgb;
+  vec3 c11 = texelFetch(uSrc, i + ivec2(1, 1), 0).rgb;
+  return mix(mix(c00, c10, a.x), mix(c01, c11, a.x), a.y);
+}
+
 vec3 colorAt(ivec2 q) {
-  vec3 c = texelFetch(uSrc, q, 0).rgb;
-  if (uVeilAmount > 0.0) c = max(c - uVeilAmount * texture(uVeil, (vec2(q) + 0.5) / vec2(textureSize(uSrc, 0))).rgb, vec3(0.0));
+  vec2 size = vec2(textureSize(uSrc, 0));
+  vec2 pos = vec2(q) + 0.5;
+  vec3 c;
+  // Lens correction, as in core/lens.js.
+  if (uLens.x != 0.0) {
+    vec2 mid = size * 0.5;
+    float R = length(mid);
+    vec2 d = (pos - mid) / R;
+    pos = mid + d * (1.0 + uLens.x * dot(d, d)) * uLens.y * R;
+    c = srcAt(pos);
+  } else {
+    c = texelFetch(uSrc, q, 0).rgb;
+  }
+  if (uVeilAmount > 0.0) c = max(c - uVeilAmount * texture(uVeil, pos / size).rgb, vec3(0.0));
+  if (uLens.z != 0.0) {
+    float r = length(pos - size * 0.5) / length(size * 0.5);
+    float t = smoothstep(0.0, 1.0, clamp((r - uLens.w) / (1.0 - uLens.w), 0.0, 1.0));
+    c *= max(0.0, 1.0 + 1.5 * uLens.z * t);
+  }
   return uMatrix * c;
 }
 
@@ -1274,7 +1305,7 @@ export class GpuRenderer {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, rgba);
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0 }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null }) {
     const gl = this.gl;
     const P = this.programs.present;
     this.canvas.width = w;
@@ -1288,6 +1319,7 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uExposure, exposure);
     const veil = veilAmount > 0 && this.veilTex;
     gl.uniform1f(P.u.uVeilAmount, veil ? veilAmount : 0);
+    gl.uniform4f(P.u.uLens, lens ? lens.k : 0, lens ? lens.zoom : 1, lens ? lens.vig : 0, lens ? lens.start : 0);
     gl.uniform1i(P.u.uVeil, 2);
     this.bindTex(2, veil ? this.veilTex : src);
     const f = (fringe && fringe.colors) || [];

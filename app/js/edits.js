@@ -26,8 +26,8 @@ export const EDIT_GROUPS = {
     'curve-points', 'curve-highlights', 'curve-lights', 'curve-darks', 'curve-shadows'],
   camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'highlights'],
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'sharp-masking', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color'],
-  defringe: ['flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
-  animation: ['anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
+  defringe: ['lens-distortion', 'lens-vignetting', 'lens-midpoint', 'flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
+  animation: ['anim-on', 'anim', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
   rendering: ['detail', 'still-scale', 'still-passes'],
   geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],
 };
