@@ -2582,7 +2582,9 @@ function renderTimeline() {
   ruler.onpointerdown = (e) => seekTimeline(e, ruler);
   rows.push(Object.assign(document.createElement('div'), { className: 'tl-label' }), ruler);
   for (const grp of trackGroups()) {
-    rows.push(...groupRow(grp, { pos, inView, head }));
+    const heading = groupRow(grp, { pos, inView, head });
+    for (const el of heading) el.dataset.group = grp.id;
+    rows.push(...heading);
     if (groupCollapsed(grp.id)) continue;
     for (const k of grp.tracks) {
     const label = Object.assign(document.createElement('div'), { className: 'tl-label tl-sub' });
@@ -2612,6 +2614,8 @@ function renderTimeline() {
     const trackHead = Object.assign(document.createElement('span'), { className: 'tl-playhead', style: `left:${pos(head)}` });
     trackHead.hidden = !inView(head);
     track.append(trackHead);
+    label.dataset.group = grp.id;
+    track.dataset.group = grp.id;
     rows.push(label, track);
   }
   }
@@ -2643,10 +2647,12 @@ function renderTimeline() {
 // The least height that still shows every track (or every channel of the
 // Curves view), with the timeline's scrollbar when there is one.
 function minTimelineHeight() {
-  // Where the last row ends (the lists stretch to fill the editor, so their
-  // own heights say nothing).
+  // Where the Camera group's last row ends: the tracks of living filters and
+  // other adjustments may scroll out of sight. (The lists stretch to fill
+  // the editor, so their own heights say nothing.)
   const contentHeight = (el) => {
-    const last = el.lastElementChild;
+    const camera = el.querySelectorAll('[data-group="camera"]');
+    const last = camera.length ? camera[camera.length - 1] : el.lastElementChild;
     if (!last) return 0;
     return last.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop;
   };
@@ -3122,6 +3128,7 @@ function renderChannels() {
       toggle.setAttribute('aria-expanded', String(!groupCollapsed(g.id)));
       head.append(toggle, document.createTextNode(g.name));
       head.onclick = () => toggleGroup(g.id);
+      head.dataset.group = g.id;
       rows.push(head);
     }
     if (groupCollapsed(ch.group.id)) continue;
@@ -3137,6 +3144,7 @@ function renderChannels() {
     const sw = Object.assign(document.createElement('span'), { className: 'tl-swatch' });
     sw.style.background = ch.color;
     row.append(box, sw, document.createTextNode(ch.name));
+    row.dataset.group = ch.group.id;
     rows.push(row);
   }
   $('tl-channels').replaceChildren(...rows);
