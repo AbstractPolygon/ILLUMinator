@@ -42,4 +42,4 @@ The *Living filter* menu adds ready-made looks built from masks around the curre
 | Mosaic | What is out of focus breaks into tiles |
 | Crayon | What is out of focus turns into a colored-pencil drawing |
 
-Every setting of a mask, living filters included, can be animated: see [[Animation]].
+Every setting of a mask, living filters included, can be animated: the ◀ ◆ ▶ at the right of each of the selected mask's settings adds or removes its keyframes and moves between them. See [[Animation]].

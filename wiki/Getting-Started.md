@@ -19,7 +19,7 @@ npm start
 
 `npm run dist` builds an installer for your system (Windows, macOS, Linux).
 
-**Browser.** Serve the `app` folder and open it; nothing to install for the people who use it.
+**Browser.** Each release also has the web version, `ILLUMinator-<version>-web.zip`: unzip it and upload what is inside to any web server (served over HTTPS). Or serve the `app` folder of the source; nothing to install for the people who use it.
 
 ```
 npm run web            # http://localhost:8080

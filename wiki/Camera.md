@@ -1,6 +1,6 @@
 # Camera
 
-The light field controls.
+The light field controls. Each can be animated: the ◀ ◆ ▶ at the right of a setting adds or removes its keyframes and moves between them (see [[Animation]]).
 
 ## Depth
 
@@ -23,6 +23,8 @@ How carefully the depth map is measured is set in [[Rendering]] (*High quality d
 Tilts the plane of focus, like a tilt-shift lens: *Tilt* is the amount, *Rotation* the direction. *Enabled* turns the tilt off and on without losing the settings.
 
 ## Perspective
+
+*Viewpoint* shows where the viewpoint is (drag on the picture to move it), as a share of the lens aperture across and down; *Center* is the middle.
 
 Moving the viewpoint shifts every depth but one, the focus plane (or, with the aperture closed, the depth the camera focused on). *Custom pivot* and *Pivot depth* choose another depth to stay still.
 

@@ -6,6 +6,10 @@
 - *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
 - *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render* starts it.
 
+## Speed
+
+Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. On computers with two graphics chips (many laptops) ILLUMinator asks for the faster one. While you drag a slider or the picture, strong depth of field blur is drawn as a quicker draft; the finished picture follows when you let go. [[Histogram and Info]] shows the renderer in use and, where the browser can measure it, the GPU time per view.
+
 ## 3D
 
 A stereo pair from two viewpoints across the lens.
