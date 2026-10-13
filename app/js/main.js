@@ -598,15 +598,16 @@ function draw(img) {
   startNoticeTimer();
   state.lastImage = img;
   const g = geometryFor(img.width, img.height);
-  const w = g ? g.width : img.width;
-  const h = g ? g.height : img.height;
+  const k = g && state.showingFrames ? state.frameScale || 1 : 1;
+  const w = Math.round((g ? g.width : img.width) * k);
+  const h = Math.round((g ? g.height : img.height) * k);
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w;
     canvas.height = h;
     layoutCanvas();
   }
-  state.geom = g ? { ...g, inverse: invert(g.matrix), srcW: img.width, srcH: img.height } : null;
-  if (g) drawGeometry(ctx, img, g);
+  state.geom = g ? { ...g, inverse: invert(k === 1 ? g.matrix : g.matrix.map((v) => v * k)), srcW: img.width, srcH: img.height } : null;
+  if (g) drawGeometry(ctx, img, g, k);
   else if (img instanceof ImageData) ctx.putImageData(img, 0, 0);
   else ctx.drawImage(img, 0, 0);
   if (cropState.editing) positionCropBox();
@@ -938,6 +939,9 @@ function ensureAnimation() {
     ? req.args.path.map((f) => pivotFor(f.u, f.v, f.alpha ?? req.args.alpha, f.aperture ?? req.args.aperture))
     : req.args.alphas.map((alpha) => pivotFor(req.args.u, req.args.v, alpha, req.args.aperture)));
   if (req.framing) state.framePivots = state.framePivots.map((p, i) => combineMotion(p, req.framing[i]));
+  // Zoomed frames are drawn into a canvas this much larger, so the zoom is
+  // resampled once (straight to the screen) instead of blown up twice.
+  state.frameScale = Math.min(3, Math.max(1, ...state.framePivots.map((p) => (p && p.zoom) || 1)));
   state.frameValues = req.values;
   state.loop = req.loop;
   state.index = 0;
@@ -2506,7 +2510,9 @@ const CHEVRON_RIGHT = '<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden
 
 // A group's heading: open / close it, key all its tracks, and a summary of
 // its keyframes (drag one to move every keyframe at that time).
-function groupRow(grp, { pos, inView, head }) {
+// A group's heading (chevron, ◆ to key the whole group, name), the same in
+// the Keyframes and Curves views.
+function groupHeading(grp) {
   const label = Object.assign(document.createElement('div'), { className: 'tl-label tl-group' });
   if (!groupCollapsed(grp.id)) label.classList.add('open');
   const toggle = Object.assign(document.createElement('button'), { type: 'button', className: 'tl-chevron', innerHTML: CHEVRON_RIGHT, title: groupCollapsed(grp.id) ? 'Show its tracks' : 'Hide its tracks' });
@@ -2525,6 +2531,12 @@ function groupRow(grp, { pos, inView, head }) {
     saveAnimation();
   };
   label.append(toggle, add, name);
+  label.dataset.group = grp.id;
+  return label;
+}
+
+function groupRow(grp, { pos, inView, head }) {
+  const label = groupHeading(grp);
   const track = Object.assign(document.createElement('div'), { className: 'tl-track tl-summary' });
   track.onpointerdown = (e) => {
     if (e.target === track) boxSelectKeys(e, track);
@@ -3138,14 +3150,7 @@ function renderChannels() {
     if (ch.group !== group) {
       group = ch.group;
       const g = group;
-      const head = Object.assign(document.createElement('div'), { className: 'tl-channel tl-channel-group' });
-      if (!groupCollapsed(g.id)) head.classList.add('open');
-      const toggle = Object.assign(document.createElement('button'), { type: 'button', className: 'tl-chevron', innerHTML: CHEVRON_RIGHT });
-      toggle.setAttribute('aria-expanded', String(!groupCollapsed(g.id)));
-      head.append(toggle, document.createTextNode(g.name));
-      head.onclick = () => toggleGroup(g.id);
-      head.dataset.group = g.id;
-      rows.push(head);
+      rows.push(groupHeading(g));
     }
     if (groupCollapsed(ch.group.id)) continue;
     const id = channelId(ch);
@@ -4543,6 +4548,13 @@ function showLut() {
   } catch {
     saved = null;
   }
+  // The dropdown shows the LUT in use: a film look by name, an imported
+  // one as such, or None.
+  const film = saved && saved.film && filmLuts.index ? filmLuts.index.luts.findIndex((l) => l.name === saved.name) : -1;
+  const imported = $('lut-film').querySelector('option[value="imported"]');
+  imported.hidden = !(saved && film < 0);
+  imported.textContent = saved ? `Imported: ${saved.name}` : '';
+  $('lut-film').value = film >= 0 ? String(film) : saved ? 'imported' : '';
   $('lut-name').textContent = saved ? saved.name : 'None';
   $('lut-name').title = saved ? `${saved.name} (${saved.size}×${saved.size}×${saved.size})` : '';
   $('lut-remove').hidden = !saved;
@@ -4580,6 +4592,7 @@ async function loadFilmIndex() {
     return group;
   });
   $('lut-film').append(...groups);
+  showLut();
 }
 
 async function filmLut(i) {
@@ -4601,18 +4614,24 @@ async function filmLut(i) {
 
 $('lut-film').onchange = async () => {
   const i = $('lut-film').value;
-  $('lut-film').value = '';
-  if (i === '' || !filmLuts.index) return;
+  if (i === 'imported') return;
+  if (i === '') {
+    $('lut-remove').click();
+    return;
+  }
+  if (!filmLuts.index) return;
   if (!canRender()) {
+    showLut();
     showNotice('Open a photo first: a LUT is kept with the photo.');
     startNoticeTimer();
     return;
   }
   try {
     const lut = await filmLut(+i);
-    $('lut-data').value = JSON.stringify(encodeLut(lut, lut.title));
+    $('lut-data').value = JSON.stringify({ ...encodeLut(lut, lut.title), film: true });
   } catch (err) {
     showError(err);
+    showLut();
     return;
   }
   showLut();

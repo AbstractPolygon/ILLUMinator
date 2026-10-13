@@ -532,7 +532,7 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-views button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .tl-views button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 .tl-views button.active { position: relative; z-index: 1; background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.tl-curves { display: grid; grid-template-columns: 112px 1fr; grid-template-rows: minmax(0, 1fr); min-width: 0; height: var(--tl-natural, 150px); }
+.tl-curves { display: grid; grid-template-columns: 132px 1fr; grid-template-rows: minmax(0, 1fr); min-width: 0; height: var(--tl-natural, 150px); }
 .tl-channels { display: flex; flex-direction: column; gap: 2px; padding-top: 16px; font-size: 11.5px; line-height: 14px; color: var(--muted); overflow-y: auto; overflow-x: hidden; }
 .tl-channel { display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; white-space: nowrap; }
 .tl-channel input { margin: 0; width: 12px; height: 12px; }
@@ -540,11 +540,11 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .tl-channel.empty { opacity: 0.45; }
 .tl-plot { display: block; width: 100%; height: 100%; min-height: 0; min-width: 0; background: #15181c; border-radius: 3px; cursor: crosshair; touch-action: none; }
 .tl-grid-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.timeline input.tl-scroll { display: block; margin: 0 0 0 112px; width: calc(100% - 118px); }
+.timeline input.tl-scroll { display: block; margin: 0 0 0 140px; width: calc(100% - 146px); }
 .tl-zoom button { padding: 2px 8px; font-size: 12px; min-width: 0; }
 .tl-zoom #tl-zoom-label { min-width: 46px; font-variant-numeric: tabular-nums; }
-.tl-grid { position: relative; flex: 1; min-width: 0; padding-right: 6px; display: grid; grid-template-columns: 112px 1fr; row-gap: 2px; user-select: none; }
-.tl-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); height: 20px; }
+.tl-grid { position: relative; flex: 1; min-width: 0; padding-right: 6px; display: grid; grid-template-columns: 132px 1fr; row-gap: 2px; column-gap: 8px; user-select: none; }
+.tl-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); height: 20px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .tl-label button { padding: 0 4px; line-height: 16px; font-size: 11px; background: none; border: 1px solid transparent; color: var(--muted); }
 .tl-label button:hover { color: var(--text); border-color: var(--line); }
 .tl-track { position: relative; height: 20px; background: #15181c; border-radius: 3px; cursor: pointer; }
@@ -565,7 +565,6 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .open > .tl-chevron svg { transform: rotate(90deg); }
 .tl-track.tl-summary { background: #1b1f24; }
 .tl-key.tl-sum { background: var(--muted); }
-.tl-channel-group { color: var(--text); font-weight: 600; cursor: pointer; gap: 2px; }
 .tl-box { position: absolute; border: 1px dashed rgba(200, 205, 213, 0.7); background: rgba(200, 205, 213, 0.08); pointer-events: none; z-index: 3; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid #e5534b; pointer-events: none; }
 .tl-curve { flex: none; }
@@ -606,3 +605,6 @@ label.lut-amount { margin-top: 14px; }
 
 /* About: third-party credits sit apart from the developer's links. */
 .credit-extra { margin-top: 18px; }
+
+/* Group headings look the same in the Curves channel list as in the tracks. */
+.tl-channels .tl-label.tl-group { flex: none; line-height: normal; }

@@ -98,8 +98,11 @@ export function easeFunction(ease) {
 }
 
 // Aperture moves in f-stops (log scale); views and pans per component.
-const toLinear = (k, v) => (k === 'aperture' ? [Math.log(v)] : isVec(k) ? v : [v]);
-const fromLinear = (k, c) => (k === 'aperture' ? Math.exp(c[0]) : isVec(k) ? c : c[0]);
+// Aperture moves in f-stops and zoom in doublings (log scales), so each
+// step of either takes the same time; views and pans per component.
+const isLog = (k) => k === 'aperture' || k === 'zoom';
+const toLinear = (k, v) => (isLog(k) ? [Math.log(v)] : isVec(k) ? v : [v]);
+const fromLinear = (k, c) => (isLog(k) ? Math.exp(c[0]) : isVec(k) ? c : c[0]);
 
 // Tangent (value per second) at keys[i], per component, for auto curves.
 function autoSlope(keys, i, k, c) {
@@ -157,7 +160,7 @@ export function segmentBezier(anim, k, i, c = 0) {
 }
 
 function mix(k, a, b, e) {
-  if (k === 'aperture') return Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * e);
+  if (isLog(k)) return Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * e);
   if (isVec(k)) return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e];
   return a + (b - a) * e;
 }
