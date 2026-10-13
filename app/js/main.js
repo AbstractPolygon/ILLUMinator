@@ -2368,7 +2368,7 @@ function keyButtonTracks(id) {
 
 function setupKeyButtons() {
   // Thin chevrons, so the three take little room.
-  const chevron = (dir) => `<svg viewBox="0 0 6 10" width="5" height="9" aria-hidden="true"><path d="${dir < 0 ? 'M4.5 1.5 1.5 5 4.5 8.5' : 'M1.5 1.5 4.5 5 1.5 8.5'}" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const chevron = (dir) => `<svg viewBox="0 0 7 12" width="7" height="12" aria-hidden="true"><path d="${dir < 0 ? 'M5.5 1.5 1.5 6 5.5 10.5' : 'M1.5 1.5 5.5 6 1.5 10.5'}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   for (const id of [...Object.keys(KEY_CONTROLS), ...Object.keys(KEY_MASK_CONTROLS)]) {
     const el = $(id);
     const label = el && el.closest('label');

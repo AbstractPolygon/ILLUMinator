@@ -77,7 +77,7 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 10px 12px;
 }
 .library { width: 210px; border-right: 1px solid var(--line); }
-.controls { width: 312px; border-left: 1px solid var(--line); }
+.controls { width: 318px; border-left: 1px solid var(--line); }
 
 h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8px; }
 /* Sections in the right sidebar are spaced by a gap, so the first visible
@@ -206,14 +206,14 @@ label output { float: right; color: var(--muted); font-variant-numeric: tabular-
    (as in DaVinci Resolve's Inspector): ◀ ◆ ▶. The diamond is the keyframe
    editor's: hollow when the setting is not animated, filled when it is, blue
    with a keyframe at the playhead; the arrows show while it is animated. */
-.controls label:has(> input[type=range]), label:has(> .key-nav) { position: relative; padding-right: 42px; }
+.controls label:has(> input[type=range]), label:has(> .key-nav) { position: relative; padding-right: 48px; }
 .key-nav { position: absolute; right: 0; top: -1px; display: flex; align-items: center; height: 18px; }
 .key-nav button {
   width: 16px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted);
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .key-nav button:hover:not(:disabled) { color: var(--text); }
-.key-nav .key-step { visibility: hidden; width: 11px; }
+.key-nav .key-step { visibility: hidden; width: 14px; }
 .key-nav.on .key-step { visibility: visible; }
 /* An arrow shows only when there is a keyframe that way. */
 .key-nav .key-step:disabled { visibility: hidden; }
