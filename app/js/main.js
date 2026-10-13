@@ -1174,6 +1174,8 @@ async function applySettings() {
     },
   };
   $('fringe-controls').disabled = !settings.defringe.on;
+  $('wb-temperature').disabled = settings.autoWb;
+  $('wb-tint').disabled = settings.autoWb;
   $('fringe-radius-label').textContent = `${settings.defringe.radius} px`;
   showFringeHues();
   if (!state.info || !state.info.hasRaw) return;

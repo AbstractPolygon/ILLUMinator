@@ -90,7 +90,8 @@ function updateColor() {
   const s = state.settings;
   const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
   const asShot = asShotKelvin();
-  const manual = whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  // Auto white balance replaces the manual temperature and tint.
+  const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = auto.map((g, i) => g * manual[i]);
   state.look = makeLook(s);
   const ccm = colorMatrix(lf.cam, s);
