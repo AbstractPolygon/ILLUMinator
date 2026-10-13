@@ -314,6 +314,7 @@ button.wide { display: block; width: 100%; }
 .icon-only[aria-expanded="true"] { color: var(--accent); }
 #settings-dialog, #about-dialog { width: min(520px, calc(100vw - 32px)); }
 #about-dialog p { margin: 0; line-height: 1.5; }
+#about-dialog .credits h3 { margin: 4px 0 4px; font-size: 13px; }
 #about-dialog h2 { display: flex; align-items: baseline; gap: 6px; }
 a.button {
   display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 6px;
