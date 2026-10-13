@@ -4,6 +4,9 @@
   "version": "0.5.3",
   "description": "Open, refocus and animate Lytro ILLUM and first generation light field photographs",
   "license": "PolyForm-Shield-1.0.0",
+  "author": "AbstractPolygon, LLC",
+  "homepage": "https://abstractpolygon.com",
+  "desktopName": "illuminator.desktop",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -59,8 +62,24 @@
       ]
     },
     "linux": {
-      "target": "AppImage",
-      "category": "Graphics"
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Graphics",
+      "maintainer": "AbstractPolygon, LLC",
+      "synopsis": "Lytro light field photo editor",
+      "syncDesktopName": true
     },
     "directories": {
       "output": "dist",

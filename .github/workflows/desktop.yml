@@ -1,10 +1,12 @@
-# Builds the desktop app installers on GitHub's own machines: a Windows
-# installer (.exe) and macOS disk images (.dmg, Apple Silicon and Intel).
+# Builds the desktop app installers on GitHub's machines: a Windows
+# installer (.exe), macOS disk images (.dmg, Apple Silicon and Intel) and
+# Linux packages (.AppImage and .deb, x64).
 # Run it from the Actions tab (Build desktop apps → Run workflow): the
 # installers are attached to the run, under Artifacts. With "Publish a
 # release" ticked (or when a version tag such as v0.5.2 is pushed) they are
-# also published as a GitHub Release, tagged with package.json's version. They are not code signed: Windows SmartScreen and macOS
-# Gatekeeper warn on first launch.
+# also published as a GitHub Release, tagged with package.json's version.
+# They are not code signed: Windows SmartScreen and macOS Gatekeeper warn on
+# first launch.
 name: Build desktop apps
 
 on:
@@ -32,6 +34,9 @@ jobs:
           - os: macos-latest
             name: macos
             args: --mac
+          - os: ubuntu-latest
+            name: linux
+            args: --linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -58,6 +63,8 @@ jobs:
           path: |
             dist/*.exe
             dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
           if-no-files-found: error
 
   release:
@@ -85,9 +92,10 @@ jobs:
 
           - **Windows:** \`ILLUMinator-${version}-win-x64.exe\`
           - **macOS:** \`ILLUMinator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`ILLUMinator-${version}-mac-x64.dmg\` (Intel)
+          - **Linux:** \`ILLUMinator-${version}-linux-amd64.deb\` (Debian, Ubuntu) or \`ILLUMinator-${version}-linux-x86_64.AppImage\` (other distributions)
 
-          The installers are not code signed. On Windows, choose *More info → Run anyway* if SmartScreen warns. On macOS, right-click the app and choose *Open* the first time.
+          The installers are not code signed. On Windows, choose *More info → Run anyway* if SmartScreen warns. On macOS, right-click the app and choose *Open* the first time. On Linux, make the AppImage executable (\`chmod +x\`) before running it.
           NOTES
-          gh release create "$tag" dist/*.exe dist/*.dmg --target "$GITHUB_SHA" \
+          gh release create "$tag" dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb --target "$GITHUB_SHA" \
             --repo "$GITHUB_REPOSITORY" --title "ILLUMinator ${version}" \
             --notes-file notes.md --generate-notes
