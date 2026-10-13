@@ -216,7 +216,7 @@ dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
 }
 
 /* Subsections sit a little in from their section's title. */
-.subpanel { border-top: 1px solid var(--line); margin-left: 12px; }
+.subpanel { border-top: 1px solid var(--line); margin-left: 6px; }
 .subpanel:first-of-type { border-top: 0; }
 .subpanel > summary {
   list-style: none;
