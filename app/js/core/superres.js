@@ -144,24 +144,42 @@ function sampleBilinear(img, w, h, x, y) {
 //    focus and the smooth refocus blur of `base` is used elsewhere;
 //  - `allInFocus`: every lens's pixels are placed using the depth under that
 //    lens, so every depth is sharp (base should then be a single view).
+// Output size and splat settings of a full resolution render (shared with
+// the GPU version in gpu/renderer.js).
+export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, sigma, aperture } = {}) {
+  // At higher output scales there are fewer samples per output pixel; use a
+  // little more of each lens and wider splats so they still cover evenly.
+  sigma ??= 0.6 * Math.max(1, scale / 3);
+  aperture ??= scale >= 4 ? 0.42 : 0.38;
+  const { grid: g, outW, outH, detail } = sampler;
+  const rUse = g.pitch * aperture;
+  return {
+    W: Math.floor((outW / detail) * scale),
+    H: Math.floor((outH / detail) * scale),
+    scale,
+    sigma,
+    rUse,
+    // A narrowed aperture spreads each lens's samples over less.
+    spreadRadius: Number.isFinite(apertureSigma) ? Math.min(rUse, 2 * apertureSigma) : rUse,
+    reach: Math.ceil(1.5 * sigma),
+    unit: g.rowStep,
+    xMin: sampler.xMin,
+    yMin: sampler.yMin,
+    detail,
+  };
+}
+
 export function renderSuperRes(raw, cam, dev, sampler, options) {
   const {
     alpha = 0, allInFocus = false, u0 = 0, v0 = 0, apertureSigma = Infinity, scale = 3, vignetting: vg, base, depth,
     depthTolerance = 0.12, onProgress, passes = 0,
   } = options;
   const inv2a2 = Number.isFinite(apertureSigma) ? 1 / (2 * apertureSigma * apertureSigma) : 0;
-  // At higher output scales there are fewer samples per output pixel; use a
-  // little more of each lens and wider splats so they still cover evenly.
-  const sigma = options.sigma ?? 0.6 * Math.max(1, scale / 3);
-  const aperture = options.aperture ?? (scale >= 4 ? 0.42 : 0.38);
-  const { grid: g, outW, outH, detail } = sampler;
+  const { W, H, sigma, rUse, spreadRadius, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale, apertureSigma, sigma: options.sigma, aperture: options.aperture });
+  const { grid: g } = sampler;
   const { width } = cam;
-  const unit = g.rowStep;
-  const { xMin, yMin } = sampler;
   const bw = options.baseW;
   const bh = options.baseH;
-  const W = Math.floor((outW / detail) * scale);
-  const H = Math.floor((outH / detail) * scale);
   // Color comes from the smooth standard render (upsampled), and only
   // brightness detail from the splatted raw pixels. Splatting each pixel into
   // its own color channel would leave red and blue (a quarter of the pixels
@@ -172,9 +190,6 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   const up = new Float32Array(W * H * 3);
   const upY = new Float32Array(W * H);
   const focus = new Float32Array(W * H);
-  const rUse = g.pitch * aperture;
-  // A narrowed aperture spreads each lens's samples over less.
-  const spreadRadius = Number.isFinite(apertureSigma) ? Math.min(rUse, 2 * apertureSigma) : rUse;
   for (let j = 0; j < H; j++) {
     const by = Math.min(bh - 1.001, Math.max(0, ((j + 0.5) / scale) * detail - 0.5));
     const y0 = Math.floor(by);
@@ -214,7 +229,6 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     }
   }
 
-  const reach = Math.ceil(1.5 * sigma);
   // One splat of every raw pixel; with `estimate`, each sample contributes
   // its difference from the estimate at its position instead (a residual).
   const totalSteps = 1 + passes;

@@ -16,7 +16,7 @@ import { makeDetail, applyDetail } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
-import { renderSuperRes, estimateVignetting, vignettingGainAt } from './core/superres.js';
+import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
@@ -506,6 +506,20 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const allInFocus = aperture <= 0;
   const opts = apertureOptions({ u, v, aperture });
   const base = allInFocus ? equalize(render(u, v)) : refocusRGB(alpha, opts);
+  if (state.gpu) {
+    // The whole render on the GPU: the picture stays there for the color pass.
+    progress('Rendering full resolution', 0);
+    const params = superResParams(sampler, { scale, apertureSigma: allInFocus ? Infinity : opts.sigma });
+    const tex = state.gpu.superRes({
+      ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
+      vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes,
+    });
+    if (tex) {
+      if (state.jobs.superres !== job) return { cancelled: true };
+      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
+      return undefined;
+    }
+  }
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
     scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
@@ -540,8 +554,12 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     if (dof > 0 && !(await ensureDepth(id))) return { cancelled: true };
     const packed = packedMasks(masks);
     const key = JSON.stringify([state.gen, u, v, alpha, aperture, dof, dof > 0 && draft, bokeh || null, state.settings.mvDenoise, state.detail, packed && packed.spatial ? packed : null]);
+    // The GPU time of each view, for the photo info (where available).
+    const message = { id, type: 'result', gpuMs: state.gpu.gpuMs() };
+    state.gpu.beginTiming();
     if (state.kept && state.kept.key === key) {
-      finishGpu(state.kept.tex, outW, outH, packed, { id, type: 'result' });
+      finishGpu(state.kept.tex, outW, outH, packed, message);
+      state.gpu.endTiming();
       return undefined;
     }
     let tex;
@@ -551,7 +569,8 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     } else {
       tex = await singleView(id, u, v);
     }
-    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key, draft }, { id, type: 'result' });
+    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key, draft }, message);
+    state.gpu.endTiming();
     return undefined;
   }
   let rgb;

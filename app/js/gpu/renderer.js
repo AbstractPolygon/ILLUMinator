@@ -943,6 +943,162 @@ void main() {
   outColor = vec4(vY * w, w, 0.0, 0.0);
 }`;
 
+// ---------------------------------------------------------------- full resolution
+// The steps of core/superres.js renderSuperRes around the splat, on the GPU,
+// so a full resolution picture never leaves GPU memory.
+
+const PHASE_BINS = 16;
+
+// Upsampled standard render and how much splatted detail to keep:
+// (r, g, b, focus).
+const SR_PREP = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uBase;
+uniform vec2 uBaseSize;
+uniform highp sampler2D uDepth;
+uniform float uDetail;
+uniform float uScale;
+uniform int uAllInFocus;
+uniform float uAlpha;
+uniform float uTolerance;
+uniform float uSpread;
+out vec4 outColor;
+void main() {
+  vec2 p = gl_FragCoord.xy - 0.5;
+  vec2 b = clamp((p + 0.5) / uScale * uDetail - 0.5, vec2(0.0), uBaseSize - 1.001);
+  ivec2 i = ivec2(floor(b));
+  vec2 a = b - vec2(i);
+  // Bilinear with full precision weights (as core/superres.js).
+  vec3 up = mix(
+    mix(texelFetch(uBase, i, 0).rgb, texelFetch(uBase, i + ivec2(1, 0), 0).rgb, a.x),
+    mix(texelFetch(uBase, i + ivec2(0, 1), 0).rgb, texelFetch(uBase, i + ivec2(1, 1), 0).rgb, a.x),
+    a.y);
+  float d = mix(
+    mix(texelFetch(uDepth, i, 0).r, texelFetch(uDepth, i + ivec2(1, 0), 0).r, a.x),
+    mix(texelFetch(uDepth, i + ivec2(0, 1), 0).r, texelFetch(uDepth, i + ivec2(1, 1), 0).r, a.x),
+    a.y);
+  float inFocus = 1.0;
+  float local = uAlpha;
+  if (uAllInFocus == 1) {
+    local = d;
+  } else {
+    float e = (d - uAlpha) / uTolerance;
+    inFocus = exp(-e * e);
+  }
+  // coverage() of core/superres.js.
+  float t = clamp((abs(local) * uSpread - 0.35) / (0.9 - 0.35), 0.0, 1.0);
+  outColor = vec4(up, inFocus * t * t * (3.0 - 2.0 * t));
+}`;
+
+// The splatted brightness, normalized (uPass 0), or corrected by a
+// back-projection residual (uPass 1).
+const SR_COMBINE = `#version 300 es
+precision highp float;
+uniform sampler2D uAcc;    // r: sum, g: weight
+uniform sampler2D uPrep;
+uniform sampler2D uSharp;
+uniform int uPass;
+out vec4 outColor;
+const float LAMBDA = 0.15;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 acc = texelFetch(uAcc, p, 0).rg;
+  if (uPass == 0) {
+    float upY = dot(texelFetch(uPrep, p, 0).rgb, vec3(0.2126, 0.7152, 0.0722));
+    outColor = vec4((acc.r + upY * LAMBDA) / (acc.g + LAMBDA), 0.0, 0.0, 0.0);
+  } else {
+    outColor = vec4(max(0.0, texelFetch(uSharp, p, 0).r + 0.8 * acc.r / (acc.g + LAMBDA)), 0.0, 0.0, 0.0);
+  }
+}`;
+
+const SR_PHASE = `
+uniform vec2 uMin;
+uniform float uUnit;
+uniform float uScale;
+uniform vec2 uLattice;  // pitch, rowStep
+vec2 phaseAt(vec2 k) {
+  float ly = uMin.y + (k.y / uScale) * uUnit;
+  float lx = uMin.x + (k.x / uScale) * uUnit;
+  float fj = ly / uLattice.y;
+  float fi = (lx - fj * uLattice.x * 0.5) / uLattice.x;
+  return vec2(fract(fi), fract(fj));
+}`;
+
+// Lattice pattern measurement: one point per pixel, added up by blending
+// into PHASE_BINS x PHASE_BINS bins of (ratio sum, count) (uPass 0), or
+// into one pixel of (standard brightness sum, splatted brightness sum)
+// (uPass 1).
+const SR_HIST_VERTEX = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uPrep;
+uniform sampler2D uSharp;
+uniform sampler2D uAcc;
+uniform int uWidth;
+uniform int uPass;
+${SR_PHASE}
+out vec2 vValue;
+void main() {
+  gl_PointSize = 1.0;
+  gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  ivec2 p = ivec2(gl_VertexID % uWidth, gl_VertexID / uWidth);
+  vec4 prep = texelFetch(uPrep, p, 0);
+  float upY = dot(prep.rgb, vec3(0.2126, 0.7152, 0.0722));
+  float sharp = texelFetch(uSharp, p, 0).r;
+  if (uPass == 1) {
+    vValue = vec2(upY, sharp);
+    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  if (prep.a < 0.5 || !(texelFetch(uAcc, p, 0).g > 0.0) || !(upY > 1e-4)) return;
+  vec2 ph = phaseAt(vec2(p));
+  ivec2 bin = min(ivec2(floor(ph * ${PHASE_BINS}.0)), ivec2(${PHASE_BINS} - 1));
+  vValue = vec2(sharp / upY, 1.0);
+  gl_Position = vec4((vec2(bin) + 0.5) / ${PHASE_BINS}.0 * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const SR_HIST_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 vValue;
+out vec4 outColor;
+void main() {
+  outColor = vec4(vValue, 0.0, 0.0);
+}`;
+
+// The full resolution picture: the standard render's color with the
+// splatted brightness (lattice pattern divided out) where in focus.
+const SR_FINAL = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uPrep;
+uniform sampler2D uSharp;
+uniform sampler2D uGain;  // PHASE_BINS x PHASE_BINS
+uniform int uPattern;
+uniform float uMatch;
+${SR_PHASE}
+out vec4 outColor;
+float gainAt(int b, int a) {
+  int n = ${PHASE_BINS};
+  return texelFetch(uGain, ivec2(((a % n) + n) % n, ((b % n) + n) % n), 0).r;
+}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 prep = texelFetch(uPrep, p, 0);
+  float sharp = texelFetch(uSharp, p, 0).r;
+  if (uPattern == 1) {
+    vec2 f = phaseAt(vec2(p)) * ${PHASE_BINS}.0 - 0.5;
+    ivec2 i = ivec2(floor(f));
+    vec2 t = f - vec2(i);
+    float g = mix(mix(gainAt(i.y, i.x), gainAt(i.y, i.x + 1), t.x), mix(gainAt(i.y + 1, i.x), gainAt(i.y + 1, i.x + 1), t.x), t.y);
+    if (g > 0.0) sharp /= g;
+  }
+  float upY = dot(prep.rgb, vec3(0.2126, 0.7152, 0.0722));
+  float ratio = upY > 1e-6 ? min(4.0, sharp * uMatch / upY) : 1.0;
+  float k = prep.a * ratio + (1.0 - prep.a);
+  outColor = vec4(prep.rgb * k, 1.0);
+}`;
+
 // ---------------------------------------------------------------- depth
 // The depth measurement of core/depth.js (estimateDepth) on the GPU: views'
 // fine detail, their spread at each trial depth, cost aggregation and the
@@ -1259,6 +1415,10 @@ export class GpuRenderer {
       present: program(gl, PRESENT),
       localSpatial: program(gl, LOCAL_SPATIAL),
       splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
+      srPrep: program(gl, SR_PREP),
+      srCombine: program(gl, SR_COMBINE),
+      srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
+      srFinal: program(gl, SR_FINAL),
     };
     // Additive blending into 32-bit floats needs EXT_float_blend; otherwise
     // accumulate in half floats (enough for these sums).
@@ -1275,6 +1435,39 @@ export class GpuRenderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     this.fbo = gl.createFramebuffer();
     this.views = null;
+    // GPU timing (EXT_disjoint_timer_query_webgl2), where the browser offers
+    // it: queries waiting for their result, and the last result in ms.
+    this.timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    this.timings = [];
+    this.lastGpuMs = null;
+  }
+
+  // Measures the GPU time of the work between beginTiming() and
+  // endTiming(); the result arrives a few frames later (gpuMs()).
+  beginTiming() {
+    if (!this.timer || this.timing) return;
+    this.timing = this.gl.createQuery();
+    this.gl.beginQuery(this.timer.TIME_ELAPSED_EXT, this.timing);
+  }
+
+  endTiming() {
+    if (!this.timing) return;
+    this.gl.endQuery(this.timer.TIME_ELAPSED_EXT);
+    this.timings.push(this.timing);
+    this.timing = null;
+  }
+
+  // The most recent finished measurement in ms, or null.
+  gpuMs() {
+    const gl = this.gl;
+    if (!this.timer) return null;
+    const disjoint = gl.getParameter(this.timer.GPU_DISJOINT_EXT);
+    while (this.timings.length && gl.getQueryParameter(this.timings[0], gl.QUERY_RESULT_AVAILABLE)) {
+      const q = this.timings.shift();
+      if (!disjoint) this.lastGpuMs = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+      gl.deleteQuery(q);
+    }
+    return this.lastGpuMs;
   }
 
   // Made on a texture unit no shader reads, so making a texture never
@@ -2003,15 +2196,11 @@ export class GpuRenderer {
     return out;
   }
 
-  // Full resolution accumulation (see renderSuperRes' gpuSplat option):
-  // returns { accY, wsum } as Float32Arrays of W * H.
-  splat(p) {
+  // What the splat reads: the standard render (upsampled colors, linear
+  // filtering) and the vignetting table. New textures, for the caller to
+  // delete.
+  splatInputs(p) {
     const gl = this.gl;
-    const { cam, dev, sampler } = this;
-    const g = sampler.grid;
-    const { W, H } = p;
-    const acc = this.texture(W, H, this.floatBlend ? gl.RGBA32F : gl.RGBA16F);
-    // Standard render (upsampled colors) with linear filtering.
     const base = this.texture(p.baseW, p.baseH, gl.RGBA16F, gl.LINEAR);
     const rgba = new Float32Array(p.baseW * p.baseH * 4);
     for (let i = 0, j = 0; i < p.base.length; i += 3, j += 4) {
@@ -2032,17 +2221,19 @@ export class GpuRenderer {
     }
     gl.bindTexture(gl.TEXTURE_2D, vig);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, vg.bins, vg.bins, gl.RGBA, gl.FLOAT, vigData);
+    return { base, vig };
+  }
 
-    // Back-projection pass: the current result, sampled at each raw pixel's
-    // position (half floats filter linearly everywhere). Made before the
-    // texture units are bound below: creating a texture binds it to the
-    // active unit, which would replace the depth map.
-    let estimate = null;
-    if (p.estimate) {
-      estimate = this.texture(W, H, gl.R16F, gl.LINEAR);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
-    }
-
+  // One splat of every raw pixel into a new W x H texture (r: brightness
+  // sum, g: weight); with `estimate` (a linearly filtered texture of the
+  // current result) the residuals instead.
+  splatInto(p, { base, vig, estimate = null }) {
+    const gl = this.gl;
+    const { cam, dev, sampler } = this;
+    const g = sampler.grid;
+    const { W, H } = p;
+    const vg = p.vignetting;
+    const acc = this.texture(W, H, this.floatBlend ? gl.RGBA32F : gl.RGBA16F);
     this.target(acc, W, H);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -2081,7 +2272,6 @@ export class GpuRenderer {
     gl.uniform2i(U.uOutSize, W, H);
     gl.uniform1i(U.uReach, p.reach);
     gl.uniform1f(U.uInv2s2, 1 / (2 * p.sigma * p.sigma));
-    gl.useProgram(P.p);
     gl.uniform1i(U.uResidual, estimate ? 1 : 0);
     gl.uniform1i(U.uEstimate, 4);
     this.bindTex(4, estimate || base);
@@ -2094,17 +2284,161 @@ export class GpuRenderer {
       gl.drawArrays(gl.POINTS, 0, Math.min(chunk, total - start));
     }
     gl.disable(gl.BLEND);
+    return acc;
+  }
 
-    const buf = new Float32Array(W * H * 4);
-    gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, buf);
-    const accY = new Float32Array(W * H);
-    const wsum = new Float32Array(W * H);
-    for (let i = 0; i < W * H; i++) {
-      accY[i] = buf[4 * i];
-      wsum[i] = buf[4 * i + 1];
+  // Full resolution accumulation (see renderSuperRes' gpuSplat option):
+  // returns { accY, wsum } as Float32Arrays of W * H.
+  splat(p) {
+    const gl = this.gl;
+    const { W, H } = p;
+    const { base, vig } = this.splatInputs(p);
+    // Back-projection pass: the current result, sampled at each raw pixel's
+    // position (half floats filter linearly everywhere). Made before the
+    // texture units are bound: creating a texture binds it to the active
+    // unit, which would replace the depth map.
+    let estimate = null;
+    if (p.estimate) {
+      estimate = this.texture(W, H, gl.R16F, gl.LINEAR);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
     }
+    const acc = this.splatInto(p, { base, vig, estimate });
+    const [accY, wsum] = this.readChannels(acc, W, H, 2);
     for (const t of [acc, base, vig, estimate]) if (t) gl.deleteTexture(t);
     return { accY, wsum };
+  }
+
+  // The whole full resolution render of core/superres.js on the GPU, from
+  // superResParams() plus renderSuperRes' options (alpha, allInFocus, u0, v0,
+  // apertureSigma, vignetting, base, baseW, baseH, depthTolerance, passes).
+  // Needs float blending (for the lattice pattern measurement); returns a
+  // W x H texture, or null without it.
+  superRes(p) {
+    if (!this.floatBlend) return null;
+    const gl = this.gl;
+    const P = this.programs;
+    const { W, H } = p;
+    const inputs = this.splatInputs(p);
+    const owned = [inputs.base, inputs.vig];
+
+    // Upsampled colors and the detail weight.
+    const prep = this.texture(W, H);
+    owned.push(prep);
+    let Q = P.srPrep;
+    this.target(prep, W, H);
+    gl.useProgram(Q.p);
+    gl.uniform1i(Q.u.uBase, 2);
+    this.bindTex(2, inputs.base);
+    gl.uniform2f(Q.u.uBaseSize, p.baseW, p.baseH);
+    gl.uniform1i(Q.u.uDepth, 3);
+    this.bindTex(3, this.depthTex);
+    gl.uniform1f(Q.u.uDetail, p.detail);
+    gl.uniform1f(Q.u.uScale, p.scale);
+    gl.uniform1i(Q.u.uAllInFocus, p.allInFocus ? 1 : 0);
+    gl.uniform1f(Q.u.uAlpha, p.alpha);
+    gl.uniform1f(Q.u.uTolerance, p.depthTolerance ?? 0.12);
+    gl.uniform1f(Q.u.uSpread, p.spreadRadius);
+    this.draw();
+
+    // Splat, normalize, then back-projection passes.
+    const acc = this.splatInto(p, inputs);
+    owned.push(acc);
+    let sharp = this.texture(W, H, gl.R32F);
+    let next = this.texture(W, H, gl.R32F);
+    const estimate = p.passes > 0 ? this.texture(W, H, gl.R16F, gl.LINEAR) : null;
+    owned.push(sharp, next, estimate);
+    const combine = (accTex, pass) => {
+      Q = P.srCombine;
+      this.target(next, W, H);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uAcc, 1);
+      this.bindTex(1, accTex);
+      gl.uniform1i(Q.u.uPrep, 2);
+      this.bindTex(2, prep);
+      gl.uniform1i(Q.u.uSharp, 3);
+      this.bindTex(3, sharp);
+      gl.uniform1i(Q.u.uPass, pass);
+      this.draw();
+      [sharp, next] = [next, sharp];
+    };
+    combine(acc, 0);
+    for (let pass = 0; pass < (p.passes || 0); pass++) {
+      // The splat samples the current result with linear filtering: half
+      // floats filter everywhere.
+      Q = P.copy;
+      this.target(estimate, W, H);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uSrc, 1);
+      this.bindTex(1, sharp);
+      this.draw();
+      const residual = this.splatInto(p, { ...inputs, estimate });
+      combine(residual, 1);
+      gl.deleteTexture(residual);
+    }
+
+    // Lattice pattern: ratio of splatted to standard brightness by position
+    // within the lens cell, and the overall brightness match.
+    const hist = this.texture(PHASE_BINS, PHASE_BINS);
+    const sums = this.texture(1, 1);
+    owned.push(hist, sums);
+    Q = P.srHist;
+    gl.useProgram(Q.p);
+    gl.uniform1i(Q.u.uPrep, 1);
+    this.bindTex(1, prep);
+    gl.uniform1i(Q.u.uSharp, 2);
+    this.bindTex(2, sharp);
+    gl.uniform1i(Q.u.uAcc, 3);
+    this.bindTex(3, acc);
+    gl.uniform1i(Q.u.uWidth, W);
+    const g = this.sampler.grid;
+    gl.uniform2f(Q.u.uMin, p.xMin, p.yMin);
+    gl.uniform1f(Q.u.uUnit, p.unit);
+    gl.uniform1f(Q.u.uScale, p.scale);
+    gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+    gl.bindVertexArray(this.emptyVao);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    for (const [tex, size, pass] of [[hist, PHASE_BINS, 0], [sums, 1, 1]]) {
+      this.target(tex, size, size);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform1i(Q.u.uPass, pass);
+      gl.drawArrays(gl.POINTS, 0, W * H);
+    }
+    gl.disable(gl.BLEND);
+    const [binSum, binCount] = this.readChannels(hist, PHASE_BINS, PHASE_BINS, 2);
+    const [[sumUp], [sumSharp]] = this.readChannels(sums, 1, 1, 2);
+    const n = PHASE_BINS * PHASE_BINS;
+    let total = 0;
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      total += binSum[i];
+      count += binCount[i];
+    }
+    const pattern = count >= n * 20;
+    const gain = new Float32Array(n);
+    for (let i = 0; i < n; i++) gain[i] = pattern && binCount[i] > 0 ? binSum[i] / binCount[i] / (total / count) : 1;
+    const gainTex = this.uploadFloat(gain, PHASE_BINS, PHASE_BINS, 'srGain');
+
+    const out = this.scratch(W, H, 'superres');
+    Q = P.srFinal;
+    this.target(out, W, H);
+    gl.useProgram(Q.p);
+    gl.uniform1i(Q.u.uPrep, 1);
+    this.bindTex(1, prep);
+    gl.uniform1i(Q.u.uSharp, 2);
+    this.bindTex(2, sharp);
+    gl.uniform1i(Q.u.uGain, 3);
+    this.bindTex(3, gainTex);
+    gl.uniform1i(Q.u.uPattern, pattern ? 1 : 0);
+    gl.uniform1f(Q.u.uMatch, sumSharp > 0 ? sumUp / sumSharp : 1);
+    gl.uniform2f(Q.u.uMin, p.xMin, p.yMin);
+    gl.uniform1f(Q.u.uUnit, p.unit);
+    gl.uniform1f(Q.u.uScale, p.scale);
+    gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+    this.draw();
+    for (const t of owned) if (t) gl.deleteTexture(t);
+    return out;
   }
 
   // Color matrix, defringing, exposure and sRGB, drawn to the canvas and

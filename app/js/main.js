@@ -873,6 +873,7 @@ async function renderCamera() {
         draw(toImageData(msg));
         if (draft) drag.drafted = true;
       }
+      if (msg && msg.gpuMs != null) showGpuTime(msg.gpuMs);
     }
   } catch (err) {
     showError(err);
@@ -1288,6 +1289,7 @@ function renderInfo() {
     rows.push(['Lens pitch', `${fmt(info.grid.pitch, 3)} px`]);
     if (info.hotPixels) rows.push(['Hot pixels fixed', info.hotPixels.toLocaleString()]);
     if (info.renderer) rows.push(['Rendering', info.renderer]);
+    if (state.gpuMs != null) rows.push(['GPU time', gpuTimeText()]);
   } else if (info.processed) {
     const p = info.processed;
     const kinds = { warp: 'All-in-focus image', single: 'Single image', focus: 'Focus stack', perspective: 'Perspective views' };
@@ -1304,6 +1306,22 @@ function renderInfo() {
     return [dt, dd];
   }));
   renderGridInfo();
+}
+
+// GPU time of a recent camera view (measured where the browser allows it).
+function gpuTimeText() {
+  return `${state.gpuMs < 10 ? fmt(state.gpuMs, 1) : Math.round(state.gpuMs)} ms per view`;
+}
+
+function showGpuTime(ms) {
+  const first = state.gpuMs == null;
+  state.gpuMs = ms;
+  if (first) {
+    if (state.info) renderInfo();
+    return;
+  }
+  const dd = [...$('info').querySelectorAll('dt')].find((dt) => dt.textContent === 'GPU time');
+  if (dd) dd.nextElementSibling.textContent = gpuTimeText();
 }
 
 function renderGridInfo() {
@@ -3956,19 +3974,26 @@ async function fullResFrames(n) {
     : a.alphas.map((alpha) => ({ u: a.u, v: a.v, alpha, aperture: a.aperture, dof: a.dof, bokeh: a.bokeh }));
   const scale = +$('still-scale').value;
   const passes = +$('still-passes').value;
-  const out = [];
-  for (let i = 0; i < Math.min(n, list.length); i++) {
-    const { promise } = engine.job('superRes', 'superres', { ...list[i], scale, passes }, {
-      onProgress: (_, p) => showProgress(`Rendering frame ${i + 1} of ${n} at full resolution`, (i + (p || 0)) / n),
-    });
-    const msg = await promise;
+  const count = Math.min(n, list.length);
+  const render = (i) => engine.job('superRes', 'superres', { ...list[i], scale, passes }, {
+    onProgress: (_, p) => showProgress(`Rendering frame ${i + 1} of ${n} at full resolution`, (i + (p || 0)) / n),
+  }).promise;
+  const encode = async (msg) => {
     if (!msg || !(msg.pixels || msg.bitmap)) throw new Error('Full resolution rendering was stopped');
     const img = toImageData(msg);
     const c = new OffscreenCanvas(img.width, img.height);
     const g = c.getContext('2d');
     if (img instanceof ImageData) g.putImageData(img, 0, 0);
     else g.drawImage(img, 0, 0);
-    out.push({ blob: await c.convertToBlob({ type: 'image/jpeg', quality: 0.95 }), width: img.width, height: img.height });
+    return { blob: await c.convertToBlob({ type: 'image/jpeg', quality: 0.95 }), width: img.width, height: img.height };
+  };
+  // The worker renders the next frame while this one is encoded.
+  const out = [];
+  let next = count ? render(0) : null;
+  for (let i = 0; i < count; i++) {
+    const msg = await next;
+    next = i + 1 < count ? render(i + 1) : null;
+    out.push(await encode(msg));
   }
   return out;
 }
