@@ -314,6 +314,9 @@ button.wide { display: block; width: 100%; }
 .icon-only[aria-expanded="true"] { color: var(--accent); }
 #settings-dialog, #about-dialog { width: min(520px, calc(100vw - 32px)); }
 #about-dialog p { margin: 0; line-height: 1.5; }
+#about-dialog .links { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#about-dialog .links a { color: var(--text); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
+#about-dialog .links a:hover { text-decoration-color: var(--text); }
 #about-dialog .credits h3 { margin: 4px 0 4px; font-size: 13px; }
 #about-dialog h2 { display: flex; align-items: baseline; gap: 6px; }
 a.button {
