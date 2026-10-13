@@ -2878,6 +2878,52 @@ function setCurvesView(on) {
   renderTimeline();
   layoutCanvas();
 }
+// Drag the editor's top edge to make it taller or shorter (the picture
+// gets the rest); a double-click goes back to the natural height.
+function setTimelineHeight(h) {
+  const tl = $('timeline');
+  tl.classList.toggle('sized', h > 0);
+  if (h > 0) tl.style.setProperty('--tl-h', `${h}px`);
+  else tl.style.removeProperty('--tl-h');
+  try {
+    if (h > 0) localStorage.setItem('illuminator.timelineHeight', String(h));
+    else localStorage.removeItem('illuminator.timelineHeight');
+  } catch {
+    // Not kept between sessions then.
+  }
+  layoutCanvas();
+  if (tlCurves.on && !tl.hidden) drawCurves();
+}
+$('tl-resize').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const handle = $('tl-resize');
+  const startY = e.clientY;
+  const startH = document.querySelector('.tl-main').getBoundingClientRect().height;
+  handle.classList.add('dragging');
+  const move = (ev) => {
+    // Leave the picture at least a third of the space.
+    const stage = document.querySelector('.stage').getBoundingClientRect().height;
+    const max = Math.max(120, stage * 0.66 - 140);
+    setTimelineHeight(Math.round(Math.min(max, Math.max(60, startH - (ev.clientY - startY)))));
+  };
+  const up = () => {
+    handle.classList.remove('dragging');
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+});
+$('tl-resize').ondblclick = () => setTimelineHeight(0);
+try {
+  const h = +localStorage.getItem('illuminator.timelineHeight');
+  if (h > 0) {
+    $('timeline').classList.add('sized');
+    $('timeline').style.setProperty('--tl-h', `${h}px`);
+  }
+} catch {
+  // Natural height.
+}
 $('tl-view-keys').onclick = () => setCurvesView(false);
 $('tl-view-curves').onclick = () => setCurvesView(true);
 
