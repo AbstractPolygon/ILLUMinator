@@ -2,7 +2,7 @@
 
 The editing panels are in the right sidebar; click a title to open or close it. Each slider shows its value; double-click a slider to reset it. Everything you change is saved with the photo.
 
-## In the picture
+## Photo viewer
 
 - **Click** to focus on that spot. With a small aperture the click also opens it up to f/2.8, so the change shows.
 - **Drag** to move the viewpoint, like grabbing the scene and turning it.
