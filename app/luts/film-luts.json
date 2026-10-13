@@ -1,0 +1,1792 @@
+{
+ "source": "G’MIC Film LUTs Collection, https://github.com/YahiaAngelo/Film-Luts (MIT License, see LICENSE-film-luts.txt)",
+ "categories": [
+  "Color negative",
+  "Color negative (new)",
+  "Color negative (vintage)",
+  "Color slide",
+  "Black and white",
+  "Print film",
+  "Instant (consumer)",
+  "Instant (pro)",
+  "Fujifilm X-Trans III"
+ ],
+ "luts": [
+  {
+   "name": "Agfa Ultra Color 100",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3110952
+  },
+  {
+   "name": "Agfa Vista 200",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3084588
+  },
+  {
+   "name": "Fuji Superia 200",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3071406
+  },
+  {
+   "name": "Fuji Superia Hg 1600",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3176862
+  },
+  {
+   "name": "Fuji Superia Reala 100",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3137316
+  },
+  {
+   "name": "Fuji Superia X-Tra 800",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3031860
+  },
+  {
+   "name": "Kodak Ektar 100",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3124134
+  },
+  {
+   "name": "Kodak Elite 100 Xpro",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3058224
+  },
+  {
+   "name": "Kodak Elite Color 200",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3045042
+  },
+  {
+   "name": "Kodak Elite Color 400",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3150498
+  },
+  {
+   "name": "Kodak Portra 160 Nc",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3097770
+  },
+  {
+   "name": "Kodak Portra 160 Vc",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3018678
+  },
+  {
+   "name": "Lomography Redscale 100",
+   "category": "Color negative",
+   "size": 13,
+   "offset": 3163680
+  },
+  {
+   "name": "Fuji 160C",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 738192
+  },
+  {
+   "name": "Fuji 160C -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 751374
+  },
+  {
+   "name": "Fuji 160C +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 843648
+  },
+  {
+   "name": "Fuji 160C ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1041378
+  },
+  {
+   "name": "Fuji 400H",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1080924
+  },
+  {
+   "name": "Fuji 400H -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 949104
+  },
+  {
+   "name": "Fuji 400H +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1160016
+  },
+  {
+   "name": "Fuji 400H ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 830466
+  },
+  {
+   "name": "Fuji 800Z",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1067742
+  },
+  {
+   "name": "Fuji 800Z -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 804102
+  },
+  {
+   "name": "Fuji 800Z +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1015014
+  },
+  {
+   "name": "Fuji 800Z ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1146834
+  },
+  {
+   "name": "Ilford Hp 5",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 935922
+  },
+  {
+   "name": "Ilford Hp 5 -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1120470
+  },
+  {
+   "name": "Ilford Hp 5 +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1028196
+  },
+  {
+   "name": "Ilford Hp 5 ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1173198
+  },
+  {
+   "name": "Kodak Portra 160",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 962286
+  },
+  {
+   "name": "Kodak Portra 160 -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1186380
+  },
+  {
+   "name": "Kodak Portra 160 +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 909558
+  },
+  {
+   "name": "Kodak Portra 160 ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1199562
+  },
+  {
+   "name": "Kodak Portra 400",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1094106
+  },
+  {
+   "name": "Kodak Portra 400 -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 870012
+  },
+  {
+   "name": "Kodak Portra 400 +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 777738
+  },
+  {
+   "name": "Kodak Portra 400 ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 856830
+  },
+  {
+   "name": "Kodak Portra 800",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1107288
+  },
+  {
+   "name": "Kodak Portra 800 -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1001832
+  },
+  {
+   "name": "Kodak Portra 800 +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 764556
+  },
+  {
+   "name": "Kodak Portra 800 ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 896376
+  },
+  {
+   "name": "Kodak Portra 800 Hc",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 883194
+  },
+  {
+   "name": "Kodak Tmax 3200",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 988650
+  },
+  {
+   "name": "Kodak Tmax 3200 -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1212744
+  },
+  {
+   "name": "Kodak Tmax 3200 +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 790920
+  },
+  {
+   "name": "Kodak Tmax 3200 ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1239108
+  },
+  {
+   "name": "Kodak Tmax 3200 Alt",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 817284
+  },
+  {
+   "name": "Kodak Tri-X 400",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 975468
+  },
+  {
+   "name": "Kodak Tri-X 400 -",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1133652
+  },
+  {
+   "name": "Kodak Tri-X 400 +",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1225926
+  },
+  {
+   "name": "Kodak Tri-X 400 ++",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 922740
+  },
+  {
+   "name": "Kodak Tri-X 400 Alt",
+   "category": "Color negative (new)",
+   "size": 13,
+   "offset": 1054560
+  },
+  {
+   "name": "Fuji Neopan 1600",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 593190
+  },
+  {
+   "name": "Fuji Neopan 1600 -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 632736
+  },
+  {
+   "name": "Fuji Neopan 1600 +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 171366
+  },
+  {
+   "name": "Fuji Neopan 1600 ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 158184
+  },
+  {
+   "name": "Fuji Superia 100",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 725010
+  },
+  {
+   "name": "Fuji Superia 100 -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 237276
+  },
+  {
+   "name": "Fuji Superia 100 +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 461370
+  },
+  {
+   "name": "Fuji Superia 100 ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 355914
+  },
+  {
+   "name": "Fuji Superia 400",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 685464
+  },
+  {
+   "name": "Fuji Superia 400 -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 369096
+  },
+  {
+   "name": "Fuji Superia 400 +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 698646
+  },
+  {
+   "name": "Fuji Superia 400 ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 316368
+  },
+  {
+   "name": "Fuji Superia 800",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 435006
+  },
+  {
+   "name": "Fuji Superia 800 -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 329550
+  },
+  {
+   "name": "Fuji Superia 800 +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 659100
+  },
+  {
+   "name": "Fuji Superia 800 ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 197730
+  },
+  {
+   "name": "Fuji Superia 1600",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 514098
+  },
+  {
+   "name": "Fuji Superia 1600 -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 487734
+  },
+  {
+   "name": "Fuji Superia 1600 +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 290004
+  },
+  {
+   "name": "Fuji Superia 1600 ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 711828
+  },
+  {
+   "name": "Ilford Delta 3200",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 421824
+  },
+  {
+   "name": "Ilford Delta 3200 -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 527280
+  },
+  {
+   "name": "Ilford Delta 3200 +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 250458
+  },
+  {
+   "name": "Ilford Delta 3200 ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 224094
+  },
+  {
+   "name": "Kodak Portra 160 Nc",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 619554
+  },
+  {
+   "name": "Kodak Portra 160 Nc -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 382278
+  },
+  {
+   "name": "Kodak Portra 160 Nc +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 540462
+  },
+  {
+   "name": "Kodak Portra 160 Nc ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 408642
+  },
+  {
+   "name": "Kodak Portra 160 Vc",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 210912
+  },
+  {
+   "name": "Kodak Portra 160 Vc -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 395460
+  },
+  {
+   "name": "Kodak Portra 160 Vc +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 448188
+  },
+  {
+   "name": "Kodak Portra 160 Vc ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 276822
+  },
+  {
+   "name": "Kodak Portra 400 Nc",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 184548
+  },
+  {
+   "name": "Kodak Portra 400 Nc -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 303186
+  },
+  {
+   "name": "Kodak Portra 400 Nc +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 672282
+  },
+  {
+   "name": "Kodak Portra 400 Nc ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 342732
+  },
+  {
+   "name": "Kodak Portra 400 Uc",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 645918
+  },
+  {
+   "name": "Kodak Portra 400 Uc -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 606372
+  },
+  {
+   "name": "Kodak Portra 400 Uc +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 566826
+  },
+  {
+   "name": "Kodak Portra 400 Uc ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 580008
+  },
+  {
+   "name": "Kodak Portra 400 Vc",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 500916
+  },
+  {
+   "name": "Kodak Portra 400 Vc -",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 263640
+  },
+  {
+   "name": "Kodak Portra 400 Vc +",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 553644
+  },
+  {
+   "name": "Kodak Portra 400 Vc ++",
+   "category": "Color negative (vintage)",
+   "size": 13,
+   "offset": 474552
+  },
+  {
+   "name": "Agfa Precisa 100",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1845480
+  },
+  {
+   "name": "Fuji Astia 100 Generic",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1858662
+  },
+  {
+   "name": "Fuji Astia 100F",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1634568
+  },
+  {
+   "name": "Fuji Fp 100C",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1687296
+  },
+  {
+   "name": "Fuji Provia 100 Generic",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1647750
+  },
+  {
+   "name": "Fuji Provia 100F",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1713660
+  },
+  {
+   "name": "Fuji Provia 400F",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1608204
+  },
+  {
+   "name": "Fuji Provia 400X",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1766388
+  },
+  {
+   "name": "Fuji Sensia 100",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1700478
+  },
+  {
+   "name": "Fuji Superia 200 Xpro",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1898208
+  },
+  {
+   "name": "Fuji Velvia 50",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1805934
+  },
+  {
+   "name": "Fuji Velvia 100 Generic",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1779570
+  },
+  {
+   "name": "Kodak E-100 Gx Ektachrome 100",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1832298
+  },
+  {
+   "name": "Kodak Ektachrome 100 Vs",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1871844
+  },
+  {
+   "name": "Kodak Ektachrome 100 Vs Generic",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1595022
+  },
+  {
+   "name": "Kodak Elite Chrome 200",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1885026
+  },
+  {
+   "name": "Kodak Elite Chrome 400",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1581840
+  },
+  {
+   "name": "Kodak Elite Extracolor 100",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1740024
+  },
+  {
+   "name": "Kodak Kodachrome 25",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1621386
+  },
+  {
+   "name": "Kodak Kodachrome 64",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1726842
+  },
+  {
+   "name": "Kodak Kodachrome 64 Generic",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1911390
+  },
+  {
+   "name": "Kodak Kodachrome 200",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1674114
+  },
+  {
+   "name": "Lomography X-Pro Slide 200",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1819116
+  },
+  {
+   "name": "Polaroid 669",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1660932
+  },
+  {
+   "name": "Polaroid 690",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1792752
+  },
+  {
+   "name": "Polaroid Polachrome",
+   "category": "Color slide",
+   "size": 13,
+   "offset": 1753206
+  },
+  {
+   "name": "Agfa Apx 25",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1265472
+  },
+  {
+   "name": "Agfa Apx 100",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1384110
+  },
+  {
+   "name": "Fuji Neopan 1600",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1515930
+  },
+  {
+   "name": "Fuji Neopan Acros 100",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1502748
+  },
+  {
+   "name": "Ilford Delta 100",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1542294
+  },
+  {
+   "name": "Ilford Delta 400",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1476384
+  },
+  {
+   "name": "Ilford Delta 3200",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1450020
+  },
+  {
+   "name": "Ilford Fp 4 Plus 125",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1410474
+  },
+  {
+   "name": "Ilford Hp 5 Plus 400",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1278654
+  },
+  {
+   "name": "Ilford Hps 800",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1291836
+  },
+  {
+   "name": "Ilford Pan F Plus 50",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1555476
+  },
+  {
+   "name": "Ilford Xp 2",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1370928
+  },
+  {
+   "name": "Kodak Bw 400 Cn",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1463202
+  },
+  {
+   "name": "Kodak Hie Hs Infra",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1568658
+  },
+  {
+   "name": "Kodak T-Max 100",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1357746
+  },
+  {
+   "name": "Kodak T-Max 400",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1305018
+  },
+  {
+   "name": "Kodak T-Max 3200",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1397292
+  },
+  {
+   "name": "Kodak Tri-X 400",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1436838
+  },
+  {
+   "name": "Polaroid 664",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1489566
+  },
+  {
+   "name": "Polaroid 667",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1344564
+  },
+  {
+   "name": "Polaroid 672",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1331382
+  },
+  {
+   "name": "Rollei Ir 400",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1423656
+  },
+  {
+   "name": "Rollei Ortho 25",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1529112
+  },
+  {
+   "name": "Rollei Retro 80S",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1252290
+  },
+  {
+   "name": "Rollei Retro 100 Tonal",
+   "category": "Black and white",
+   "size": 13,
+   "offset": 1318200
+  },
+  {
+   "name": "Fuji 3510 Constlclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 92274
+  },
+  {
+   "name": "Fuji 3510 Constlmap",
+   "category": "Print film",
+   "size": 13,
+   "offset": 79092
+  },
+  {
+   "name": "Fuji 3510 Cuspclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 105456
+  },
+  {
+   "name": "Fuji 3513 Constlclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 13182
+  },
+  {
+   "name": "Fuji 3513 Constlmap",
+   "category": "Print film",
+   "size": 13,
+   "offset": 118638
+  },
+  {
+   "name": "Fuji 3513 Cuspclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 52728
+  },
+  {
+   "name": "Kodak 2383 Constlclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 39546
+  },
+  {
+   "name": "Kodak 2383 Constlmap",
+   "category": "Print film",
+   "size": 13,
+   "offset": 26364
+  },
+  {
+   "name": "Kodak 2383 Cuspclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 65910
+  },
+  {
+   "name": "Kodak 2393 Constlclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 131820
+  },
+  {
+   "name": "Kodak 2393 Constlmap",
+   "category": "Print film",
+   "size": 13,
+   "offset": 145002
+  },
+  {
+   "name": "Kodak 2393 Cuspclip",
+   "category": "Print film",
+   "size": 13,
+   "offset": 0
+  },
+  {
+   "name": "Polaroid Px-70",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3625050
+  },
+  {
+   "name": "Polaroid Px-70 -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3809598
+  },
+  {
+   "name": "Polaroid Px-70 --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3493230
+  },
+  {
+   "name": "Polaroid Px-70 +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3545958
+  },
+  {
+   "name": "Polaroid Px-70 ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3783234
+  },
+  {
+   "name": "Polaroid Px-70 +++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3664596
+  },
+  {
+   "name": "Polaroid Px-70 Cold",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3717324
+  },
+  {
+   "name": "Polaroid Px-70 Cold -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3216408
+  },
+  {
+   "name": "Polaroid Px-70 Cold --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3756870
+  },
+  {
+   "name": "Polaroid Px-70 Cold +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3242772
+  },
+  {
+   "name": "Polaroid Px-70 Cold ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3255954
+  },
+  {
+   "name": "Polaroid Px-70 Warm",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3519594
+  },
+  {
+   "name": "Polaroid Px-70 Warm -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3440502
+  },
+  {
+   "name": "Polaroid Px-70 Warm --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3506412
+  },
+  {
+   "name": "Polaroid Px-70 Warm +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3730506
+  },
+  {
+   "name": "Polaroid Px-70 Warm ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3704142
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Cold",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3308682
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Cold -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3361410
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Cold --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3321864
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Cold +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3559140
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Cold ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3875508
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Cold +++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3480048
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Warm",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3466866
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Warm -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3282318
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Warm --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3572322
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Warm +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3822780
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Warm ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3611868
+  },
+  {
+   "name": "Polaroid Px-100Uv+ Warm +++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3414138
+  },
+  {
+   "name": "Polaroid Px-680",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3427320
+  },
+  {
+   "name": "Polaroid Px-680 -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3203226
+  },
+  {
+   "name": "Polaroid Px-680 --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3796416
+  },
+  {
+   "name": "Polaroid Px-680 +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3400956
+  },
+  {
+   "name": "Polaroid Px-680 ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3295500
+  },
+  {
+   "name": "Polaroid Px-680 Cold",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3770052
+  },
+  {
+   "name": "Polaroid Px-680 Cold -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3190044
+  },
+  {
+   "name": "Polaroid Px-680 Cold --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3835962
+  },
+  {
+   "name": "Polaroid Px-680 Cold +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3387774
+  },
+  {
+   "name": "Polaroid Px-680 Cold ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3849144
+  },
+  {
+   "name": "Polaroid Px-680 Cold ++ Alt",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3269136
+  },
+  {
+   "name": "Polaroid Px-680 Warm",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3888690
+  },
+  {
+   "name": "Polaroid Px-680 Warm -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3690960
+  },
+  {
+   "name": "Polaroid Px-680 Warm --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3348228
+  },
+  {
+   "name": "Polaroid Px-680 Warm +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3651414
+  },
+  {
+   "name": "Polaroid Px-680 Warm ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3229590
+  },
+  {
+   "name": "Polaroid Time Zero Expired",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3677778
+  },
+  {
+   "name": "Polaroid Time Zero Expired -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3585504
+  },
+  {
+   "name": "Polaroid Time Zero Expired --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3374592
+  },
+  {
+   "name": "Polaroid Time Zero Expired ---",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3335046
+  },
+  {
+   "name": "Polaroid Time Zero Expired +",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3862326
+  },
+  {
+   "name": "Polaroid Time Zero Expired ++",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3638232
+  },
+  {
+   "name": "Polaroid Time Zero Expired Cold",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3532776
+  },
+  {
+   "name": "Polaroid Time Zero Expired Cold -",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3598686
+  },
+  {
+   "name": "Polaroid Time Zero Expired Cold --",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3743688
+  },
+  {
+   "name": "Polaroid Time Zero Expired Cold ---",
+   "category": "Instant (consumer)",
+   "size": 13,
+   "offset": 3453684
+  },
+  {
+   "name": "Fuji Fp-100C",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2214576
+  },
+  {
+   "name": "Fuji Fp-100C -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2702310
+  },
+  {
+   "name": "Fuji Fp-100C --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2346396
+  },
+  {
+   "name": "Fuji Fp-100C +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2148666
+  },
+  {
+   "name": "Fuji Fp-100C ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2425488
+  },
+  {
+   "name": "Fuji Fp-100C ++ Alt",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2306850
+  },
+  {
+   "name": "Fuji Fp-100C +++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2768220
+  },
+  {
+   "name": "Fuji Fp-100C Alt",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 3005496
+  },
+  {
+   "name": "Fuji Fp-100C Cool",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2610036
+  },
+  {
+   "name": "Fuji Fp-100C Cool -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2913222
+  },
+  {
+   "name": "Fuji Fp-100C Cool --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2359578
+  },
+  {
+   "name": "Fuji Fp-100C Cool +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2188212
+  },
+  {
+   "name": "Fuji Fp-100C Cool ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2320032
+  },
+  {
+   "name": "Fuji Fp-100C Negative",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2530944
+  },
+  {
+   "name": "Fuji Fp-100C Negative -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2755038
+  },
+  {
+   "name": "Fuji Fp-100C Negative --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2794584
+  },
+  {
+   "name": "Fuji Fp-100C Negative +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2544126
+  },
+  {
+   "name": "Fuji Fp-100C Negative ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2781402
+  },
+  {
+   "name": "Fuji Fp-100C Negative ++ Alt",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2847312
+  },
+  {
+   "name": "Fuji Fp-100C Negative +++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2675946
+  },
+  {
+   "name": "Fuji Fp-3000B",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2807766
+  },
+  {
+   "name": "Fuji Fp-3000B -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2504580
+  },
+  {
+   "name": "Fuji Fp-3000B --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2385942
+  },
+  {
+   "name": "Fuji Fp-3000B +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2728674
+  },
+  {
+   "name": "Fuji Fp-3000B ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2596854
+  },
+  {
+   "name": "Fuji Fp-3000B +++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2939586
+  },
+  {
+   "name": "Fuji Fp-3000B Hc",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2135484
+  },
+  {
+   "name": "Fuji Fp-3000B Negative",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2227758
+  },
+  {
+   "name": "Fuji Fp-3000B Negative -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2122302
+  },
+  {
+   "name": "Fuji Fp-3000B Negative --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2372760
+  },
+  {
+   "name": "Fuji Fp-3000B Negative +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2240940
+  },
+  {
+   "name": "Fuji Fp-3000B Negative ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2992314
+  },
+  {
+   "name": "Fuji Fp-3000B Negative +++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2517762
+  },
+  {
+   "name": "Fuji Fp-3000B Negative Early",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2900040
+  },
+  {
+   "name": "Polaroid 665",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2820948
+  },
+  {
+   "name": "Polaroid 665 -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2662764
+  },
+  {
+   "name": "Polaroid 665 --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2161848
+  },
+  {
+   "name": "Polaroid 665 +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2570490
+  },
+  {
+   "name": "Polaroid 665 ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2175030
+  },
+  {
+   "name": "Polaroid 665 Negative",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2412306
+  },
+  {
+   "name": "Polaroid 665 Negative -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2741856
+  },
+  {
+   "name": "Polaroid 665 Negative +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2293668
+  },
+  {
+   "name": "Polaroid 665 Negative Hc",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2952768
+  },
+  {
+   "name": "Polaroid 669",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2267304
+  },
+  {
+   "name": "Polaroid 669 -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2860494
+  },
+  {
+   "name": "Polaroid 669 --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2689128
+  },
+  {
+   "name": "Polaroid 669 +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2979132
+  },
+  {
+   "name": "Polaroid 669 ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2965950
+  },
+  {
+   "name": "Polaroid 669 +++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2465034
+  },
+  {
+   "name": "Polaroid 669 Cold",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2636400
+  },
+  {
+   "name": "Polaroid 669 Cold -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2333214
+  },
+  {
+   "name": "Polaroid 669 Cold --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2557308
+  },
+  {
+   "name": "Polaroid 669 Cold +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2886858
+  },
+  {
+   "name": "Polaroid 690",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2583672
+  },
+  {
+   "name": "Polaroid 690 -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2399124
+  },
+  {
+   "name": "Polaroid 690 --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2438670
+  },
+  {
+   "name": "Polaroid 690 +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2451852
+  },
+  {
+   "name": "Polaroid 690 ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2478216
+  },
+  {
+   "name": "Polaroid 690 Cold",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2649582
+  },
+  {
+   "name": "Polaroid 690 Cold -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2623218
+  },
+  {
+   "name": "Polaroid 690 Cold --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2254122
+  },
+  {
+   "name": "Polaroid 690 Cold +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2834130
+  },
+  {
+   "name": "Polaroid 690 Cold ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2201394
+  },
+  {
+   "name": "Polaroid 690 Warm",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2926404
+  },
+  {
+   "name": "Polaroid 690 Warm -",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2715492
+  },
+  {
+   "name": "Polaroid 690 Warm --",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2280486
+  },
+  {
+   "name": "Polaroid 690 Warm +",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2491398
+  },
+  {
+   "name": "Polaroid 690 Warm ++",
+   "category": "Instant (pro)",
+   "size": 13,
+   "offset": 2873676
+  },
+  {
+   "name": "Fuji Xtrans Iii Acros",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 1990482
+  },
+  {
+   "name": "Fuji Xtrans Iii Acros+G",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2109120
+  },
+  {
+   "name": "Fuji Xtrans Iii Acros+R",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 1950936
+  },
+  {
+   "name": "Fuji Xtrans Iii Acros+Ye",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2003664
+  },
+  {
+   "name": "Fuji Xtrans Iii Astia",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2069574
+  },
+  {
+   "name": "Fuji Xtrans Iii Classic Chrome",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 1977300
+  },
+  {
+   "name": "Fuji Xtrans Iii Mono",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2016846
+  },
+  {
+   "name": "Fuji Xtrans Iii Mono+G",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2030028
+  },
+  {
+   "name": "Fuji Xtrans Iii Mono+R",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2095938
+  },
+  {
+   "name": "Fuji Xtrans Iii Mono+Ye",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2082756
+  },
+  {
+   "name": "Fuji Xtrans Iii Pro Neg Hi",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2043210
+  },
+  {
+   "name": "Fuji Xtrans Iii Pro Neg Std",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 1937754
+  },
+  {
+   "name": "Fuji Xtrans Iii Provia",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 2056392
+  },
+  {
+   "name": "Fuji Xtrans Iii Sepia",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 1924572
+  },
+  {
+   "name": "Fuji Xtrans Iii Velvia",
+   "category": "Fujifilm X-Trans III",
+   "size": 13,
+   "offset": 1964118
+  }
+ ]
+}

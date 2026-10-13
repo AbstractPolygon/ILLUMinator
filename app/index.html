@@ -217,12 +217,15 @@
         <summary><h2>Process</h2></summary>
         <details class="subpanel">
           <summary><h3>LUT</h3></summary>
+          <select id="lut-film" class="lut-film" aria-label="Film look" title="Film emulation LUTs from the G'MIC Film LUTs Collection (MIT License)">
+            <option value="">Film look…</option>
+          </select>
           <div class="row lut-row">
             <button id="lut-import" type="button" title="A 3D LUT in .cube format, as made by DaVinci Resolve, Premiere and most LUT packs">Import LUT…</button>
             <span id="lut-name" class="lut-name">None</span>
             <button id="lut-remove" type="button" class="icon-only" title="Remove the LUT" aria-label="Remove the LUT" hidden></button>
           </div>
-          <label>Amount <output data-for="lut-amount" for="lut-amount">100%</output>
+          <label class="lut-amount">Amount <output data-for="lut-amount" for="lut-amount">100%</output>
             <input id="lut-amount" type="range" min="0" max="100" step="1" value="100" data-default="100">
           </label>
           <input id="lut-file" type="file" accept=".cube" hidden>
@@ -752,6 +755,7 @@
         <ul class="links">
           <li><a href="https://abstractpolygon.com/" target="_blank" rel="noopener">abstractpolygon.com</a></li>
         </ul>
+        <p class="hint">Film looks: <a href="https://github.com/YahiaAngelo/Film-Luts" target="_blank" rel="noopener">G'MIC Film LUTs Collection</a>, copyright © 2024 Yahia, MIT License.</p>
       </section>
       <p class="hint">Copyright © AbstractPolygon, LLC. Licensed under PolyForm Shield 1.0.0.</p>
       <menu>

@@ -4559,6 +4559,68 @@ async function sendLut() {
   await engine.request('setLut', { lut: saved ? decodeLut(saved) : null });
 }
 
+// Film looks bundled with the app (app/luts, built by
+// scripts/build-film-luts.mjs): the list loads at start, the LUTs themselves
+// (one file) the first time one is chosen.
+const filmLuts = { index: null, data: null };
+
+async function loadFilmIndex() {
+  try {
+    const res = await fetch('luts/film-luts.json');
+    if (!res.ok) return;
+    filmLuts.index = await res.json();
+  } catch {
+    return;
+  }
+  const groups = filmLuts.index.categories.map((cat) => {
+    const group = Object.assign(document.createElement('optgroup'), { label: cat });
+    filmLuts.index.luts.forEach((l, i) => {
+      if (l.category === cat) group.append(Object.assign(document.createElement('option'), { value: String(i), textContent: l.name }));
+    });
+    return group;
+  });
+  $('lut-film').append(...groups);
+}
+
+async function filmLut(i) {
+  const entry = filmLuts.index.luts[i];
+  if (!filmLuts.data) {
+    showProgress('Loading film looks', 0);
+    try {
+      filmLuts.data = await (await fetch('luts/film-luts.bin')).arrayBuffer();
+    } finally {
+      hideProgress();
+    }
+  }
+  const n = entry.size ** 3 * 3;
+  const q = new Uint16Array(filmLuts.data, entry.offset, n);
+  const data = new Float32Array(n);
+  for (let k = 0; k < n; k++) data[k] = q[k] / 65535;
+  return { title: entry.name, size: entry.size, min: [0, 0, 0], max: [1, 1, 1], data };
+}
+
+$('lut-film').onchange = async () => {
+  const i = $('lut-film').value;
+  $('lut-film').value = '';
+  if (i === '' || !filmLuts.index) return;
+  if (!canRender()) {
+    showNotice('Open a photo first: a LUT is kept with the photo.');
+    startNoticeTimer();
+    return;
+  }
+  try {
+    const lut = await filmLut(+i);
+    $('lut-data').value = JSON.stringify(encodeLut(lut, lut.title));
+  } catch (err) {
+    showError(err);
+    return;
+  }
+  showLut();
+  scheduleSave();
+  applySettingsSoon();
+};
+loadFilmIndex();
+
 $('lut-remove').innerHTML = TRASH_ICON;
 $('lut-import').onclick = () => {
   if (!canRender()) {

@@ -592,5 +592,7 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 .tl-ruler, .tl-ruler-label { position: sticky; top: 0; z-index: 4; background: var(--panel); }
 
 /* Process > LUT */
+.lut-film { width: 100%; margin-bottom: 8px; }
 .lut-row { display: flex; align-items: center; gap: 8px; }
+label.lut-amount { margin-top: 14px; }
 .lut-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
