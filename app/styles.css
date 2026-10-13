@@ -66,7 +66,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .library { width: 210px; border-right: 1px solid var(--line); }
 .controls { width: 270px; border-left: 1px solid var(--line); }
 
-h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 14px 0 8px; }
+h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 14px 0 8px; }
 /* Sections in the right sidebar are spaced by a gap, so the first visible
    heading lines up with "Photos" whichever sections are hidden. */
 .controls { display: flex; flex-direction: column; gap: 10px; }
