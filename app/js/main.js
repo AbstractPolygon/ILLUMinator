@@ -1,8 +1,9 @@
 import { VERSION } from './version.js';
 import { readEdits, writeEdits, editsStore } from './edits.js';
 import { Engine, toImageData } from './engine.js';
-import { blobReader, readThumbnail } from './core/lfp.js';
-import { openFiles, pickCameraFolder, isLightFieldName, download, native, NativeFile } from './platform.js';
+import { blobReader, readThumbnail, openContainer } from './core/lfp.js';
+import { findRecipe, recipeToEdits } from './core/recipe.js';
+import { openFiles, pickCameraFolder, isLightFieldName, isSidecarName, findSidecar, download, native, NativeFile } from './platform.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -61,7 +62,7 @@ function showError(err) {
 function addToLibrary(entries) {
   for (const e of entries) {
     if (state.library.some((x) => x.name === e.name && x.size === e.size)) continue;
-    const item = { name: e.name, size: e.size, file: e.file, thumb: null };
+    const item = { name: e.name, size: e.size, file: e.file, sidecar: e.sidecar || null, thumb: null };
     state.library.push(item);
     readThumbnail(blobReader(e.file)).then((t) => {
       if (t && state.library.includes(item)) {
@@ -113,6 +114,8 @@ async function openItem(item) {
 }
 
 function resetView() {
+  hideNotice();
+  state.notice = null;
   resetAnimation();
   state.info = null;
   state.still = null;
@@ -148,6 +151,7 @@ async function openWith(args, transfer) {
     renderInfo();
     if (!info.hasRaw && !info.processed) throw new Error('The file contains no light field image.');
     setMode(state.mode);
+    if (state.notice) showNotice(...state.notice);
     if (info.hasRaw) engine.request('prepare').catch(() => {});
   } catch (err) {
     showError(err);
@@ -159,6 +163,7 @@ async function openWith(args, transfer) {
 
 function draw(img) {
   if (!img) return;
+  startNoticeTimer();
   if (canvas.width !== img.width || canvas.height !== img.height) {
     canvas.width = img.width;
     canvas.height = img.height;
@@ -1219,9 +1224,22 @@ $('camera-select-all').onclick = () => {
 
 // ---------------------------------------------------------------- wiring
 
+// Lytro Desktop edits picked together with a photo belong to it: a
+// stack.view.lfp picked with a single photo (and then not listed itself),
+// or an exported IMG_0001.lfp picked with IMG_0001.lfr.
+const stem = (name) => name.replace(/\.[^.]+$/, '').toLowerCase();
+
 async function openPicked(files) {
-  const lf = files.filter((f) => isLightFieldName(f.name));
-  addToLibrary(lf.map((f) => ({ name: f.name, size: f.size, file: f })));
+  let lf = files.filter((f) => isLightFieldName(f.name));
+  const sidecars = lf.filter((f) => isSidecarName(f.name));
+  const photos = lf.filter((f) => !isSidecarName(f.name));
+  let viewFile = null;
+  if (sidecars.length === 1 && photos.length === 1) {
+    viewFile = sidecars[0];
+    lf = photos;
+  }
+  const sidecarFor = (f) => viewFile || (/\.lfr$/i.test(f.name) && lf.find((g) => /\.lfp$/i.test(g.name) && stem(g.name) === stem(f.name))) || null;
+  addToLibrary(lf.map((f) => ({ name: f.name, size: f.size, file: f, sidecar: sidecarFor(f) })));
   if (lf.length) openItem(state.library.find((x) => x.name === lf[0].name));
 }
 
@@ -1375,7 +1393,8 @@ function photoKey(info) {
 async function restoreEdits(info) {
   clearTimeout(saveTimer);
   state.editsKey = photoKey(info);
-  const saved = state.editsKey ? await editsStore.load(state.editsKey) : null;
+  let saved = state.editsKey ? await editsStore.load(state.editsKey) : null;
+  if (!saved) saved = await lytroEdits(info, state.current);
   state.restoring = true;
   try {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
@@ -1392,6 +1411,61 @@ async function restoreEdits(info) {
     state.restoring = false;
   }
 }
+
+// The edits Lytro Desktop saved for a photo (in its stack.view.lfp, or in
+// the file itself), as ILLUMinator edits, or null. Used for photos that have
+// no ILLUMinator edits yet; they are saved as ours once changed.
+async function lytroEdits(info, item) {
+  let recipe = null;
+  try {
+    const sidecar = item ? item.sidecar || (await findSidecar(item.file)) : null;
+    if (sidecar) recipe = findRecipe((await openContainer(blobReader(sidecar))).toc);
+  } catch (err) {
+    console.warn('Could not read Lytro Desktop edits', err);
+  }
+  if (!recipe) recipe = info && info.recipe;
+  if (!recipe) return null;
+  const capture = (info.cam && info.cam.capture) || {};
+  const { edits, unsupported } = recipeToEdits(recipe, {
+    nativeF: capture.fNumber || 2,
+    asShot: capture.cct || 5500,
+    radius: info.radius || 4.5,
+    viewWidth: info.width || 615,
+  });
+  // A processed file's pictures already carry Lytro's color and detail
+  // edits; only its focus, aperture and viewpoint apply.
+  if (!info.hasRaw) {
+    delete edits.process;
+    delete edits.details;
+    delete edits.defringe;
+  }
+  state.notice = ['Applied this photo\u2019s edits from Lytro Desktop.', unsupported.length ? `Not supported yet: ${unsupported.join(', ')}.` : ''];
+  return edits;
+}
+
+// A note over the picture; it goes away by itself a while after the picture
+// first shows.
+let noticeTimer = null;
+function showNotice(text, detail = '') {
+  hideNotice();
+  $('notice-text').textContent = text;
+  $('notice-detail').textContent = detail;
+  $('notice-detail').hidden = !detail;
+  $('notice').hidden = false;
+}
+
+function startNoticeTimer() {
+  if (noticeTimer || $('notice').hidden) return;
+  noticeTimer = setTimeout(hideNotice, $('notice-detail').hidden ? 6000 : 12000);
+}
+
+function hideNotice() {
+  clearTimeout(noticeTimer);
+  noticeTimer = null;
+  $('notice').hidden = true;
+}
+
+$('notice-close').onclick = hideNotice;
 
 function scheduleSave() {
   if (state.restoring || !state.editsKey || !canRender()) return;

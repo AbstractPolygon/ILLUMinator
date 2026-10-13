@@ -12,6 +12,7 @@ function subscribe(channel, callback) {
 contextBridge.exposeInMainWorld('lytroNative', {
   openFiles: () => ipcRenderer.invoke('open-files'),
   readFile: (path) => ipcRenderer.invoke('read-file', path),
+  findSidecar: (path) => ipcRenderer.invoke('find-sidecar', path),
   readRange: (path, offset, length) => ipcRenderer.invoke('read-range', path, offset, length),
   listCameras: () => ipcRenderer.invoke('list-cameras'),
   cameraThumbnail: (cameraId, fileId) => ipcRenderer.invoke('camera-thumbnail', cameraId, fileId),

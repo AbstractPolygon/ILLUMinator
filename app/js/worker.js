@@ -196,6 +196,7 @@ function summary() {
     privateMetadata: lf.privateMetadata,
     stacks: lf.stacks.map((s) => ({ kind: s.kind, source: s.source, count: s.images.length })),
     photoId: lf.photoId,
+    recipe: lf.recipe || null,
   };
   if (state.pp) {
     const pp = state.pp;

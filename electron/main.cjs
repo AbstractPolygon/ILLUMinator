@@ -149,6 +149,36 @@ function registerIpc() {
     }
   });
 
+  // Lytro Desktop keeps a picture's edits in stack.view.lfp, in the same
+  // folder as its raw.lfp; an exported IMG_0001.lfp next to IMG_0001.lfr
+  // carries them too.
+  ipcMain.handle('find-sidecar', async (_e, file) => {
+    const p = checkAllowed(file);
+    const dir = path.dirname(p);
+    const candidates = [path.join(dir, 'stack.view.lfp')];
+    if (/\.lfr$/i.test(p)) {
+      const base = path.basename(p).replace(/\.[^.]+$/, '').toLowerCase();
+      try {
+        for (const name of await fsp.readdir(dir)) {
+          if (/\.lfp$/i.test(name) && name.replace(/\.[^.]+$/, '').toLowerCase() === base) candidates.push(path.join(dir, name));
+        }
+      } catch {
+        // Folder not readable: only the fixed name is tried.
+      }
+    }
+    for (const side of candidates) {
+      if (side === p) continue;
+      try {
+        const found = await describe(side);
+        allow(side);
+        return found;
+      } catch {
+        // Not there.
+      }
+    }
+    return null;
+  });
+
   ipcMain.handle('list-cameras', async () => {
     cameras = await camera.listCameras();
     for (const c of cameras) for (const f of c.files) if (c.kind === 'drive') allow(f.id);

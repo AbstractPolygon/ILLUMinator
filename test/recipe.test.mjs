@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findRecipe, recipeToEdits, LAMBDA_TO_ALPHA } from '../app/js/core/recipe.js';
+import { isSidecarName } from '../app/js/platform.js';
 
 test('finds the newest recipe in a view', () => {
   const toc = { views: [{ recipe4: { viewExposure: 1 }, accelerations: [] }] };
@@ -24,4 +25,12 @@ test('converts Lytro Desktop edits to ILLUMinator controls', () => {
   assert.equal(edits.details['nr-luminance'], 20);
   assert.equal(edits.defringe['fringe-on'], true);
   assert.deepEqual(unsupported, ['crop']);
+});
+
+test('recognizes Lytro Desktop edits files', () => {
+  assert.equal(isSidecarName('stack.view.lfp'), true);
+  assert.equal(isSidecarName('STACK.VIEW.LFP'), true);
+  assert.equal(isSidecarName('raw.lfp'), false);
+  assert.equal(isSidecarName('stack.lfp'), false);
+  assert.equal(isSidecarName('IMG_0001.lfr'), false);
 });

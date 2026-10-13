@@ -77,6 +77,22 @@ export async function pickCameraFolder() {
   };
 }
 
+// Lytro Desktop's edits file for a picture (its views carry the recipe).
+export function isSidecarName(name) {
+  return /(^|\.)view\.lfp$/i.test(name);
+}
+
+// The edits file next to `file` on disk (desktop app only), or null.
+export async function findSidecar(file) {
+  if (!native || !native.findSidecar || !(file instanceof NativeFile)) return null;
+  try {
+    const found = await native.findSidecar(file.path);
+    return found ? new NativeFile(found) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isLightFieldName(name) {
   return LF_FILE.test(name);
 }

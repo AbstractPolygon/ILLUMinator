@@ -2,6 +2,7 @@
 
 import { bufferReader, isLfp, readLightFieldPicture, LfpError } from './lfp.js';
 import { cameraInfo, guessRawLayout, packedSize, unpackRaw, removeHotPixels } from './raw.js';
+import { findRecipe } from './recipe.js';
 import { gridFromCamera, calibrateGrid, measureGrid, normalizeGrid } from './lenslet.js';
 
 export async function decodeLightField(bytes, { onProgress = () => {}, calibrate = true } = {}) {
@@ -27,6 +28,8 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     // file), or of its table of contents for processed files.
     photoId: picture ? picture.rawRef || (picture.container.sections.find((s) => s.type === 'LFM') || {}).sha1 || null : null,
     thumbnails: picture ? picture.thumbnails : [],
+    // Lytro Desktop edits saved in the file, if any (recipe.js).
+    recipe: picture ? findRecipe(picture.toc) : null,
     readSection: picture ? picture.container.readSection : async () => null,
     cam: null,
     raw: null,
