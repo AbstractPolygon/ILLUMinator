@@ -39,6 +39,7 @@ export function recipeToEdits(recipe, ctx = {}) {
   const camera = {};
   const details = {};
   const defringe = {};
+  const geometry = {};
 
   // Camera: aperture is a fraction of the camera's own (f/2 on the ILLUM).
   const aperture = num(r.viewAperture, 1);
@@ -99,8 +100,23 @@ export function recipeToEdits(recipe, ctx = {}) {
   defringe['fringe-radius'] = Math.round(clamp((num(r.viewDefringeRadius, 5.5) * viewWidth) / 2450 * 2, 1, 6));
   defringe['fringe-threshold'] = Math.round(clamp(0.05 + (0.75 * num(r.viewDefringeThreshold, 50)) / 100, 0.05, 0.8) * 20) / 20;
 
-  if (r.viewCrop && (r.viewCrop.left || r.viewCrop.top || r.viewCrop.right !== 1 || r.viewCrop.bottom !== 1 || r.viewCrop.angle)) unsupported.push('crop');
-  if (num(r.viewOrientation, 1) !== 1) unsupported.push('orientation');
+  // Geometry: the crop is left/top/right/bottom fractions of the picture,
+  // the straightening angle in degrees; orientation is an EXIF code.
+  const crop = r.viewCrop || {};
+  const left = clamp(num(crop.left, 0), 0, 1);
+  const top = clamp(num(crop.top, 0), 0, 1);
+  const right = clamp(num(crop.right, 1), left, 1);
+  const bottom = clamp(num(crop.bottom, 1), top, 1);
+  geometry.orientation = Math.round(clamp(num(r.viewOrientation, 1), 1, 8));
+  geometry.straighten = Math.round(clamp(num(crop.angle, 0), -45, 45) * 10) / 10;
+  geometry['crop-aspect'] = 'free';
+  geometry['crop-x'] = left;
+  geometry['crop-y'] = top;
+  geometry['crop-w'] = right - left || 1;
+  geometry['crop-h'] = bottom - top || 1;
+  // Not shown yet: the crop and orientation controls are still to come.
+  if (left || top || right !== 1 || bottom !== 1 || geometry.straighten) unsupported.push('crop');
+  if (geometry.orientation !== 1) unsupported.push('orientation');
   if (r.viewReduceFlare) unsupported.push('reduce flare');
   if (r.viewFx && Array.isArray(r.viewFx.fxContainerSequence) && r.viewFx.fxContainerSequence.length) unsupported.push('effects');
   if (num(r.viewSharpenEdgeMasking, 0)) unsupported.push('sharpening edge masking');
@@ -114,6 +130,7 @@ export function recipeToEdits(recipe, ctx = {}) {
       camera,
       details,
       defringe,
+      geometry,
       view: { u: clamp(num(r.viewPerspectiveU, 0), -1, 1) * radius, v: clamp(num(r.viewPerspectiveV, 0), -1, 1) * radius },
       focusPoint: { x: clamp(num(r.viewFocusX, 0.5), 0, 1), y: clamp(num(r.viewFocusY, 0.5), 0, 1) },
     },
