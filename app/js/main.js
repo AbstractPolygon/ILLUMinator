@@ -2098,6 +2098,8 @@ function maskFromEditor(final) {
   if (!m) return;
   for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) m[key] = +$(id).value / k;
   for (const [key, id] of Object.entries(FX_SLIDERS)) m.fx[key] = +$(id).value / 100;
+  // Turned off: its keyframes leave the editor, so nothing hidden stays selected.
+  if (m.on && !$('mask-on').checked) clearSelection();
   m.on = $('mask-on').checked;
   if (!m.on && $('mask-show').checked) $('mask-show').checked = false;
   m.invert = $('mask-invert').checked;
@@ -2189,7 +2191,8 @@ function setMaskAttr(m, a, v) {
 // after the living filter that made it (or the mask).
 function trackGroups() {
   const groups = [{ id: 'camera', name: 'Camera', tracks: [...TRACKS] }];
-  getMasks().forEach((m, i) => groups.push({ id: m.id, name: m.name || maskLabel(m, i), tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) }));
+  // `off`: a disabled adjustment, whose keyframes the editor hides.
+  getMasks().forEach((m, i) => groups.push({ id: m.id, name: m.name || maskLabel(m, i), off: !m.on, tracks: maskAttrs(m).map((a) => `mask:${m.id}:${a}`) }));
   for (const g of groups) for (const k of g.tracks) if (!anim.tracks[k]) anim.tracks[k] = [];
   return groups;
 }
@@ -2582,6 +2585,7 @@ function renderTimeline() {
   ruler.onpointerdown = (e) => seekTimeline(e, ruler);
   rows.push(Object.assign(document.createElement('div'), { className: 'tl-label tl-ruler-label' }), ruler);
   for (const grp of trackGroups()) {
+    if (grp.off) continue;
     const heading = groupRow(grp, { pos, inView, head });
     for (const el of heading) el.dataset.group = grp.id;
     rows.push(...heading);
@@ -2851,7 +2855,7 @@ $('tl-grid').parentElement.addEventListener('wheel', (e) => {
 $('tl-key-all').onclick = () => {
   const t = Math.round(playheadTime() * KEY_FPS) / KEY_FPS;
   // Every track of the open groups.
-  for (const g of trackGroups()) if (!groupCollapsed(g.id)) for (const k of g.tracks) setKey(anim, k, t, currentValue(k), KEY_FPS);
+  for (const g of trackGroups()) if (!g.off && !groupCollapsed(g.id)) for (const k of g.tracks) setKey(anim, k, t, currentValue(k), KEY_FPS);
   saveAnimation();
 };
 $('tl-ease').onchange = () => {
@@ -3053,6 +3057,7 @@ const MASK_COLORS = ['#ff8a65', '#4db6ac', '#9575cd', '#e0e0e0', '#81c784', '#64
 function channelList() {
   const out = [];
   for (const grp of trackGroups()) {
+    if (grp.off) continue;
     if (grp.id === 'camera') out.push(...CHANNELS.map((ch) => ({ ...ch, group: grp })));
     else grp.tracks.forEach((k, n) => out.push({ k, c: 0, name: trackName(k), color: MASK_COLORS[n % MASK_COLORS.length], group: grp }));
   }
