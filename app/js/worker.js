@@ -357,7 +357,7 @@ async function open({ id, bytes, synthetic }) {
 // and blur, or with any of them per frame ({ u, v, alpha, aperture, dof },
 // for keyframed animations).
 async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }) {
-  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh, masks: f.masks || null }));
+  const list = path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? alpha, aperture: f.aperture ?? aperture, dof: f.dof ?? dof, bokeh: f.bokeh ?? bokeh, masks: f.masks || null }));
   if (state.pp) return processedFrames({ id, job, kind: 'frames', list });
   requireRaw();
   state.jobs.frames = job;
@@ -368,12 +368,12 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
     const f = list[i];
     if (state.gpu) {
       const tex = f.aperture > 0 ? state.gpu.refocusTo(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) } }, { id, type: 'frame', index: i });
+      await presentGpu(id, tex, outW, outH, { alpha: f.alpha, dof: f.dof, bokeh: f.bokeh, pxPerUnit: viewPxPerUnit(), masks: { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) } }, { id, type: 'frame', index: i });
       await tick();
       continue;
     }
     const rgb = f.aperture > 0 ? refocusRGB(f.alpha, apertureOptions(f)) : await singleView(id, f.u, f.v);
-    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, bokeh), { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) });
+    frameMessage(id, i, await withDepthOfField(id, rgb, outW, outH, f.alpha, f.dof, 1, f.bokeh), { focus: f.alpha, overrides: f.masks, view: viewOf(f.u, f.v) });
     await tick();
   }
   return { done: true };

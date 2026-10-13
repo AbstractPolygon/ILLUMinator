@@ -7,6 +7,7 @@
   --heading: #b3bac4; /* section titles: lighter than subsection titles */
   --accent: #c8cdd5; /* light grey that sits with the dark toolbar */
   --accent-text: #15171b;
+  --key-selected: #4da3ff; /* selected keyframes: clear blue, not yellow */
   --slider-track: 2px;
   --slider-thumb-w: 12px;
   --slider-thumb-h: 6px;
@@ -75,7 +76,7 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 10px 12px;
 }
 .library { width: 210px; border-right: 1px solid var(--line); }
-.controls { width: 270px; border-left: 1px solid var(--line); }
+.controls { width: 296px; border-left: 1px solid var(--line); }
 
 h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8px; }
 /* Sections in the right sidebar are spaced by a gap, so the first visible
@@ -200,6 +201,19 @@ label.check input { margin: 0; }
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 fieldset.plain:disabled { opacity: 0.45; }
 label output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Keyframe diamonds in a column of their own at the right of the settings
+   (as in DaVinci Resolve's Inspector): dim when not animated, lit when
+   animated, red with a keyframe at the playhead. */
+/* Every slider leaves the column free, so they all line up. */
+.controls label:has(> input[type=range]), label:has(> .key-toggle) { position: relative; padding-right: 24px; }
+.key-toggle {
+  position: absolute; right: 0; top: -1px; width: 18px; height: 18px; padding: 0;
+  border: 0; background: none; color: var(--muted); opacity: 0.45;
+  font-size: 11px; line-height: 18px; text-align: center; cursor: pointer;
+}
+.key-toggle:hover { opacity: 1; }
+.key-toggle.on { color: var(--text); opacity: 1; }
+.key-toggle.here { color: #ff5a4f; }
 .row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
@@ -560,10 +574,12 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
   position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px;
   background: var(--text); transform: rotate(45deg); border-radius: 1px; cursor: ew-resize;
 }
-.tl-key.selected { background: #ff9f1a; box-shadow: 0 0 0 1.5px #fff; z-index: 1; }
+.tl-key.selected { background: var(--key-selected); box-shadow: 0 0 0 1.5px #fff; z-index: 1; }
 .tl-key.hold { border-radius: 0; background: var(--muted); }
-.tl-key.hold.selected { background: #ff9f1a; }
+.tl-key.hold.selected { background: var(--key-selected); }
 .tl-label.tl-sub { padding-left: 14px; }
+.tl-label.tl-group.tl-section { padding-left: 12px; font-weight: 500; }
+.tl-label.tl-sub.tl-deep { padding-left: 26px; }
 .tl-label.tl-group { color: var(--text); font-weight: 600; gap: 2px; }
 .tl-group-name { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-chevron { display: inline-flex; align-items: center; justify-content: center; padding: 0 2px; background: none; border: 0; color: var(--muted); }
