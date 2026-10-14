@@ -109,6 +109,8 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // No developer tools in the installed app; `npm start` keeps them.
+      devTools: !app.isPackaged,
     },
   });
   // No menu bar on Windows and Linux. On macOS the system bar keeps the app,
