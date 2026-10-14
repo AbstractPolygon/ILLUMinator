@@ -23,14 +23,17 @@ void main() {
   ivec2 size = textureSize(uSrc, 0);
   int n = uAxis == 0 ? size.x : size.y;
   float pos = (float(uAxis == 0 ? p.x : p.y) + 0.5) * uRatio - 0.5;
-  float radius = uLanczos == 1 ? 3.0 : 1.0;
-  float start = floor(pos) - radius + 1.0;
+  // Reducing: the filter widens with the reduction (no aliasing).
+  float scale = clamp(uRatio, 1.0, 8.0);
+  float radius = (uLanczos == 1 ? 3.0 : 1.0) * scale;
+  float start = floor(pos - radius) + 1.0;
+  int taps = int(ceil(2.0 * radius)) + 1;
   vec4 sum = vec4(0.0);
   float wsum = 0.0;
-  for (int t = 0; t < 6; t++) {
-    if (float(t) >= 2.0 * radius) break;
+  for (int t = 0; t < 64; t++) {
+    if (t >= taps) break;
     float i = start + float(t);
-    float d = pos - i;
+    float d = (pos - i) / scale;
     float w = uLanczos == 1 ? (abs(d) < 3.0 ? sinc(d) * sinc(d / 3.0) : 0.0) : max(0.0, 1.0 - abs(d));
     int k = int(clamp(i, 0.0, float(n - 1)));
     sum += texelFetch(uSrc, uAxis == 0 ? ivec2(k, p.y) : ivec2(p.x, k), 0) * w;
@@ -135,7 +138,7 @@ function pass(gl, program, src, target, w, h, uniforms) {
   if (fb) gl.deleteFramebuffer(fb);
 }
 
-// Enlarges `source` (a canvas, ImageBitmap or ImageData) to W x H and returns
+// Enlarges (or reduces) `source` (a canvas, ImageBitmap or ImageData) to W x H and returns
 // a canvas holding the result. The returned canvas may be reused by the next
 // call: draw or save it before upscaling again.
 export function upscaleImage(source, W, H, { method = 'lanczos', sharpen = 0 } = {}) {

@@ -681,8 +681,22 @@
       <details class="panel">
         <summary><h2>Render</h2></summary>
         <details class="subpanel">
+          <summary><h3>3D</h3></summary>
+          <label id="stereo-on-row" class="check" title="Shows the picture in 3D, in the chosen 3D type, while you edit"><input id="stereo-on" type="checkbox"> Show 3D</label>
+          <label>3D type
+            <select id="stereo-mode">
+              <option value="anaglyph">Anaglyph (red / cyan glasses)</option>
+              <option value="parallel">Side by side</option>
+              <option value="cross">Cross-eyed</option>
+            </select>
+          </label>
+          <label title="How far apart the two eyes' viewpoints are, as a share of the lens aperture">Baseline <output data-for="stereo-baseline" for="stereo-baseline">60</output>
+            <input id="stereo-baseline" type="range" min="10" max="100" step="5" value="60" data-default="60">
+          </label>
+          <button id="stereo-btn" class="wide" disabled>Save 3D image</button>
+        </details>
+        <details class="subpanel">
           <summary><h3>Quality</h3></summary>
-          <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
           <label>Resolution
             <select id="detail">
               <option value="1" selected>1× (fast)</option>
@@ -690,6 +704,7 @@
               <option value="2">2×</option>
             </select>
           </label>
+          <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
           <div class="stack">
             <label class="check" title="Full resolution on/off (F)"><input id="fullres-on" type="checkbox"> Full resolution</label>
             <div id="fullres-panel" hidden>
@@ -712,29 +727,20 @@
           </div>
         </details>
         <details class="subpanel">
-          <summary><h3>3D</h3></summary>
-          <label id="stereo-on-row" class="check" title="Shows the picture in 3D, in the chosen 3D type, while you edit"><input id="stereo-on" type="checkbox"> Show 3D</label>
-          <label>3D type
-            <select id="stereo-mode">
-              <option value="anaglyph">Anaglyph (red / cyan glasses)</option>
-              <option value="parallel">Side by side</option>
-              <option value="cross">Cross-eyed</option>
-            </select>
-          </label>
-          <label title="How far apart the two eyes' viewpoints are, as a share of the lens aperture">Baseline <output data-for="stereo-baseline" for="stereo-baseline">60</output>
-            <input id="stereo-baseline" type="range" min="10" max="100" step="5" value="60" data-default="60">
-          </label>
-          <button id="stereo-btn" class="wide" disabled>Save 3D image</button>
-        </details>
-        <details class="subpanel">
           <summary><h3>Photo</h3></summary>
-          <label title="Saved photos are enlarged by this much with the Upscaling settings; Native saves the picture as rendered">Size
+          <label title="Saved photos are enlarged by this much with the chosen Upscaling; Native saves the picture as rendered">Size
             <select id="photo-size">
               <option value="1" selected>Native</option>
               <option value="1.5">1.5×</option>
               <option value="2">2×</option>
               <option value="3">3×</option>
               <option value="4">4×</option>
+            </select>
+          </label>
+          <label title="How saved photos and 3D images are enlarged to the chosen Size: Lanczos keeps edges crisp; Smooth is softer">Upscaling
+            <select id="photo-upscale" disabled>
+              <option value="lanczos" selected>Lanczos (sharp)</option>
+              <option value="smooth">Smooth</option>
             </select>
           </label>
           <button id="png-btn" class="wide" disabled>Save PNG</button>
@@ -747,11 +753,27 @@
               <option value="mp4">MP4</option>
             </select>
           </label>
-          <label title="The height of exported videos (their short side); frames are enlarged to it with the Upscaling settings">Size
+          <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
             <select id="video-size">
-              <option value="1080" selected>1080p</option>
-              <option value="1440">1440p</option>
-              <option value="2160">4K (2160p)</option>
+              <optgroup label="Shape of the crop">
+                <option value="1080" selected>1080p</option>
+                <option value="1440">1440p</option>
+                <option value="2160">4K (2160p)</option>
+              </optgroup>
+              <optgroup label="Social media">
+                <option value="1080x1920">9:16 · Reels, TikTok, Shorts, Stories (1080 × 1920)</option>
+                <option value="2160x3840">9:16 · 4K vertical (2160 × 3840)</option>
+                <option value="1080x1350">4:5 · Instagram, Facebook feed (1080 × 1350)</option>
+                <option value="1080x1080">1:1 · Square posts (1080 × 1080)</option>
+                <option value="1920x1080">16:9 · YouTube, X, LinkedIn (1920 × 1080)</option>
+                <option value="3840x2160">16:9 · YouTube 4K (3840 × 2160)</option>
+              </optgroup>
+            </select>
+          </label>
+          <label title="How video frames are enlarged to the video Size: Lanczos keeps edges crisp; Smooth is softer">Upscaling
+            <select id="upscale-method">
+              <option value="lanczos" selected>Lanczos (sharp)</option>
+              <option value="smooth">Smooth</option>
             </select>
           </label>
           <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
@@ -770,12 +792,6 @@
         </details>
         <details class="subpanel">
           <summary><h3>Upscaling</h3></summary>
-          <label title="How saved photos, 3D images and video frames are enlarged: Lanczos keeps edges crisp; Smooth is softer">Method
-            <select id="upscale-method">
-              <option value="lanczos" selected>Lanczos (sharp)</option>
-              <option value="smooth">Smooth</option>
-            </select>
-          </label>
           <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none">Sharpen <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
             <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
           </label>

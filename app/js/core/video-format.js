@@ -46,3 +46,26 @@ export function videoBitrate(mbps) {
   const v = Number.isFinite(+mbps) && +mbps > 0 ? +mbps : VIDEO_QUALITY.default;
   return Math.round(Math.min(VIDEO_QUALITY.max, Math.max(VIDEO_QUALITY.min, v)) * 1e6);
 }
+
+// A video's frame for a Size setting and a picture w x h: a height such as
+// '1080' keeps the picture's shape with that short side; a fixed size such
+// as '1080x1920' (social media) takes the largest centered part of the
+// picture with that shape. Sizes are even, as video encoders need.
+export function videoFrame(size, w, h) {
+  const even = (v) => Math.max(2, 2 * Math.round(v / 2));
+  const fixed = /^(\d+)x(\d+)$/.exec(String(size));
+  if (fixed) {
+    const W = +fixed[1];
+    const H = +fixed[2];
+    const aspect = W / H;
+    let cw = w;
+    let ch = w / aspect;
+    if (ch > h) {
+      ch = h;
+      cw = h * aspect;
+    }
+    return { width: W, height: H, crop: { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch } };
+  }
+  const up = (+size || 1080) / Math.min(w, h);
+  return { width: even(w * up), height: even(h * up), crop: { x: 0, y: 0, w, h } };
+}

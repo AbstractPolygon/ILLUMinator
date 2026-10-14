@@ -43,3 +43,13 @@ test('sizes for upscaling', () => {
   assert.deepEqual(scaledSize(2460, 1708, 2), [4920, 3416]);
   assert.deepEqual(scaledSize(1557, 1081, 1, { even: true }), [1558, 1082]);
 });
+
+test('reducing does not alias: fine stripes average to gray', () => {
+  // One-pixel black and white stripes, reduced 4x: every output pixel is
+  // about mid gray (a narrow filter would pick stripes and give 0 or 255).
+  const stripes = image(64, 4, (x) => (x % 2 ? 255 : 0));
+  for (const method of ['lanczos', 'smooth']) {
+    const out = upscale(stripes, 16, 1, { method });
+    for (let x = 2; x < 14; x++) assert.ok(Math.abs(out.data[x * 4] - 127.5) < 12, `${method} ${x}: ${out.data[x * 4]}`);
+  }
+});

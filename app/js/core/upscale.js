@@ -19,17 +19,20 @@ function sinc(x) {
 // normalized weights of the input samples it takes.
 function weights(inSize, outSize, method) {
   const ratio = inSize / outSize;
-  const radius = method === 'lanczos' ? A : 1;
-  const taps = 2 * radius;
+  // Reducing: the filter widens with the reduction, so every input pixel
+  // counts and fine detail does not alias.
+  const scale = Math.max(1, ratio);
+  const radius = (method === 'lanczos' ? A : 1) * scale;
+  const taps = Math.ceil(2 * radius) + 1;
   const first = new Int32Array(outSize);
   const w = new Float32Array(outSize * taps);
   for (let o = 0; o < outSize; o++) {
     const center = (o + 0.5) * ratio - 0.5;
-    const start = Math.floor(center) - radius + 1;
+    const start = Math.floor(center - radius) + 1;
     first[o] = start;
     let sum = 0;
     for (let t = 0; t < taps; t++) {
-      const d = center - (start + t);
+      const d = (center - (start + t)) / scale;
       const v = method === 'lanczos'
         ? (Math.abs(d) < A ? sinc(d) * sinc(d / A) : 0)
         : Math.max(0, 1 - Math.abs(d));

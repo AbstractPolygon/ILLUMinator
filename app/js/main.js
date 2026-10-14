@@ -4,7 +4,7 @@ import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { upscaleImage } from './gpu/upscale.js';
-import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate } from './core/video-format.js';
+import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
 import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -4406,8 +4406,13 @@ function upscaleSettings() {
 function enlargeForSave(source) {
   const k = +$('photo-size').value || 1;
   if (k === 1) return source;
-  return upscaleImage(source, Math.round(source.width * k), Math.round(source.height * k), upscaleSettings());
+  return upscaleImage(source, Math.round(source.width * k), Math.round(source.height * k), { ...upscaleSettings(), method: $('photo-upscale').value });
 }
+// Photo > Upscaling applies only when the photo is enlarged.
+function showPhotoUpscale() {
+  $('photo-upscale').disabled = (+$('photo-size').value || 1) === 1;
+}
+$('photo-size').addEventListener('change', showPhotoUpscale);
 
 function savePng() {
   try {
@@ -4522,19 +4527,22 @@ async function exportVideo() {
     const g0 = frameGeometry(0, size.width, size.height);
     const w = g0 ? g0.width : size.width;
     const h = g0 ? g0.height : size.height;
-    // Enlarged to the chosen Video size (the short side, as in 1080p), in
-    // even pixels for the encoder; the bitrate follows the size.
-    const target = +$('video-size').value || 1080;
-    const up = target / Math.min(w, h);
-    const even = (v) => Math.max(2, 2 * Math.round(v / 2));
+    // Sized to the chosen Video size: a height (the short side, as in
+    // 1080p) keeps the picture's shape; a social media size takes the
+    // largest centered part with its shape. Even pixels for the encoder.
+    const frame = videoFrame($('video-size').value, w, h);
     const c = document.createElement('canvas');
-    c.width = even(w * up);
-    c.height = even(h * up);
+    c.width = frame.width;
+    c.height = frame.height;
     const cctx = c.getContext('2d');
     cctx.imageSmoothingQuality = 'high';
-    // Each frame is drawn at its own size, then enlarged by the upscaler.
+    // Each frame is drawn at its own size, cut to the video's shape, then
+    // enlarged (or reduced) by the upscaler.
     const native = Object.assign(document.createElement('canvas'), { width: Math.round(w), height: Math.round(h) });
     const nctx = native.getContext('2d');
+    const cut = frame.crop;
+    const whole = cut.x === 0 && cut.y === 0 && cut.w === w && cut.h === h;
+    const part = whole ? native : Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(cut.w)), height: Math.max(1, Math.round(cut.h)) });
     const opts = upscaleSettings();
     const stream = c.captureStream(state.fps);
     const pick = chooseVideoType($('video-format').value, $('video-codec').value, canRecord);
@@ -4555,7 +4563,8 @@ async function exportVideo() {
       const g = frameGeometry(i, img.width, img.height);
       if (g) drawGeometry(nctx, img, g, native.width / g.width);
       else nctx.drawImage(img, 0, 0, native.width, native.height);
-      const big = upscaleImage(native, c.width, c.height, opts);
+      if (!whole) part.getContext('2d').drawImage(native, cut.x, cut.y, cut.w, cut.h, 0, 0, part.width, part.height);
+      const big = upscaleImage(part, c.width, c.height, opts);
       const wait = t0 + (n * 1000) / state.fps - performance.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       cctx.drawImage(big, 0, 0);
@@ -5019,6 +5028,7 @@ async function restoreEdits(info) {
     showFrameRate();
     showAnimationEnabled();
     showVideoCodecs();
+    showPhotoUpscale();
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;
     renderMasks();

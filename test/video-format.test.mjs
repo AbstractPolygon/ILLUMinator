@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseVideoType, videoType, videoBitrate, VIDEO_FORMATS, VIDEO_CODECS } from '../app/js/core/video-format.js';
+import { chooseVideoType, videoType, videoBitrate, videoFrame, VIDEO_FORMATS, VIDEO_CODECS } from '../app/js/core/video-format.js';
 
 const only = (...types) => (t) => types.includes(t);
 
@@ -30,4 +30,20 @@ test('bitrate from the quality slider, 1 to 40 Mbit/s', () => {
   assert.equal(videoBitrate('40'), 40e6);
   assert.equal(videoBitrate(90), 40e6);
   assert.equal(videoBitrate('high'), 16e6);
+});
+
+test('video frames: heights keep the shape, social sizes cut the center', () => {
+  assert.deepEqual(videoFrame('1080', 2460, 1708), { width: 1556, height: 1080, crop: { x: 0, y: 0, w: 2460, h: 1708 } });
+  const vertical = videoFrame('1080x1920', 2460, 1708);
+  assert.equal(vertical.width, 1080);
+  assert.equal(vertical.height, 1920);
+  assert.equal(vertical.crop.h, 1708);
+  assert.ok(Math.abs(vertical.crop.w - 1708 * 9 / 16) < 1e-9);
+  assert.ok(Math.abs(vertical.crop.x - (2460 - vertical.crop.w) / 2) < 1e-9);
+  const square = videoFrame('1080x1080', 2460, 1708);
+  assert.deepEqual(square.crop, { x: 376, y: 0, w: 1708, h: 1708 });
+  // A tall picture into a wide video: full width, centered rows.
+  const wide = videoFrame('1920x1080', 900, 1600);
+  assert.equal(wide.crop.w, 900);
+  assert.ok(Math.abs(wide.crop.h - 900 * 9 / 16) < 1e-9);
 });
