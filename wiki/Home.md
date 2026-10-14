@@ -2,6 +2,8 @@
 
 **Latest version: {{version}}**
 
+<img width="1920" alt="ILLUMinator with a photo open and keyframes in the keyframe editor" src="https://github.com/user-attachments/assets/5b8ec554-7b05-4de3-8464-a2a44a2cd03e" />
+
 ILLUMinator is a photo editor for Lytro ILLUM and first generation Lytro cameras. It can import libraries from Lytro Desktop. It runs as a desktop app (Windows, macOS, Linux) and in a web browser.
 
 Because a Lytro photo is a light field, it keeps working like a camera after the shot: you can refocus, change the aperture, move the viewpoint and tilt the plane of focus, then develop the picture and export stills or animations.
