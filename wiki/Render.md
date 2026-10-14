@@ -7,7 +7,7 @@ A stereo pair from two viewpoints across the lens.
 - *Show 3D* shows the picture in 3D while you edit.
 - *3D type:* *Anaglyph* (red / cyan glasses), *Side by side* (parallel viewing) or *Cross-eyed*.
 - *Baseline:* how far apart the two viewpoints are.
-- *Save 3D image* saves the pair as a PNG.
+- *Save 3D image* saves the pair as an image, in the Photo *File format*.
 
 ## Quality
 
@@ -21,9 +21,10 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 
 ## Photo
 
+- *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.
 - *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×.
 - *Upscaling:* how they are enlarged: *Lanczos (sharp)*, which keeps edges crisp, or *Smooth*, softer. Used when *Size* is larger than *Native*; the *Sharpen* setting under *Upscaling* applies too.
-- *Save PNG* saves the picture as shown, at that size.
+- *Save PNG* (or *Save JPEG*) saves the picture as shown, at that size.
 
 ## Video
 

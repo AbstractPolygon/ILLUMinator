@@ -4233,7 +4233,7 @@ async function saveStereo() {
       o.drawImage(first, 0, 0);
       o.drawImage(second, L.width, 0);
     }
-    enlargeForSave(out).toBlob((blob) => download(blob, `${baseName()}-3d-${mode}.png`), 'image/png');
+    savePhoto(out, `${baseName()}-3d-${mode}`);
   } catch (err) {
     showError(err);
   } finally {
@@ -4414,9 +4414,29 @@ function showPhotoUpscale() {
 }
 $('photo-size').addEventListener('change', showPhotoUpscale);
 
+// Photo > File format: PNG, or JPEG at its quality.
+function savePhoto(source, name) {
+  const jpeg = $('photo-format').value === 'jpeg';
+  const type = jpeg ? 'image/jpeg' : 'image/png';
+  enlargeForSave(source).toBlob((blob) => download(blob, `${name}.${jpeg ? 'jpg' : 'png'}`), type, jpeg ? +$('photo-quality').value / 100 : undefined);
+}
+
+function showPhotoFormat() {
+  const jpeg = $('photo-format').value === 'jpeg';
+  $('photo-quality-row').hidden = !jpeg;
+  $('png-btn').textContent = jpeg ? 'Save JPEG' : 'Save PNG';
+}
+$('photo-format').addEventListener('change', showPhotoFormat);
+$('photo-quality').oninput = () => showSliderValue($('photo-quality'));
+$('photo-quality').ondblclick = () => {
+  $('photo-quality').value = $('photo-quality').dataset.default;
+  showSliderValue($('photo-quality'));
+  scheduleSave();
+};
+
 function savePng() {
   try {
-    enlargeForSave(canvas).toBlob((blob) => download(blob, `${baseName()}.png`), 'image/png');
+    savePhoto(canvas, baseName());
   } catch (err) {
     showError(err);
   }
@@ -5029,6 +5049,7 @@ async function restoreEdits(info) {
     showAnimationEnabled();
     showVideoCodecs();
     showPhotoUpscale();
+    showPhotoFormat();
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;
     renderMasks();
