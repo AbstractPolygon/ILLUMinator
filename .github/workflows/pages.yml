@@ -1,7 +1,6 @@
-# Publishes the browser version on GitHub Pages
-# (https://abstractpolygon.github.io/ILLUMinator/), the site's "Try online":
-# after every successful desktop build, and on demand (Actions → Run
-# workflow). Pages must be set to deploy from GitHub Actions once:
+# Publishes the website (site/) at https://abstractpolygon.github.io/ILLUMinator/
+# and the browser version under /app/, the site's "Try online": after every
+# successful desktop build, and on demand (Actions → Run workflow). Pages must be set to deploy from GitHub Actions once:
 # Settings → Pages → Source: GitHub Actions.
 name: Web app on GitHub Pages
 
@@ -34,9 +33,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: node scripts/build-web.mjs --out dist/web
+      - run: node scripts/build-web.mjs --out dist/pages/app
+      - run: cp -r site/. dist/pages/ && touch dist/pages/.nojekyll
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: dist/web
+          path: dist/pages
       - id: deploy
         uses: actions/deploy-pages@v4
