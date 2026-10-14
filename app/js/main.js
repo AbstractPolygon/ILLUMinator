@@ -1685,6 +1685,23 @@ $('settings-dialog').addEventListener('close', () => $('settings-btn').setAttrib
 // The About window shows the top bar's logo.
 $('about-title').prepend(document.querySelector('.toolbar h1 .logo').cloneNode(true));
 
+// Full screen: the whole app fills the screen (the desktop app's window too).
+function showFullscreen() {
+  const on = !!document.fullscreenElement;
+  const b = $('fullscreen-btn');
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Exit full screen' : 'Full screen';
+  b.setAttribute('aria-label', b.title);
+  b.querySelector('.fs-enter').hidden = on;
+  b.querySelector('.fs-exit').hidden = !on;
+}
+$('fullscreen-btn').hidden = !document.fullscreenEnabled;
+$('fullscreen-btn').onclick = () => {
+  const done = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  Promise.resolve(done).catch(() => {});
+};
+document.addEventListener('fullscreenchange', showFullscreen);
+
 $('about-btn').onclick = () => {
   $('about-version').textContent = VERSION;
   $('about-btn').setAttribute('aria-expanded', 'true');
