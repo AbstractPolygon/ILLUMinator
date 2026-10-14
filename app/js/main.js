@@ -1,5 +1,5 @@
 import { VERSION } from './version.js';
-import { readEdits, writeEdits, editsStore } from './edits.js';
+import { readEdits, writeEdits, editsStore, EDITS_FORMAT, EDITS_VERSION } from './edits.js';
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
@@ -456,6 +456,11 @@ function photoMenu(photo, button) {
     });
   }
   items.push({ label: 'New album…', action: () => newAlbum([photo.id]) });
+  items.push('-');
+  items.push({
+    label: 'Reset settings…',
+    action: () => confirmInMenu(`Reset every setting of ${photo.name}? Its adjustments, keyframes and local adjustments go back to how a newly opened photo starts.`, 'Reset', () => resetPhotoSettings(photo)),
+  });
   items.push('-');
   const where = lib.store.kind === 'folder'
     ? 'Its folder (the photo and its edits) is moved to the trash.'
@@ -5023,6 +5028,19 @@ function photoKey(info) {
   return cur ? `file:${cur.name}:${cur.file.size}` : null;
 }
 
+// Reset settings (a photo's ••• menu): its edits are replaced by a reset
+// mark, so it opens as a new photo does, without Lytro Desktop's edits; an
+// open photo starts over at once.
+async function resetPhotoSettings(photo) {
+  clearTimeout(saveTimer);
+  await lib.saveEdits(photo, { format: EDITS_FORMAT, version: EDITS_VERSION, reset: true, photo: { id: photo.id, name: photo.name } });
+  if (state.current && state.current.photo === photo && state.info) {
+    if (state.playing) setPlaying(false);
+    await restoreEdits(state.info);
+    renderInfo();
+  }
+}
+
 async function restoreEdits(info) {
   clearTimeout(saveTimer);
   state.editsKey = photoKey(info);
@@ -5031,7 +5049,9 @@ async function restoreEdits(info) {
   // them in the app's storage, which is still read for those photos.
   let saved = photo ? await lib.loadEdits(photo) : null;
   if (!saved && state.editsKey) saved = await editsStore.load(state.editsKey);
-  if (!saved) saved = await lytroEdits(info, state.current);
+  const reset = !!(saved && saved.reset);
+  if (reset) saved = null;
+  else if (!saved) saved = await lytroEdits(info, state.current);
   state.restoring = true;
   try {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
