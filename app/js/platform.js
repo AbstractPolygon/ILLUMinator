@@ -69,9 +69,7 @@ export async function pickCameraFolder() {
   if (window.showDirectoryPicker) {
     try {
       const dir = await window.showDirectoryPicker({ id: 'lytro-camera', mode: 'read' });
-      const out = [];
-      await walkDirectory(dir, dir.name + '/', out);
-      return { source: dir.name, files: out };
+      return { ...(await listCameraFolder(dir)), dir };
     } catch (err) {
       // Cancelled by the user: stop. Not allowed here (e.g. inside an
       // embedded frame): fall back to the folder input below.
@@ -83,6 +81,51 @@ export async function pickCameraFolder() {
     source: files.length ? files[0].webkitRelativePath.split('/')[0] : '',
     files: files.filter((f) => /\.(lfr|lfp)$/i.test(f.name)).map((f) => ({ name: f.name, path: f.webkitRelativePath, size: f.size, file: f })),
   };
+}
+
+// The light field files in a folder chosen earlier (a FileSystemDirectoryHandle).
+export async function listCameraFolder(dir) {
+  const out = [];
+  await walkDirectory(dir, dir.name + '/', out);
+  return { source: dir.name, files: out };
+}
+
+// The camera's drive, remembered between plug-ins (browsers that can keep
+// folder handles): IndexedDB holds the handle; reading it again needs the
+// user's permission, which the browser may keep or ask for again.
+const HANDLE_DB = 'illuminator-handles';
+
+function handleStore(mode, run) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(HANDLE_DB, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('handles');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction('handles', mode);
+      const req = run(tx.objectStore('handles'));
+      tx.oncomplete = () => {
+        open.result.close();
+        resolve(req && req.result);
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+}
+
+export async function rememberCameraFolder(dir) {
+  try {
+    await handleStore('readwrite', (store) => store.put(dir, 'camera'));
+  } catch {
+    // Not kept: the drive is chosen again next time.
+  }
+}
+
+export async function recallCameraFolder() {
+  try {
+    return (await handleStore('readonly', (store) => store.get('camera'))) || null;
+  } catch {
+    return null;
+  }
 }
 
 // Asks for a folder (a Lytro Desktop library, a copy of a camera card) and

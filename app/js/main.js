@@ -5,7 +5,7 @@ import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './co
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { upscaleImage } from './gpu/upscale.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
-import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, LYTRO_USB_VENDOR } from './platform.js';
+import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
@@ -170,6 +170,7 @@ function renderLibrary() {
     return li;
   }));
   renderGrid(photos, album);
+  if (cameraSection.cam) renderCameraSection();
   const empty = $('library-empty');
   empty.hidden = photos.length > 0;
   if (album) empty.textContent = 'No photos in this album yet. Drag photos onto the album, or use ••• on a photo.';
@@ -4649,6 +4650,11 @@ async function importFromCameraFolder() {
     return;
   }
   const { files, source } = result;
+  if (result.dir) {
+    rememberedFailed = false;
+    rememberCameraFolder(result.dir);
+  }
+  if (files.length) setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: source, files } });
   $('camera-choose').hidden = false;
   $('camera-select-row').hidden = true;
   $('camera-dest').hidden = true;
@@ -4659,7 +4665,7 @@ async function importFromCameraFolder() {
     files,
     thumb: (f) => readThumbnail(blobReader(f.file)),
     onImport: async (picked) => {
-      const added = await importPhotos(groupPhotos(picked.map((f) => ({ path: f.path, file: f.file }))));
+      const added = await importCameraFiles({ kind: 'web' }, picked);
       if (added.length) openItem(added[0]);
     },
   });
@@ -4693,27 +4699,7 @@ async function importFromConnectedCamera(preferId) {
       files: cam.files,
       thumb: (f) => native.cameraThumbnail(cam.id, f.id),
       onImport: async (picked) => {
-        if (!picked.length) return;
-        // A camera drive is read directly; a camera reached over adb is
-        // copied to the library's staging folder first.
-        let entries;
-        if (cam.kind === 'drive') {
-          entries = picked.map((f) => ({ path: `${f.folder}/${f.name}`, file: new NativeFile({ path: f.id, name: f.name, size: f.size }) }));
-        } else {
-          const stop = native.onImportProgress((p) => showProgress(`Copying ${p.file} from the camera (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
-          try {
-            const files = await native.importFromCamera(cam.id, picked.map((f) => f.id));
-            entries = files.map((f) => ({ path: f.name, file: new NativeFile(f) }));
-          } catch (err) {
-            showError(err);
-            return;
-          } finally {
-            stop();
-            hideProgress();
-          }
-        }
-        const added = await importPhotos(groupPhotos(entries));
-        if (cam.kind !== 'drive') lib.store.remove('.incoming').catch(() => {});
+        const added = await importCameraFiles(cam, picked);
         if (added.length) openItem(added[0]);
       },
     });
@@ -4721,6 +4707,151 @@ async function importFromConnectedCamera(preferId) {
   select.onchange = show;
   show();
 }
+
+// ---------------------------------------------------------------- camera section
+
+// The Camera section above the library: the connected camera's photos.
+// { cam: { kind: 'drive' | 'adb' | 'web', id, label, files }, note, show }
+// (`show`: the Show photos… button, to choose or allow reading the drive in
+// a browser). Clicking a photo imports it (once) and opens it.
+let cameraSection = {};
+const cameraThumbs = new Map();
+let rememberedFailed = false;
+
+function setCameraSection(next) {
+  const was = cameraSection.cam;
+  cameraSection = next;
+  if (!next.cam || (was && was.id !== next.cam.id)) {
+    for (const url of cameraThumbs.values()) URL.revokeObjectURL(url);
+    cameraThumbs.clear();
+  }
+  renderCameraSection();
+}
+
+// The library photo this camera file was imported as, if any.
+function importedAs(f) {
+  return lib ? lib.photos.find((p) => p.name === f.name && p.size === f.size) || null : null;
+}
+
+function cameraThumb(cam, f) {
+  if (cam.kind === 'web') return readThumbnail(blobReader(f.file));
+  if (cam.kind === 'drive') return native.cameraThumbnail(cam.id, f.id);
+  return Promise.resolve(null);
+}
+
+function renderCameraSection() {
+  const { cam, note = '', show = false } = cameraSection;
+  $('camera-section').hidden = !cam && !note;
+  const n = cam ? cam.files.length : 0;
+  $('camera-section-note').textContent = cam
+    ? (n ? `${n} photo${n === 1 ? '' : 's'} on ${cam.label}. Click one to import and open it.` : `No photos on ${cam.label}.`)
+    : note;
+  $('camera-show').hidden = !show || !!cam;
+  $('camera-show').textContent = rememberedFailed ? 'Choose camera drive…' : 'Show photos…';
+  $('camera-import-all').hidden = !n || (cam && cam.files.every(importedAs));
+  $('camera-list').replaceChildren(...(cam ? cam.files : []).map((f) => {
+    const li = document.createElement('li');
+    li.classList.toggle('imported', !!importedAs(f));
+    li.title = importedAs(f) ? `${f.name} (in the library)` : f.name;
+    const key = `${cam.id}|${f.id || f.path}`;
+    const ph = cameraThumbs.has(key)
+      ? Object.assign(document.createElement('img'), { src: cameraThumbs.get(key), alt: '' })
+      : Object.assign(document.createElement('div'), { className: 'noimg' });
+    if (!cameraThumbs.has(key)) {
+      cameraThumb(cam, f).then((t) => {
+        if (!t || cameraSection.cam !== cam) return;
+        const url = URL.createObjectURL(new Blob([t.bytes], { type: t.mime }));
+        cameraThumbs.set(key, url);
+        ph.replaceWith(Object.assign(document.createElement('img'), { src: url, alt: '' }));
+      }).catch(() => {});
+    }
+    const name = document.createElement('span');
+    name.textContent = f.name;
+    li.append(ph, name);
+    li.onclick = async () => {
+      const photo = importedAs(f) || (await importCameraFiles(cam, [f]))[0];
+      if (photo) openItem(photo);
+    };
+    return li;
+  }));
+}
+
+// Imports photos from a camera into the library: a camera drive (desktop
+// or browser) is read directly; a camera reached over adb is copied to the
+// library's staging folder first. Returns the added photos.
+async function importCameraFiles(cam, picked) {
+  if (!picked.length) return [];
+  let entries;
+  if (cam.kind === 'web') {
+    entries = picked.map((f) => ({ path: f.path, file: f.file }));
+  } else if (cam.kind === 'drive') {
+    entries = picked.map((f) => ({ path: `${f.folder}/${f.name}`, file: new NativeFile({ path: f.id, name: f.name, size: f.size }) }));
+  } else {
+    const stop = native.onImportProgress((p) => showProgress(`Copying ${p.file} from the camera (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
+    try {
+      const files = await native.importFromCamera(cam.id, picked.map((f) => f.id));
+      entries = files.map((f) => ({ path: f.name, file: new NativeFile(f) }));
+    } catch (err) {
+      showError(err);
+      return [];
+    } finally {
+      stop();
+      hideProgress();
+    }
+  }
+  const added = await importPhotos(groupPhotos(entries));
+  if (cam.kind === 'adb') lib.store.remove('.incoming').catch(() => {});
+  renderCameraSection();
+  return added;
+}
+
+// Browser: lists a camera drive (a folder handle) in the Camera section.
+// False when it has no photos or cannot be read (not mounted yet, gone).
+async function showWebCamera(dir) {
+  try {
+    const { source, files } = await listCameraFolder(dir);
+    if (!files.length) return false;
+    setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: source, files } });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+$('camera-show').onclick = async () => {
+  // First the drive chosen last time (asking to read it again), then, if
+  // that fails, a fresh choice.
+  if (!rememberedFailed) {
+    const dir = await recallCameraFolder();
+    if (dir && dir.requestPermission) {
+      const ok = (await dir.requestPermission({ mode: 'read' }).catch(() => 'denied')) === 'granted';
+      if (ok && (await showWebCamera(dir))) return;
+      rememberedFailed = true;
+      renderCameraSection();
+      return;
+    }
+  }
+  let result;
+  try {
+    result = await pickCameraFolder();
+  } catch (err) {
+    if (err.name !== 'AbortError') showError(err);
+    return;
+  }
+  if (result.dir) {
+    rememberedFailed = false;
+    rememberCameraFolder(result.dir);
+  }
+  if (result.dir && (await showWebCamera(result.dir))) return;
+  setCameraSection({ ...cameraSection, cam: { kind: 'web', id: `web:${result.source}`, label: result.source, files: result.files } });
+};
+
+$('camera-import-all').onclick = async () => {
+  const { cam } = cameraSection;
+  if (!cam) return;
+  const added = await importCameraFiles(cam, cam.files.filter((f) => !importedAs(f)));
+  if (added.length) openItem(added[0]);
+};
 
 function importFromCamera() {
   return native ? importFromConnectedCamera(null) : importFromCameraFolder();
@@ -5347,68 +5478,58 @@ setMode('camera');
 libReady = openLibrary();
 $('version').textContent = VERSION;
 
-// Desktop app: show the photos already imported, and announce cameras as
-// they are plugged in.
+// Desktop app: the camera's photos show in the Camera section as soon as
+// it is connected (a drive, or adb). WebUSB plug-in events (any OS; the main
+// process lets the page see Lytro's vendor ID only) show it at once, before
+// its drive mounts, and make the main process look for the drive sooner.
 if (native) {
   document.body.classList.add('native');
-  // Cameras the app has already seen: a camera that newly appears with
-  // photos opens the import dialog. Those connected at launch only show in
-  // the status line.
-  let seen = null;
   let lastCams = [];
-  // Lytro cameras on USB, from WebUSB plug-in events (any OS): the main
-  // process lets the page see Lytro's vendor ID only. A camera shows here
-  // at once, before (or without) its drive mounting.
   let usbLytros = 0;
-  const showCameraStatus = () => {
+  const showCameras = () => {
     const count = lastCams.reduce((n, c) => n + c.files.length, 0);
     $('camera-status').textContent = lastCams.length
       ? `Lytro camera connected · ${count} photo${count === 1 ? '' : 's'}`
       : usbLytros ? 'Lytro camera connected · looking for photos…' : '';
     $('camera-status').classList.toggle('connected', lastCams.length > 0 || usbLytros > 0);
+    const c = lastCams.find((x) => x.files.length) || lastCams[0];
+    setCameraSection(c ? { cam: { kind: c.kind, id: c.id, label: c.label, files: c.files } }
+      : usbLytros ? { note: 'Lytro camera connected. Looking for its photos…' } : {});
   };
-  // Cameras already connected at launch.
   native.listCameras().then((cams) => {
-    if (seen) return;
-    seen = new Set(cams.filter((c) => c.files.length).map((c) => c.id));
     lastCams = cams;
-    showCameraStatus();
-  }).catch(() => {
-    seen = seen || new Set();
-  });
+    showCameras();
+  }).catch(() => {});
   native.onCamerasChanged((cams) => {
     lastCams = cams;
-    showCameraStatus();
-    const arrived = seen ? cams.find((c) => c.files.length && !seen.has(c.id)) : null;
-    seen = new Set(cams.filter((c) => c.files.length).map((c) => c.id));
-    // Not over another dialog (an export, a library import, the camera
-    // dialog already open).
-    if (arrived && !document.querySelector('dialog[open]')) importFromConnectedCamera(arrived.id);
+    showCameras();
   });
   if (navigator.usb) {
     const isLytro = (d) => d.vendorId === LYTRO_USB_VENDOR;
     navigator.usb.addEventListener('connect', (e) => {
       if (!isLytro(e.device)) return;
       usbLytros++;
-      showCameraStatus();
+      showCameras();
       native.cameraUsbConnected();
     });
     navigator.usb.addEventListener('disconnect', (e) => {
       if (!isLytro(e.device)) return;
       usbLytros = Math.max(0, usbLytros - 1);
-      showCameraStatus();
+      showCameras();
     });
     navigator.usb.getDevices().then((devices) => {
       usbLytros = devices.filter(isLytro).length;
-      showCameraStatus();
+      showCameras();
     }).catch(() => {});
   }
 }
 
 // Browser: WebUSB tells the page when a Lytro is plugged in, once the user
 // has allowed this site to see it (Detect camera…, Chrome and Edge). It
-// cannot read the photos over USB (browsers keep USB drives to the OS), so
-// a plug-in opens the import dialog, ready to choose the camera's drive.
+// cannot read the photos over USB (browsers keep USB drives to the OS):
+// the camera's drive is chosen once and remembered, and its photos show in
+// the Camera section on later plug-ins (the browser may ask to allow
+// reading it again).
 if (!native && navigator.usb) {
   const isLytro = (d) => d.vendorId === LYTRO_USB_VENDOR;
   const allowedKey = 'illuminator.usbWatch';
@@ -5424,29 +5545,36 @@ if (!native && navigator.usb) {
     $('camera-status').classList.toggle('connected', connected > 0);
     $('usb-watch-btn').hidden = allowed;
   };
-  const promptImport = () => {
-    if (document.querySelector('dialog[open]')) return;
-    $('camera-select-row').hidden = true;
-    $('camera-dest').hidden = true;
-    $('camera-choose').hidden = false;
-    $('camera-dialog-source').textContent = 'Lytro camera connected. Choose its drive (or the DCIM folder on it) to see the photos.';
-    showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
+  const arrived = async () => {
+    showUsbStatus();
+    if (cameraSection.cam) return;
+    setCameraSection({ note: 'Lytro camera connected.', show: true });
+    // The drive chosen last time, if the browser still lets the page read
+    // it: list it (it can take a few seconds to mount).
+    const dir = await recallCameraFolder();
+    if (!dir || !dir.queryPermission || (await dir.queryPermission({ mode: 'read' }).catch(() => 'denied')) !== 'granted') return;
+    for (let i = 0; i < 10 && connected && !cameraSection.cam; i++) {
+      if (await showWebCamera(dir)) return;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
   };
   navigator.usb.addEventListener('connect', (e) => {
     if (!isLytro(e.device)) return;
     connected++;
-    showUsbStatus();
-    promptImport();
+    arrived();
   });
   navigator.usb.addEventListener('disconnect', (e) => {
     if (!isLytro(e.device)) return;
     connected = Math.max(0, connected - 1);
     showUsbStatus();
+    if (!connected) setCameraSection({});
   });
   navigator.usb.getDevices().then((devices) => {
     connected = devices.filter(isLytro).length;
-    if (connected) allowed = true;
-    showUsbStatus();
+    if (connected) {
+      allowed = true;
+      arrived();
+    } else showUsbStatus();
   }).catch(() => showUsbStatus());
   $('usb-watch-btn').onclick = async () => {
     try {
@@ -5457,7 +5585,10 @@ if (!native && navigator.usb) {
       } catch {
         // Only hides the button next time.
       }
-      if (isLytro(device)) connected = Math.max(connected, 1);
+      if (isLytro(device)) {
+        connected = Math.max(connected, 1);
+        arrived();
+      }
       showUsbStatus();
       showNotice('ILLUMinator will now notice when this camera is plugged in.');
       startNoticeTimer();

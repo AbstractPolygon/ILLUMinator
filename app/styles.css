@@ -114,16 +114,16 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
 .panel > summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 #histogram { display: block; width: 100%; height: 80px; border-radius: 6px; background: #0b0c0e; border: 1px solid var(--line); }
 
-#library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-#library-list li {
+#library-list, #camera-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#library-list li, #camera-list li {
   display: flex; align-items: center; gap: 8px;
   padding: 4px; border-radius: 6px; cursor: pointer; border: 1px solid transparent;
 }
 #library-list li { position: relative; }
-#library-list li:hover { background: #22262c; }
+#library-list li:hover, #camera-list li:hover { background: #22262c; }
 #library-list li.current { border-color: var(--accent); }
-#library-list img, #library-list .noimg { width: 64px; height: 44px; object-fit: cover; border-radius: 4px; background: #2a2e35; flex: none; }
-#library-list span { font-size: 12.5px; word-break: break-all; }
+#library-list img, #library-list .noimg, #camera-list img, #camera-list .noimg { width: 64px; height: 44px; object-fit: cover; border-radius: 4px; background: #2a2e35; flex: none; }
+#library-list span, #camera-list span { font-size: 12.5px; word-break: break-all; }
 
 .stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 /* Album grid: takes the place of the picture and its controls. */
@@ -473,6 +473,12 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 .albums .more { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
 .albums li:hover .more ~ * , .albums li:hover .album:has(+ .more) .count { visibility: hidden; }
 .library #photos-title { margin-top: 16px; }
+/* Camera: the connected camera's photos, above the library. */
+.camera-section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.camera-section h2 { margin: 0; }
+.camera-section .hint { margin: 0; }
+#camera-list:empty { display: none; }
+#camera-list li.imported span::after { content: ' ✓'; color: var(--accent); }
 
 /* Crop, straighten and orientation. */
 .geometry-row { align-items: center; margin: 2px 0 6px; }
