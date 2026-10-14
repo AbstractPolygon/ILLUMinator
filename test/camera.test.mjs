@@ -73,3 +73,12 @@ test('parses adb ls -l listings', () => {
   assert.deepEqual(entries.map((e) => [e.name, e.dir]), [['100PHOTO', true], ['IMG_0813.LFR', false], ['IMG_0813.JPG', false]]);
   assert.equal(entries[1].size, 55561840);
 });
+
+test('Lytro USB devices are recognized by vendor ID, on the page and in the main process', async () => {
+  const { LYTRO_USB_VENDOR } = await import('../app/js/platform.js');
+  assert.equal(camera.LYTRO_USB_VENDOR, 0x24cf);
+  assert.equal(LYTRO_USB_VENDOR, camera.LYTRO_USB_VENDOR);
+  assert.ok(camera.isLytroUsb({ vendorId: 0x24cf, productId: 0x00a1 }));
+  assert.ok(!camera.isLytroUsb({ vendorId: 0x046d, productId: 0xc52b }));
+  assert.ok(!camera.isLytroUsb(null));
+});

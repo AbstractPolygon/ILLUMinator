@@ -3,7 +3,7 @@
 // served through a private app:// scheme so module workers and WebGL run as
 // they do on the web.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, session, shell } = require('electron');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
@@ -14,6 +14,10 @@ app.commandLine.appendSwitch('force_high_performance_gpu');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
 const POLL_MS = 3000;
+// After a Lytro is plugged in: scan every second for this long, while its
+// drive mounts.
+const FAST_POLL_MS = 1000;
+const FAST_POLL_FOR_MS = 20000;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -156,8 +160,12 @@ function createWindow() {
   });
 }
 
-// Watches for cameras being plugged in or removed.
+// Watches for cameras being plugged in or removed: every few seconds, and
+// every second for a while after the app sees a Lytro arrive on USB.
+let pollTimer = null;
+let fastUntil = 0;
 async function pollCameras() {
+  clearTimeout(pollTimer);
   try {
     const found = await camera.listCameras();
     const key = (list) => list.map((c) => `${c.id}:${c.files.length}`).join('|');
@@ -169,7 +177,12 @@ async function pollCameras() {
   } catch (err) {
     console.error('Camera scan failed', err);
   }
-  setTimeout(pollCameras, POLL_MS);
+  pollTimer = setTimeout(pollCameras, Date.now() < fastUntil ? FAST_POLL_MS : POLL_MS);
+}
+
+function scanSoon() {
+  fastUntil = Date.now() + FAST_POLL_FOR_MS;
+  pollCameras();
 }
 
 function summary() {
@@ -237,6 +250,9 @@ function registerIpc() {
     }
     return null;
   });
+
+  // The page saw a Lytro plugged in over USB (app/js/main.js, WebUSB).
+  ipcMain.on('camera-usb-connected', () => scanSoon());
 
   ipcMain.handle('list-cameras', async () => {
     cameras = await camera.listCameras();
@@ -384,6 +400,9 @@ app.whenReady().then(async () => {
     if (!file.startsWith(APP_DIR + path.sep)) return new Response('Not found', { status: 404 });
     return net.fetch(pathToFileURL(file).href);
   });
+  // USB plug-in events reach the page (WebUSB) for Lytro cameras only,
+  // without asking: the page only watches them come and go.
+  session.defaultSession.setDevicePermissionHandler((details) => details.deviceType === 'usb' && camera.isLytroUsb(details.device));
   registerIpc();
   buildMenu();
   createWindow();

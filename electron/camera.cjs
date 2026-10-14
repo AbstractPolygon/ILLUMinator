@@ -12,6 +12,12 @@ const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 
 const LIGHT_FIELD = /\.(lfr|lfp)$/i;
+// Lytro, Inc.'s USB vendor ID (usb.ids), shared by its cameras.
+const LYTRO_USB_VENDOR = 0x24cf;
+
+function isLytroUsb(device) {
+  return !!device && device.vendorId === LYTRO_USB_VENDOR;
+}
 const ADB_DCIM = '/storage/sdcard1/DCIM';
 
 async function isDir(p) {
@@ -207,4 +213,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };

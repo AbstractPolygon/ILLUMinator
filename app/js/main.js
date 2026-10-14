@@ -5,7 +5,7 @@ import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './co
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { upscaleImage } from './gpu/upscale.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
-import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile } from './platform.js';
+import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, LYTRO_USB_VENDOR } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
@@ -4666,8 +4666,11 @@ async function importFromCameraFolder() {
 
 // Desktop app: cameras are detected over USB; photos are copied into the
 // import folder, then opened from there.
-async function importFromConnectedCamera() {
+// `preferId` picks that camera first (the one just plugged in).
+async function importFromConnectedCamera(preferId) {
   const cameras = await native.listCameras();
+  // Opened by a plug-in, but the camera has gone again: stay quiet.
+  if (preferId && !cameras.some((c) => c.id === preferId)) return;
   const select = $('camera-select');
   $('camera-dest').hidden = false;
   if (!cameras.length) {
@@ -4679,6 +4682,8 @@ async function importFromConnectedCamera() {
   }
   select.replaceChildren(...cameras.map((c, i) => Object.assign(document.createElement('option'), { value: i, textContent: c.label })));
   $('camera-select-row').hidden = cameras.length < 2;
+  const preferred = cameras.findIndex((c) => c.id === preferId);
+  if (preferred >= 0) select.value = String(preferred);
   const show = () => {
     const cam = cameras[+select.value || 0];
     $('camera-dialog-source').textContent = `${cam.files.length} light field photo(s) on ${cam.label}.`;
@@ -4716,7 +4721,7 @@ async function importFromConnectedCamera() {
 }
 
 function importFromCamera() {
-  return native ? importFromConnectedCamera() : importFromCameraFolder();
+  return native ? importFromConnectedCamera(null) : importFromCameraFolder();
 }
 
 $('camera-select-all').onclick = () => {
@@ -5344,11 +5349,58 @@ $('version').textContent = VERSION;
 // they are plugged in.
 if (native) {
   document.body.classList.add('native');
-  native.onCamerasChanged((cams) => {
-    const count = cams.reduce((n, c) => n + c.files.length, 0);
-    $('camera-status').textContent = cams.length ? `Lytro camera connected · ${count} photo${count === 1 ? '' : 's'}` : '';
-    $('camera-status').classList.toggle('connected', cams.length > 0);
+  // Cameras the app has already seen: a camera that newly appears with
+  // photos opens the import dialog. Those connected at launch only show in
+  // the status line.
+  let seen = null;
+  let lastCams = [];
+  // Lytro cameras on USB, from WebUSB plug-in events (any OS): the main
+  // process lets the page see Lytro's vendor ID only. A camera shows here
+  // at once, before (or without) its drive mounting.
+  let usbLytros = 0;
+  const showCameraStatus = () => {
+    const count = lastCams.reduce((n, c) => n + c.files.length, 0);
+    $('camera-status').textContent = lastCams.length
+      ? `Lytro camera connected · ${count} photo${count === 1 ? '' : 's'}`
+      : usbLytros ? 'Lytro camera connected · looking for photos…' : '';
+    $('camera-status').classList.toggle('connected', lastCams.length > 0 || usbLytros > 0);
+  };
+  // Cameras already connected at launch.
+  native.listCameras().then((cams) => {
+    if (seen) return;
+    seen = new Set(cams.filter((c) => c.files.length).map((c) => c.id));
+    lastCams = cams;
+    showCameraStatus();
+  }).catch(() => {
+    seen = seen || new Set();
   });
+  native.onCamerasChanged((cams) => {
+    lastCams = cams;
+    showCameraStatus();
+    const arrived = seen ? cams.find((c) => c.files.length && !seen.has(c.id)) : null;
+    seen = new Set(cams.filter((c) => c.files.length).map((c) => c.id));
+    // Not over another dialog (an export, a library import, the camera
+    // dialog already open).
+    if (arrived && !document.querySelector('dialog[open]')) importFromConnectedCamera(arrived.id);
+  });
+  if (navigator.usb) {
+    const isLytro = (d) => d.vendorId === LYTRO_USB_VENDOR;
+    navigator.usb.addEventListener('connect', (e) => {
+      if (!isLytro(e.device)) return;
+      usbLytros++;
+      showCameraStatus();
+      native.cameraUsbConnected();
+    });
+    navigator.usb.addEventListener('disconnect', (e) => {
+      if (!isLytro(e.device)) return;
+      usbLytros = Math.max(0, usbLytros - 1);
+      showCameraStatus();
+    });
+    navigator.usb.getDevices().then((devices) => {
+      usbLytros = devices.filter(isLytro).length;
+      showCameraStatus();
+    }).catch(() => {});
+  }
 }
 
 // Test hook: ?sample opens the synthetic sample on load.

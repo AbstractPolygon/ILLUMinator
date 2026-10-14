@@ -4,6 +4,9 @@
 
 const LF_FILE = /\.(lfr|lfp|raw)$/i;
 
+// Lytro, Inc.'s USB vendor ID (as electron/camera.cjs).
+export const LYTRO_USB_VENDOR = 0x24cf;
+
 export const native = typeof window !== 'undefined' ? window.lytroNative || null : null;
 
 function toArrayBuffer(u8) {

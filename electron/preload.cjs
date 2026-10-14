@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('lytroNative', {
     move: (from, to) => ipcRenderer.invoke('lib-move', from, to),
     remove: (rel) => ipcRenderer.invoke('lib-remove', rel),
   },
+  cameraUsbConnected: () => ipcRenderer.send('camera-usb-connected'),
   onCamerasChanged: (callback) => subscribe('cameras-changed', callback),
   onImportProgress: (callback) => subscribe('import-progress', callback),
   onMenu: (callback) => subscribe('menu', callback),
