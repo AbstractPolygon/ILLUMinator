@@ -24,6 +24,7 @@
   "build": {
     "appId": "com.illuminator.app",
     "productName": "ILLUMinator",
+    "copyright": "Copyright © AbstractPolygon, LLC",
     "files": [
       "app/**/*",
       "electron/**/*",
@@ -79,7 +80,8 @@
       "category": "Graphics",
       "maintainer": "AbstractPolygon, LLC",
       "synopsis": "Lytro light field photo editor",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "vendor": "AbstractPolygon, LLC"
     },
     "directories": {
       "output": "dist",
