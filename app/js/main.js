@@ -4947,6 +4947,15 @@ async function restoreEdits(info) {
     resetTemperature(info, { keep: !!saved });
     state.camera = { ...view };
     state.focusPoint = { ...focusPoint };
+    // Lytro Desktop's living filter: ours like it, around the focus.
+    if (saved && saved.lytroFilter) {
+      const opt = [...$('mask-filter').options].find((o) => o.value === saved.lytroFilter);
+      const added = livingFilter(saved.lytroFilter).map((m) => ({ ...m, name: opt ? opt.textContent.trim() : '' }));
+      const masks = [...getMasks(), ...added].slice(0, MAX_MASKS);
+      $('local-masks').value = JSON.stringify(masks);
+      maskSel = masks.length ? 0 : -1;
+      renderMasks();
+    }
     showFocusPoint();
     for (const input of document.querySelectorAll('aside.controls input[type=range]')) showSliderValue(input);
     showFNumber();
@@ -4986,6 +4995,8 @@ async function lytroEdits(info, item) {
     delete edits.process;
     delete edits.details;
     delete edits.defringe;
+    delete edits.local;
+    delete edits.lytroFilter;
   }
   state.notice = ['Applied this photo\u2019s edits from Lytro Desktop.', unsupported.length ? `Not supported yet: ${unsupported.join(', ')}.` : ''];
   return edits;
