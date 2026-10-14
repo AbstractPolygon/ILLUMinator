@@ -1,11 +1,15 @@
 // Upscaling for export: enlarges a rendered picture (RGBA bytes) to a bigger
-// size for saved photos and videos. Two methods:
+// size for saved photos and videos. Three methods:
+//  - 'fsr': AMD FSR 1 (core/fsr.js), edge-adaptive enlarging with its own
+//    sharpening (RCAS) in place of the unsharp mask; reductions use Lanczos;
 //  - 'lanczos': a Lanczos-3 filter, sharper than ordinary smoothing and
 //    without its softness (overshoot at edges is clamped);
 //  - 'smooth': bilinear, the browser's ordinary enlarging.
 // `sharpen` (0..1) then adds an unsharp mask scaled to the enlargement, to
 // bring back the crispness enlarging takes away. Enlarging adds pixels, not
 // detail: the light field's detail is set by Rendering > Full resolution.
+
+import { easu, rcas, rcasStrength } from './fsr.js';
 
 const A = 3;
 
@@ -51,6 +55,10 @@ const clampIndex = (i, n) => (i < 0 ? 0 : i >= n ? n - 1 : i);
 export function upscale(img, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
   const { width: w, height: h, data } = img;
   if (W === w && H === h && !sharpen) return { width: w, height: h, data: new Uint8ClampedArray(data) };
+  if (method === 'fsr') {
+    if (W >= w && H >= h) return { width: W, height: H, data: rcas(easu(img, W, H), W, H, rcasStrength(sharpen)) };
+    method = 'lanczos';
+  }
   // Rows first: w x h -> W x h (floats), then columns: -> W x H.
   const X = weights(w, W, method);
   const mid = new Float32Array(W * h * 4);

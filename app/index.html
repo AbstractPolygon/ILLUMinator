@@ -746,10 +746,11 @@
               <option value="4">4×</option>
             </select>
           </label>
-          <label title="How saved photos and 3D images are enlarged to the chosen Size: Lanczos keeps edges crisp; Smooth is softer">Upscaling
+          <label title="How saved photos and 3D images are enlarged to the chosen Size: Lanczos keeps edges crisp; Smooth is softer; FSR 1 follows edges and sharpens with the Sharpen setting">Upscaling
             <select id="photo-upscale" disabled>
               <option value="lanczos" selected>Lanczos (sharp)</option>
               <option value="smooth">Smooth</option>
+              <option value="fsr">FSR 1 (AMD, crisp edges)</option>
             </select>
           </label>
           <button id="png-btn" class="wide" disabled>Save PNG</button>
@@ -777,10 +778,11 @@
               </optgroup>
             </select>
           </label>
-          <label title="How video frames are enlarged to the video Size: Lanczos keeps edges crisp; Smooth is softer">Upscaling
+          <label title="How video frames are enlarged to the video Size: Lanczos keeps edges crisp; Smooth is softer; FSR 1 follows edges and sharpens with the Sharpen setting">Upscaling
             <select id="upscale-method">
               <option value="lanczos" selected>Lanczos (sharp)</option>
               <option value="smooth">Smooth</option>
+              <option value="fsr">FSR 1 (AMD, crisp edges)</option>
             </select>
           </label>
           <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
@@ -853,7 +855,12 @@
           <li><a href="https://abstractpolygon.com/" target="_blank" rel="noopener">abstractpolygon.com</a></li>
         </ul>
         <p class="hint about-copyright">ILLUMinator Copyright © AbstractPolygon, LLC. Licensed under <a href="https://github.com/AbstractPolygon/ILLUMinator/blob/main/LICENSE.md" target="_blank" rel="noopener">PolyForm Shield 1.0.0</a>.</p>
-        <h3 class="credit-extra">Film looks</h3>
+        <h3 class="credit-extra">FSR 1 upscaling</h3>
+            <ul class="links">
+              <li><a href="https://github.com/GPUOpen-Effects/FidelityFX-FSR" target="_blank" rel="noopener">AMD FidelityFX Super Resolution 1</a></li>
+            </ul>
+            <p class="hint about-copyright">Copyright © 2021 Advanced Micro Devices, Inc. Licensed under the <a href="https://github.com/GPUOpen-Effects/FidelityFX-FSR/blob/master/license.txt" target="_blank" rel="noopener">MIT License</a>.</p>
+            <h3 class="credit-extra">Film looks</h3>
         <ul class="links">
           <li><a href="https://github.com/YahiaAngelo/Film-Luts" target="_blank" rel="noopener">G'MIC Film LUTs Collection</a></li>
         </ul>

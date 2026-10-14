@@ -1,8 +1,14 @@
 // Upscaling for export on the GPU (WebGL2): the same Lanczos-3 / bilinear
-// filter and unsharp mask as core/upscale.js, a few milliseconds a frame
-// instead of seconds. Falls back to core/upscale.js without WebGL2.
+// filter and unsharp mask as core/upscale.js, and FSR 1 (EASU + RCAS) as
+// core/fsr.js, a few milliseconds a frame instead of seconds. Falls back to
+// core/upscale.js without WebGL2.
+//
+// The FSR 1 shaders are ported from AMD FidelityFX Super Resolution 1.0,
+// Copyright (c) 2021 Advanced Micro Devices, Inc., under the MIT license;
+// the full notice is in core/fsr.js.
 
 import { upscale as upscaleCpu } from '../core/upscale.js';
+import { rcasStrength } from '../core/fsr.js';
 
 const VERTEX = `#version 300 es
 in vec2 aPos;
@@ -66,6 +72,109 @@ void main() {
   outColor = vec4(clamp(c.rgb + (c.rgb - blur) * uAmount, 0.0, 1.0), clamp(c.a, 0.0, 1.0));
 }`;
 
+// FSR 1 EASU: 12 taps around the sample, weighted along the local edge.
+const EASU = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uScale;
+out vec4 outColor;
+vec3 tap(ivec2 p, ivec2 last) { return texelFetch(uSrc, clamp(p, ivec2(0), last), 0).rgb; }
+float luma(vec3 c) { return c.r * 0.5 + c.g + c.b * 0.5; }
+void setF(inout vec2 dir, inout float len, float w, float a, float b, float c, float d, float e) {
+  float lenX = max(abs(d - c), abs(c - b));
+  lenX = lenX > 0.0 ? 1.0 / lenX : 0.0;
+  float dx = d - b;
+  dir.x += dx * w;
+  lenX = clamp(abs(dx) * lenX, 0.0, 1.0);
+  len += lenX * lenX * w;
+  float lenY = max(abs(e - c), abs(c - a));
+  lenY = lenY > 0.0 ? 1.0 / lenY : 0.0;
+  float dy = e - a;
+  dir.y += dy * w;
+  lenY = clamp(abs(dy) * lenY, 0.0, 1.0);
+  len += lenY * lenY * w;
+}
+void tapF(inout vec3 ac, inout float aw, vec2 off, vec2 dir, vec2 len2, float lob, float clp, vec3 c) {
+  vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len2;
+  float d2 = min(dot(v, v), clp);
+  float wB = 2.0 / 5.0 * d2 - 1.0;
+  float wA = lob * d2 - 1.0;
+  wB *= wB;
+  wA *= wA;
+  wB = 25.0 / 16.0 * wB - (25.0 / 16.0 - 1.0);
+  float w = wB * wA;
+  ac += c * w;
+  aw += w;
+}
+void main() {
+  ivec2 last = textureSize(uSrc, 0) - 1;
+  vec2 pp = (gl_FragCoord.xy) * uScale - 0.5;
+  vec2 fp = floor(pp);
+  vec2 t = pp - fp;
+  ivec2 f0 = ivec2(fp);
+  vec3 b = tap(f0 + ivec2(0, -1), last), c = tap(f0 + ivec2(1, -1), last);
+  vec3 e = tap(f0 + ivec2(-1, 0), last), f = tap(f0, last), g = tap(f0 + ivec2(1, 0), last), h = tap(f0 + ivec2(2, 0), last);
+  vec3 i = tap(f0 + ivec2(-1, 1), last), j = tap(f0 + ivec2(0, 1), last), k = tap(f0 + ivec2(1, 1), last), l = tap(f0 + ivec2(2, 1), last);
+  vec3 n = tap(f0 + ivec2(0, 2), last), o = tap(f0 + ivec2(1, 2), last);
+  float lB = luma(b), lC = luma(c), lE = luma(e), lF = luma(f), lG = luma(g), lH = luma(h);
+  float lI = luma(i), lJ = luma(j), lK = luma(k), lL = luma(l), lN = luma(n), lO = luma(o);
+  vec2 dir = vec2(0.0);
+  float len = 0.0;
+  setF(dir, len, (1.0 - t.x) * (1.0 - t.y), lB, lE, lF, lG, lJ);
+  setF(dir, len, t.x * (1.0 - t.y), lC, lF, lG, lH, lK);
+  setF(dir, len, (1.0 - t.x) * t.y, lF, lI, lJ, lK, lN);
+  setF(dir, len, t.x * t.y, lG, lJ, lK, lL, lO);
+  float dr = dot(dir, dir);
+  if (dr < 1.0 / 32768.0) dir = vec2(1.0, 0.0);
+  else dir *= inversesqrt(dr);
+  len = len * 0.5;
+  len *= len;
+  float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+  vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+  float lob = 0.5 + (1.0 / 4.0 - 0.04 - 0.5) * len;
+  float clp = 1.0 / lob;
+  vec3 ac = vec3(0.0);
+  float aw = 0.0;
+  tapF(ac, aw, vec2(0.0, -1.0) - t, dir, len2, lob, clp, b);
+  tapF(ac, aw, vec2(1.0, -1.0) - t, dir, len2, lob, clp, c);
+  tapF(ac, aw, vec2(-1.0, 0.0) - t, dir, len2, lob, clp, e);
+  tapF(ac, aw, vec2(0.0, 0.0) - t, dir, len2, lob, clp, f);
+  tapF(ac, aw, vec2(1.0, 0.0) - t, dir, len2, lob, clp, g);
+  tapF(ac, aw, vec2(2.0, 0.0) - t, dir, len2, lob, clp, h);
+  tapF(ac, aw, vec2(-1.0, 1.0) - t, dir, len2, lob, clp, i);
+  tapF(ac, aw, vec2(0.0, 1.0) - t, dir, len2, lob, clp, j);
+  tapF(ac, aw, vec2(1.0, 1.0) - t, dir, len2, lob, clp, k);
+  tapF(ac, aw, vec2(2.0, 1.0) - t, dir, len2, lob, clp, l);
+  tapF(ac, aw, vec2(0.0, 2.0) - t, dir, len2, lob, clp, n);
+  tapF(ac, aw, vec2(1.0, 2.0) - t, dir, len2, lob, clp, o);
+  vec3 lo = min(min(f, g), min(j, k));
+  vec3 hi = max(max(f, g), max(j, k));
+  outColor = vec4(clamp(ac / aw, lo, hi), 1.0);
+}`;
+
+// FSR 1 RCAS: sharpens as far as the neighbors allow without clipping.
+const RCAS = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform float uSharp;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 last = textureSize(uSrc, 0) - 1;
+  vec3 e = texelFetch(uSrc, p, 0).rgb;
+  vec3 b = texelFetch(uSrc, clamp(p + ivec2(0, 1), ivec2(0), last), 0).rgb;
+  vec3 d = texelFetch(uSrc, clamp(p + ivec2(-1, 0), ivec2(0), last), 0).rgb;
+  vec3 f = texelFetch(uSrc, clamp(p + ivec2(1, 0), ivec2(0), last), 0).rgb;
+  vec3 h = texelFetch(uSrc, clamp(p + ivec2(0, -1), ivec2(0), last), 0).rgb;
+  vec3 mn = min(min(b, d), min(f, h));
+  vec3 mx = max(max(b, d), max(f, h));
+  vec3 hitMin = min(mn, e) / max(4.0 * mx, vec3(1e-6));
+  vec3 hitMax = (1.0 - max(mx, e)) / min(4.0 * mn - 4.0, vec3(-1e-6));
+  vec3 lobeC = max(-hitMin, hitMax);
+  float lobe = max(-(0.25 - 1.0 / 16.0), min(max(lobeC.r, max(lobeC.g, lobeC.b)), 0.0)) * uSharp;
+  vec3 c = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);
+  outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
 let ctx;
 
 function compile(gl, src) {
@@ -96,7 +205,7 @@ function setup() {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    ctx = { canvas, gl, float, resample: compile(gl, RESAMPLE), sharpen: compile(gl, SHARPEN), max: gl.getParameter(gl.MAX_TEXTURE_SIZE) };
+    ctx = { canvas, gl, float, resample: compile(gl, RESAMPLE), sharpen: compile(gl, SHARPEN), easu: compile(gl, EASU), rcas: compile(gl, RCAS), max: gl.getParameter(gl.MAX_TEXTURE_SIZE) };
   } catch {
     ctx = null;
   }
@@ -133,7 +242,7 @@ function pass(gl, program, src, target, w, h, uniforms) {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, src);
   gl.uniform1i(gl.getUniformLocation(program, 'uSrc'), 0);
-  for (const [name, [kind, v]] of Object.entries(uniforms)) gl[kind](gl.getUniformLocation(program, name), v);
+  for (const [name, [kind, v]] of Object.entries(uniforms)) gl[kind](gl.getUniformLocation(program, name), ...[].concat(v));
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   if (fb) gl.deleteFramebuffer(fb);
 }
@@ -149,6 +258,16 @@ export function upscaleImage(source, W, H, { method = 'lanczos', sharpen = 0 } =
   const { gl } = c;
   c.canvas.width = W;
   c.canvas.height = H;
+  if (method === 'fsr' && W >= w && H >= h) {
+    const src = texture(gl, w, h, false, source);
+    const sharp = rcasStrength(sharpen);
+    const big = sharp ? texture(gl, W, H, c.float) : null;
+    pass(gl, c.easu, src, big, W, H, { uScale: ['uniform2f', [w / W, h / H]] });
+    if (big) pass(gl, c.rcas, big, null, W, H, { uSharp: ['uniform1f', sharp] });
+    for (const t of [src, big]) if (t) gl.deleteTexture(t);
+    return c.canvas;
+  }
+  if (method === 'fsr') method = 'lanczos';
   const lanczos = method === 'lanczos' ? 1 : 0;
   const src = texture(gl, w, h, false, source);
   const rows = texture(gl, W, h, c.float);

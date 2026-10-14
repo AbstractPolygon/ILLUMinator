@@ -53,3 +53,26 @@ test('reducing does not alias: fine stripes average to gray', () => {
     for (let x = 2; x < 14; x++) assert.ok(Math.abs(out.data[x * 4] - 127.5) < 12, `${method} ${x}: ${out.data[x * 4]}`);
   }
 });
+
+test('FSR 1 keeps a flat picture flat and an edge crisp, within 0..255', () => {
+  const flat = upscale(image(6, 4, () => 90), 15, 10, { method: 'fsr', sharpen: 0.5 });
+  assert.equal(flat.width, 15);
+  assert.equal(flat.height, 10);
+  for (let i = 0; i < flat.data.length; i += 4) {
+    assert.ok(Math.abs(flat.data[i] - 90) <= 1, `flat ${flat.data[i]}`);
+    assert.equal(flat.data[i + 3], 255);
+  }
+  const edge = image(8, 2, (x) => (x < 4 ? 0 : 255));
+  const row = (img) => Array.from({ length: img.width }, (_, x) => img.data[x * 4]);
+  const steep = (r) => Math.max(...r.slice(1).map((v, i) => Math.abs(v - r[i])));
+  const fsr = row(upscale(edge, 32, 8, { method: 'fsr' }));
+  const smooth = row(upscale(edge, 32, 8, { method: 'smooth' }));
+  assert.ok(steep(fsr) > steep(smooth));
+  assert.equal(fsr[0], 0);
+  assert.equal(fsr[31], 255);
+});
+
+test('FSR 1 reduces with Lanczos', () => {
+  const big = image(20, 20, (x, y) => ((x + y) % 2 ? 255 : 0));
+  assert.deepEqual(upscale(big, 5, 5, { method: 'fsr' }).data, upscale(big, 5, 5, { method: 'lanczos' }).data);
+});
