@@ -3,7 +3,7 @@
 // served through a private app:// scheme so module workers and WebGL run as
 // they do on the web.
 
-const { app, BrowserWindow, dialog, ipcMain, protocol, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, shell } = require('electron');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
@@ -111,9 +111,25 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  // No File/Edit/View menu bar on Windows and Linux. On macOS the menu sits in
-  // the system bar and carries the copy, paste and quit shortcuts, so it stays.
-  if (process.platform !== 'darwin') win.removeMenu();
+  // No menu bar on Windows and Linux. On macOS the system bar keeps the app,
+  // Edit and Window menus, which carry the quit, copy/paste, minimize and
+  // close shortcuts.
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu', submenu: [
+        { role: 'about' }, { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' }, { role: 'quit' },
+      ] },
+      { role: 'editMenu', submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+      ] },
+      { role: 'windowMenu', submenu: [{ role: 'minimize' }, { role: 'close' }] },
+    ]));
+  } else {
+    win.removeMenu();
+  }
   win.loadURL('app://lytro/index.html');
   // Links to other sites open in the browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
