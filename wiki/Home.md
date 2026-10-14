@@ -12,7 +12,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 - [[Library and Albums]]: where photos and edits are kept, organizing with albums
 - [[Importing]]: from the camera, from Lytro Desktop, from files
 - [[Editing]]: the photo viewer, and every panel:
-  [[Crop]] · [[Process]] · [[Local Adjustments]] · [[Camera]] · [[Details]] · [[Optics]] · [[Animation]] · [[Rendering]]
+  [[Crop]] · [[Process]] · [[Local Adjustments]] · [[Camera]] · [[Details]] · [[Optics]] · [[Animation]] · [[Render]]
 - [[Exporting]]: stills, full resolution renders and videos
 - [[Keyboard Shortcuts]]
 - [[File Formats]]: the library, the edits files and the Lytro files ILLUMinator reads

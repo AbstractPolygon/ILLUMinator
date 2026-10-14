@@ -3,6 +3,7 @@ import { readEdits, writeEdits, editsStore } from './edits.js';
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
+import { upscaleImage } from './gpu/upscale.js';
 import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -4231,7 +4232,7 @@ async function saveStereo() {
       o.drawImage(first, 0, 0);
       o.drawImage(second, L.width, 0);
     }
-    out.toBlob((blob) => download(blob, `${baseName()}-3d-${mode}.png`), 'image/png');
+    enlargeForSave(out).toBlob((blob) => download(blob, `${baseName()}-3d-${mode}.png`), 'image/png');
   } catch (err) {
     showError(err);
   } finally {
@@ -4395,9 +4396,31 @@ function baseName() {
   return state.current ? state.current.name.replace(/\.[^.]+$/, '') : 'lytro';
 }
 
-function savePng() {
-  canvas.toBlob((blob) => download(blob, `${baseName()}.png`), 'image/png');
+// Saved photos and 3D images are enlarged by Render > Photo > Size, and
+// video frames to Render > Video > Size, with the Upscaling settings.
+function upscaleSettings() {
+  return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
 }
+
+function enlargeForSave(source) {
+  const k = +$('photo-size').value || 1;
+  if (k === 1) return source;
+  return upscaleImage(source, Math.round(source.width * k), Math.round(source.height * k), upscaleSettings());
+}
+
+function savePng() {
+  try {
+    enlargeForSave(canvas).toBlob((blob) => download(blob, `${baseName()}.png`), 'image/png');
+  } catch (err) {
+    showError(err);
+  }
+}
+$('upscale-sharpen').oninput = () => showSliderValue($('upscale-sharpen'));
+$('upscale-sharpen').ondblclick = () => {
+  $('upscale-sharpen').value = $('upscale-sharpen').dataset.default;
+  showSliderValue($('upscale-sharpen'));
+  scheduleSave();
+};
 
 // The crop, rotation and this frame's pivot, pan and zoom, for frame i of
 // the animation (an image w x h), or null when there is nothing to apply.
@@ -4462,16 +4485,20 @@ async function exportVideo() {
     const g0 = frameGeometry(0, size.width, size.height);
     const w = g0 ? g0.width : size.width;
     const h = g0 ? g0.height : size.height;
-    // Enlarged to the chosen Video size (long side), in even pixels for the
-    // encoder; the bitrate follows the size.
+    // Enlarged to the chosen Video size (the short side, as in 1080p), in
+    // even pixels for the encoder; the bitrate follows the size.
     const target = +$('video-size').value || 1080;
-    const up = target / Math.max(w, h);
+    const up = target / Math.min(w, h);
     const even = (v) => Math.max(2, 2 * Math.round(v / 2));
     const c = document.createElement('canvas');
     c.width = even(w * up);
     c.height = even(h * up);
     const cctx = c.getContext('2d');
     cctx.imageSmoothingQuality = 'high';
+    // Each frame is drawn at its own size, then enlarged by the upscaler.
+    const native = Object.assign(document.createElement('canvas'), { width: Math.round(w), height: Math.round(h) });
+    const nctx = native.getContext('2d');
+    const opts = upscaleSettings();
     const stream = c.captureStream(state.fps);
     const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
     const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Math.round(12e6 * (c.width * c.height) / (1920 * 1080)) });
@@ -4486,10 +4513,12 @@ async function exportVideo() {
       const i = order[n];
       const img = full ? await createImageBitmap(full[i].blob) : frames[i];
       const g = frameGeometry(i, img.width, img.height);
+      if (g) drawGeometry(nctx, img, g, native.width / g.width);
+      else nctx.drawImage(img, 0, 0, native.width, native.height);
+      const big = upscaleImage(native, c.width, c.height, opts);
       const wait = t0 + (n * 1000) / state.fps - performance.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      if (g) drawGeometry(cctx, img, g, c.width / g.width);
-      else cctx.drawImage(img, 0, 0, c.width, c.height);
+      cctx.drawImage(big, 0, 0);
       if (full) img.close();
       showProgress('Recording video', n / order.length);
     }

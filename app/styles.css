@@ -362,7 +362,6 @@ input[type=range]:disabled::-moz-range-thumb { background: var(--muted); }
 button.wide { display: block; width: 100%; }
 .stack { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .stack > * { margin: 0; }
-.row.export { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .icon-only {
   display: inline-flex; align-items: center; justify-content: center;
@@ -618,7 +617,7 @@ li:hover > .more, .more:focus-visible, .more[aria-expanded="true"] { opacity: 1;
 
 /* Everything inside a section is indented like its subsections. */
 .controls > .panel > :not(summary) { margin-left: 6px; }
-.controls > .panel > :is(canvas, button.wide, .row.export) { width: calc(100% - 6px); }
+.controls > .panel > :is(canvas, button.wide) { width: calc(100% - 6px); }
 .mask-filter { width: auto; padding: 3px 6px; font-size: 12px; }
 
 /* Number fields: plain arrows instead of the browser's spinner. */
@@ -631,7 +630,6 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 .num-arrows button:hover, .num-arrows button:hover:not(:disabled) { background: none; color: var(--text); }
 .anim-length .num { width: 64px; }
 .ccm-grid .num { width: 100%; }
-.controls > .panel > .row.export { margin-top: 8px; margin-bottom: 8px; }
 
 /* Rendering: room between a checkbox and the field below it. */
 #depth-hq-row, #stereo-on-row { margin-bottom: 10px; }
@@ -659,4 +657,3 @@ label.lut-amount { margin-top: 14px; }
 [data-panel=camera] label.check:has(#pivot-on, #tilt-on) { margin-bottom: 10px; }
 
 /* Rendering: Video size above the export buttons. */
-.video-size { margin-top: 12px; }

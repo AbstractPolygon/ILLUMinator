@@ -1,4 +1,4 @@
-# Rendering
+# Render
 
 ## Quality
 
@@ -19,6 +19,21 @@ A stereo pair from two viewpoints across the lens.
 - *Baseline:* how far apart the two viewpoints are.
 - *Save 3D image* saves the pair as a PNG.
 
-## Export
+## Photo
 
-*Video size* sets how large exported videos are: 1080p (the default), 1440p or 4K, on the long side. *Save PNG* saves the picture as shown; *Export video* saves the animation, at the current *Resolution*, or with *Full resolution* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
+- *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the *Upscaling* settings.
+- *Save PNG* saves the picture as shown, at that size.
+
+## Video
+
+- *Size:* the height of exported videos (their short side): 1080p (the default), 1440p or 4K (2160p). Each frame is enlarged to it with the *Upscaling* settings.
+- *Export video* saves the animation, at the current *Resolution*, or with *Full resolution* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
+
+## Upscaling
+
+How saved photos, 3D images and video frames are enlarged.
+
+- *Method:* *Lanczos (sharp)*, a filter that keeps edges crisp, or *Smooth*, the softer ordinary enlarging.
+- *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). It has no effect at *Native* size.
+
+Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.

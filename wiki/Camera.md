@@ -9,7 +9,7 @@ The light field controls. Each can be animated: the ◀ ◆ ▶ at the right of 
 - *Smoothing:* smooths the depth map, following the picture's edges.
 - *Show depth map:* warm colors are near, cool colors are far.
 
-How carefully the depth map is measured is set in [[Rendering]] (*High quality depth map*).
+How carefully the depth map is measured is set in [[Render]] (*High quality depth map*).
 
 ## Focus Spread
 

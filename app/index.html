@@ -679,7 +679,7 @@
       </details>
 
       <details class="panel">
-        <summary><h2>Rendering</h2></summary>
+        <summary><h2>Render</h2></summary>
         <details class="subpanel">
           <summary><h3>Quality</h3></summary>
           <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
@@ -726,17 +726,43 @@
           </label>
           <button id="stereo-btn" class="wide" disabled>Save 3D image</button>
         </details>
-        <label class="video-size" title="The long side of exported videos">Video size
-          <select id="video-size">
-            <option value="1080" selected>1080p</option>
-            <option value="1440">1440p</option>
-            <option value="2160">4K (2160p)</option>
-          </select>
-        </label>
-        <div class="row export">
-          <button id="png-btn" disabled>Save PNG</button>
-          <button id="webm-btn">Export video</button>
-        </div>
+        <details class="subpanel">
+          <summary><h3>Photo</h3></summary>
+          <label title="Saved photos are enlarged by this much with the Upscaling settings; Native saves the picture as rendered">Size
+            <select id="photo-size">
+              <option value="1" selected>Native</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+              <option value="4">4×</option>
+            </select>
+          </label>
+          <button id="png-btn" class="wide" disabled>Save PNG</button>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Video</h3></summary>
+          <label title="The height of exported videos (their short side); frames are enlarged to it with the Upscaling settings">Size
+            <select id="video-size">
+              <option value="1080" selected>1080p</option>
+              <option value="1440">1440p</option>
+              <option value="2160">4K (2160p)</option>
+            </select>
+          </label>
+          <button id="webm-btn" class="wide">Export video</button>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Upscaling</h3></summary>
+          <label title="How saved photos, 3D images and video frames are enlarged: Lanczos keeps edges crisp; Smooth is softer">Method
+            <select id="upscale-method">
+              <option value="lanczos" selected>Lanczos (sharp)</option>
+              <option value="smooth">Smooth</option>
+            </select>
+          </label>
+          <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none">Sharpen <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
+            <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
+          </label>
+          <p class="hint">Enlarging adds pixels, not detail. For the most detail, turn on Full resolution under Quality.</p>
+        </details>
       </details>
 
       <details class="panel" data-panel="lenslets" hidden>
