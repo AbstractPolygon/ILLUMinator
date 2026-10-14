@@ -105,7 +105,7 @@ function buildMenu() {
   const send = (id) => () => { if (win) win.webContents.send('menu', id); };
   const template = [
     ...(mac ? [{ role: 'appMenu', submenu: [
-      { role: 'about' }, { type: 'separator' },
+      { label: 'About ILLUMinator', click: send('about') }, { type: 'separator' },
       { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' }, { role: 'quit' },
@@ -123,7 +123,8 @@ function buildMenu() {
     ] },
     { role: 'windowMenu' },
     { role: 'help', submenu: [
-      { label: 'ILLUMinator Help', click: () => shell.openExternal('https://github.com/AbstractPolygon/ILLUMinator/wiki') },
+      { label: 'About', click: send('about') },
+      { label: 'Wiki', click: () => shell.openExternal('https://github.com/AbstractPolygon/ILLUMinator/wiki') },
     ] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

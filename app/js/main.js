@@ -4682,6 +4682,7 @@ if (native && native.onMenu) {
   native.onMenu((id) => {
     if (id === 'open') $('open-btn').click();
     else if (id === 'import-library') importFolder();
+    else if (id === 'about') $('about-btn').click();
   });
 }
 $('camera-btn').onclick = importFromCamera;
