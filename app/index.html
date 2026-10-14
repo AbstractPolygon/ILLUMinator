@@ -747,6 +747,13 @@
               <option value="mp4">MP4</option>
             </select>
           </label>
+          <label title="The height of exported videos (their short side); frames are enlarged to it with the Upscaling settings">Size
+            <select id="video-size">
+              <option value="1080" selected>1080p</option>
+              <option value="1440">1440p</option>
+              <option value="2160">4K (2160p)</option>
+            </select>
+          </label>
           <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
             <select id="video-codec">
               <option value="vp9" selected>VP9</option>
@@ -754,13 +761,6 @@
               <option value="h264">H.264</option>
               <option value="h265">H.265 (HEVC)</option>
               <option value="av1">AV1</option>
-            </select>
-          </label>
-          <label title="The height of exported videos (their short side); frames are enlarged to it with the Upscaling settings">Size
-            <select id="video-size">
-              <option value="1080" selected>1080p</option>
-              <option value="1440">1440p</option>
-              <option value="2160">4K (2160p)</option>
             </select>
           </label>
           <label title="The video's bitrate: higher keeps more detail and makes bigger files">Quality <output data-for="video-quality" for="video-quality">16 Mbit/s</output>
