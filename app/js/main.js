@@ -4677,6 +4677,13 @@ async function openPicked(files) {
 }
 
 $('open-btn').onclick = async () => openPicked(await openFiles());
+// Commands from the desktop app's menu bar.
+if (native && native.onMenu) {
+  native.onMenu((id) => {
+    if (id === 'open') $('open-btn').click();
+    else if (id === 'import-library') importFolder();
+  });
+}
 $('camera-btn').onclick = importFromCamera;
 $('sample-btn').onclick = () => {
   state.current = null;

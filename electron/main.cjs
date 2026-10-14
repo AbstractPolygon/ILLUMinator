@@ -98,6 +98,37 @@ async function lfpModule() {
   return import(pathToFileURL(path.join(APP_DIR, 'js', 'core', 'lfp.js')).href);
 }
 
+// The menu bar: Electron's standard menus without reload and developer tools,
+// plus the app's import commands. On macOS, Quit sits in the app menu.
+function buildMenu() {
+  const mac = process.platform === 'darwin';
+  const send = (id) => () => { if (win) win.webContents.send('menu', id); };
+  const template = [
+    ...(mac ? [{ role: 'appMenu', submenu: [
+      { role: 'about' }, { type: 'separator' },
+      { role: 'services' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+      { type: 'separator' }, { role: 'quit' },
+    ] }] : []),
+    { label: 'File', submenu: [
+      { label: 'Import Lytro File…', accelerator: 'CmdOrCtrl+O', click: send('open') },
+      { label: 'Import Lytro Library…', click: send('import-library') },
+      ...(mac ? [] : [{ type: 'separator' }, { role: 'quit' }]),
+    ] },
+    { role: 'editMenu' },
+    { label: 'View', submenu: [
+      { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+      { type: 'separator' },
+      { role: 'togglefullscreen' },
+    ] },
+    { role: 'windowMenu' },
+    { role: 'help', submenu: [
+      { label: 'ILLUMinator Help', click: () => shell.openExternal('https://github.com/AbstractPolygon/ILLUMinator/wiki') },
+    ] },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1400,
@@ -113,28 +144,6 @@ function createWindow() {
       devTools: !app.isPackaged,
     },
   });
-  // No menu bar on Windows and Linux. On macOS the system bar keeps the app,
-  // Edit and Window menus, which carry the quit, copy/paste, minimize and
-  // close shortcuts, plus Help, which opens the wiki.
-  if (process.platform === 'darwin') {
-    Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { role: 'appMenu', submenu: [
-        { role: 'about' }, { type: 'separator' },
-        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
-        { type: 'separator' }, { role: 'quit' },
-      ] },
-      { role: 'editMenu', submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-      ] },
-      { role: 'windowMenu', submenu: [{ role: 'minimize' }, { role: 'close' }] },
-      { role: 'help', submenu: [
-        { label: 'ILLUMinator Help', click: () => shell.openExternal('https://github.com/AbstractPolygon/ILLUMinator/wiki') },
-      ] },
-    ]));
-  } else {
-    win.removeMenu();
-  }
   win.loadURL('app://lytro/index.html');
   // Links to other sites open in the browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -375,6 +384,7 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(file).href);
   });
   registerIpc();
+  buildMenu();
   createWindow();
   pollCameras();
   app.on('activate', () => {

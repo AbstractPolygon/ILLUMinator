@@ -32,4 +32,5 @@ contextBridge.exposeInMainWorld('lytroNative', {
   },
   onCamerasChanged: (callback) => subscribe('cameras-changed', callback),
   onImportProgress: (callback) => subscribe('import-progress', callback),
+  onMenu: (callback) => subscribe('menu', callback),
 });

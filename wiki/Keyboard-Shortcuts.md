@@ -11,6 +11,7 @@
 | Enter | Crop: apply the frame |
 | Esc | Crop: cancel; white balance picker: cancel; menus: close |
 | Double-click a slider | Reset it |
+| Ctrl / ⌘ + O | Import a Lytro file (desktop app) |
 
 In the keyframe editor:
 
@@ -21,3 +22,13 @@ In the keyframe editor:
 | Shift-click a keyframe | Add it to the selection, or take it out |
 | Ctrl / ⌘ + mouse wheel | Zoom the timeline |
 | Shift + mouse wheel | Scroll along the timeline |
+
+## Menu bar
+
+The desktop app has a menu bar (on macOS, at the top of the screen):
+
+- **File:** Import Lytro File…, Import Lytro Library…, Quit (on macOS, Quit is in the ILLUMinator menu)
+- **Edit:** Undo, Redo, Cut, Copy, Paste, Delete and Select All, for text fields
+- **View:** Actual Size, Zoom In and Zoom Out (the size of the whole window's contents), and Toggle Full Screen
+- **Window:** Minimize, Zoom and Close
+- **Help:** ILLUMinator Help opens this wiki
