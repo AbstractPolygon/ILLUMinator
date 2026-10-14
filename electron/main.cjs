@@ -111,6 +111,9 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  // No File/Edit/View menu bar on Windows and Linux. On macOS the menu sits in
+  // the system bar and carries the copy, paste and quit shortcuts, so it stays.
+  if (process.platform !== 'darwin') win.removeMenu();
   win.loadURL('app://lytro/index.html');
   // Links to other sites open in the browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
