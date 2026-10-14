@@ -113,7 +113,7 @@ function createWindow() {
   });
   // No menu bar on Windows and Linux. On macOS the system bar keeps the app,
   // Edit and Window menus, which carry the quit, copy/paste, minimize and
-  // close shortcuts.
+  // close shortcuts, plus Help, which opens the wiki.
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { role: 'appMenu', submenu: [
@@ -126,6 +126,9 @@ function createWindow() {
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
       ] },
       { role: 'windowMenu', submenu: [{ role: 'minimize' }, { role: 'close' }] },
+      { role: 'help', submenu: [
+        { label: 'ILLUMinator Help', click: () => shell.openExternal('https://github.com/AbstractPolygon/ILLUMinator/wiki') },
+      ] },
     ]));
   } else {
     win.removeMenu();
