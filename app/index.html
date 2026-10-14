@@ -53,9 +53,8 @@
       <section id="camera-section" class="camera-section" hidden>
         <h2>Camera</h2>
         <p id="camera-section-note" class="hint"></p>
+        <ul id="camera-rows" class="albums"></ul>
         <button id="camera-show" type="button" hidden>Show photos…</button>
-        <ul id="camera-list" class="photo-list"></ul>
-        <button id="camera-import-all" type="button" hidden>Import all</button>
       </section>
       <h2>Library</h2>
       <ul id="album-list" class="albums"></ul>
@@ -70,6 +69,7 @@
         <div class="grid-bar">
           <h2 id="grid-title"></h2>
           <span id="grid-count" class="hint"></span>
+          <button id="grid-import-all" type="button" hidden>Import all</button>
           <span class="spacer"></span>
           <div class="thumb-size" role="group" aria-label="Thumbnail size">
             <button id="thumb-smaller" type="button" class="icon-only" title="Smaller thumbnails (−)" aria-label="Smaller thumbnails">
@@ -83,6 +83,7 @@
         </div>
         <div id="photo-grid" class="photo-grid"></div>
         <p id="grid-empty" class="hint" hidden></p>
+        <p id="grid-camera-choose-row" hidden><button id="grid-camera-choose" type="button">Choose camera drive…</button></p>
       </div>
       <div id="drop-zone" class="viewer">
         <canvas id="view"></canvas>

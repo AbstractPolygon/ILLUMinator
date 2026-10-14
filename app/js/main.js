@@ -140,6 +140,11 @@ function saveThumbnail() {
 
 const EMPTY_LIBRARY = 'Open .LFR / .LFP files, drop them here, or import from a camera or Lytro Desktop.';
 
+// The Camera section's state (see setCameraSection).
+let cameraSection = {};
+const cameraThumbs = new Map();
+let rememberedFailed = false;
+
 function renderLibrary() {
   renderAlbums();
   const album = lib && state.album ? lib.album(state.album) : null;
@@ -169,8 +174,10 @@ function renderLibrary() {
     li.onclick = () => openItem(photo);
     return li;
   }));
-  renderGrid(photos, album);
-  if (cameraSection.cam) renderCameraSection();
+  if (state.cameraView && !cameraSection.note && !cameraSection.cam) state.cameraView = false;
+  renderCameraSection();
+  if (state.cameraView) renderCameraGrid();
+  else renderGrid(photos, album);
   const empty = $('library-empty');
   empty.hidden = photos.length > 0;
   if (album) empty.textContent = 'No photos in this album yet. Drag photos onto the album, or use ••• on a photo.';
@@ -187,13 +194,14 @@ function renderAlbums() {
   const rows = [{ id: null, name: 'All photos', count: lib.photos.length }, ...lib.albums.map((a) => ({ id: a.id, name: a.name, count: a.photos.length }))];
   list.replaceChildren(...rows.map((row) => {
     const li = document.createElement('li');
-    li.classList.toggle('current', state.album === row.id);
+    li.classList.toggle('current', !state.cameraView && state.album === row.id);
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'album' });
     const name = Object.assign(document.createElement('span'), { className: 'name', textContent: row.name });
     const count = Object.assign(document.createElement('span'), { className: 'count', textContent: row.count });
     b.append(name, count);
     b.onclick = () => {
       state.album = row.id;
+      state.cameraView = false;
       showGrid(true);
     };
     li.append(b);
@@ -272,6 +280,8 @@ $('thumb-bigger').onclick = () => setThumbSize(+$('thumb-size').value * 1.25);
 
 function renderGrid(photos, album) {
   if (!state.grid) return;
+  $('grid-import-all').hidden = true;
+  $('grid-camera-choose-row').hidden = true;
   $('grid-title').textContent = album ? album.name : 'All photos';
   $('grid-count').textContent = `${photos.length} photo${photos.length === 1 ? '' : 's'}`;
   const current = state.current && state.current.photo;
@@ -344,7 +354,10 @@ function newAlbum(photoIds = []) {
     if (name) {
       const album = await lib.createAlbum(name);
       if (photoIds.length) await lib.addToAlbum(album.id, photoIds);
-      else state.album = album.id;
+      else {
+        state.album = album.id;
+        state.cameraView = false;
+      }
     }
     renderLibrary();
   });
@@ -1687,6 +1700,7 @@ async function importFolder() {
   // Photos imported before with the same names are replaced by these.
   const added = await importPhotos(entries, { album: album.id, replace: true });
   state.album = album.id;
+  state.cameraView = false;
   showGrid(true);
   const withEdits = entries.filter((e) => e.sidecar).length;
   showNotice(`Added ${added.length} photo${added.length === 1 ? '' : 's'} from ${picked.name} to the album “${album.name}”.`,
@@ -1736,6 +1750,7 @@ $('library-choose').onclick = async () => {
   if (!dir) return;
   closePhoto();
   state.album = null;
+  state.cameraView = false;
   libReady = openLibrary();
   await showLibraryLocation();
 };
@@ -4714,9 +4729,6 @@ async function importFromConnectedCamera(preferId) {
 // { cam: { kind: 'drive' | 'adb' | 'web', id, label, files }, note, show }
 // (`show`: the Show photos… button, to choose or allow reading the drive in
 // a browser). Clicking a photo imports it (once) and opens it.
-let cameraSection = {};
-const cameraThumbs = new Map();
-let rememberedFailed = false;
 
 function setCameraSection(next) {
   const was = cameraSection.cam;
@@ -4725,7 +4737,10 @@ function setCameraSection(next) {
     for (const url of cameraThumbs.values()) URL.revokeObjectURL(url);
     cameraThumbs.clear();
   }
-  renderCameraSection();
+  // The camera's photos just arrived while the library grid is showing:
+  // show them.
+  if (next.cam && !was && state.grid) state.cameraView = true;
+  renderLibrary();
 }
 
 // The library photo this camera file was imported as, if any.
@@ -4739,41 +4754,83 @@ function cameraThumb(cam, f) {
   return Promise.resolve(null);
 }
 
+// The Camera row in the sidebar: like an album, it shows the camera's
+// photos in the grid.
 function renderCameraSection() {
   const { cam, note = '', show = false } = cameraSection;
   $('camera-section').hidden = !cam && !note;
-  const n = cam ? cam.files.length : 0;
-  $('camera-section-note').textContent = cam
-    ? (n ? `${n} photo${n === 1 ? '' : 's'} on ${cam.label}. Click one to import and open it.` : `No photos on ${cam.label}.`)
-    : note;
+  $('camera-section-note').textContent = cam ? '' : note;
+  $('camera-section-note').hidden = !!cam || !note;
   $('camera-show').hidden = !show || !!cam;
   $('camera-show').textContent = rememberedFailed ? 'Choose camera drive…' : 'Show photos…';
-  $('camera-import-all').hidden = !n || (cam && cam.files.every(importedAs));
-  $('camera-list').replaceChildren(...(cam ? cam.files : []).map((f) => {
+  const rows = cam || note ? [{ name: cam ? cam.label : 'Lytro camera', count: cam ? cam.files.length : '' }] : [];
+  $('camera-rows').replaceChildren(...rows.map((row) => {
     const li = document.createElement('li');
-    li.classList.toggle('imported', !!importedAs(f));
-    li.title = importedAs(f) ? `${f.name} (in the library)` : f.name;
+    li.classList.toggle('current', !!state.cameraView);
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'album', title: 'Show the photos on the camera' });
+    b.append(
+      Object.assign(document.createElement('span'), { className: 'name', textContent: row.name }),
+      Object.assign(document.createElement('span'), { className: 'count', textContent: row.count }),
+    );
+    b.onclick = () => {
+      state.cameraView = true;
+      showGrid(true);
+    };
+    li.append(b);
+    return li;
+  }));
+}
+
+// The camera's photos as thumbnails in the grid: clicking one imports it
+// (once) and opens it; ✓ marks photos already in the library.
+function renderCameraGrid() {
+  if (!state.grid) return;
+  const { cam } = cameraSection;
+  const files = cam ? cam.files : [];
+  $('grid-title').textContent = cam ? cam.label : 'Lytro camera';
+  $('grid-count').textContent = cam ? `${files.length} photo${files.length === 1 ? '' : 's'} on the camera` : '';
+  $('grid-import-all').hidden = !files.length || files.every(importedAs);
+  $('photo-grid').replaceChildren(...files.map((f) => {
+    const tile = document.createElement('div');
+    const inLib = importedAs(f);
+    tile.className = inLib ? 'tile imported' : 'tile';
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('aria-label', inLib ? `Open ${f.name}` : `Import and open ${f.name}`);
+    tile.title = inLib ? `${f.name} (in the library)` : `${f.name} · ${(f.size / 1e6).toFixed(0)} MB`;
+    const frame = Object.assign(document.createElement('div'), { className: 'frame' });
     const key = `${cam.id}|${f.id || f.path}`;
-    const ph = cameraThumbs.has(key)
-      ? Object.assign(document.createElement('img'), { src: cameraThumbs.get(key), alt: '' })
-      : Object.assign(document.createElement('div'), { className: 'noimg' });
-    if (!cameraThumbs.has(key)) {
+    if (cameraThumbs.has(key)) frame.append(Object.assign(document.createElement('img'), { src: cameraThumbs.get(key), alt: '' }));
+    else {
       cameraThumb(cam, f).then((t) => {
         if (!t || cameraSection.cam !== cam) return;
         const url = URL.createObjectURL(new Blob([t.bytes], { type: t.mime }));
         cameraThumbs.set(key, url);
-        ph.replaceWith(Object.assign(document.createElement('img'), { src: url, alt: '' }));
+        frame.append(Object.assign(document.createElement('img'), { src: url, alt: '' }));
       }).catch(() => {});
     }
-    const name = document.createElement('span');
-    name.textContent = f.name;
-    li.append(ph, name);
-    li.onclick = async () => {
+    const name = Object.assign(document.createElement('div'), { className: 'name', textContent: f.name });
+    tile.append(frame, name);
+    const open = async () => {
       const photo = importedAs(f) || (await importCameraFiles(cam, [f]))[0];
       if (photo) openItem(photo);
     };
-    return li;
+    tile.onclick = open;
+    tile.onkeydown = (e) => {
+      if (e.target === tile && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        open();
+      }
+    };
+    return tile;
   }));
+  // A browser reads the camera only from a drive the user chooses.
+  $('grid-camera-choose-row').hidden = !!cam || native !== null;
+  $('grid-empty').hidden = files.length > 0;
+  $('grid-empty').textContent = cam
+    ? `No photos found on ${cam.label}.`
+    : native ? 'Looking for the photos on the camera…'
+    : 'To see the photos on the camera, choose its drive (or the DCIM folder on it). Browsers can read a camera only through a drive you choose; it is remembered for next time.';
 }
 
 // Imports photos from a camera into the library: a camera drive (desktop
@@ -4801,7 +4858,6 @@ async function importCameraFiles(cam, picked) {
   }
   const added = await importPhotos(groupPhotos(entries));
   if (cam.kind === 'adb') lib.store.remove('.incoming').catch(() => {});
-  renderCameraSection();
   return added;
 }
 
@@ -4818,7 +4874,7 @@ async function showWebCamera(dir) {
   }
 }
 
-$('camera-show').onclick = async () => {
+async function showCameraPhotos() {
   // First the drive chosen last time (asking to read it again), then, if
   // that fails, a fresh choice.
   if (!rememberedFailed) {
@@ -4844,9 +4900,16 @@ $('camera-show').onclick = async () => {
   }
   if (result.dir && (await showWebCamera(result.dir))) return;
   setCameraSection({ ...cameraSection, cam: { kind: 'web', id: `web:${result.source}`, label: result.source, files: result.files } });
-};
+}
 
-$('camera-import-all').onclick = async () => {
+$('camera-show').onclick = () => {
+  state.cameraView = true;
+  showGrid(true);
+  showCameraPhotos();
+};
+$('grid-camera-choose').onclick = showCameraPhotos;
+
+$('grid-import-all').onclick = async () => {
   const { cam } = cameraSection;
   if (!cam) return;
   const added = await importCameraFiles(cam, cam.files.filter((f) => !importedAs(f)));
@@ -4897,6 +4960,7 @@ async function importAlbumArchive(file) {
       },
     });
     state.album = album.id;
+    state.cameraView = false;
     showNotice(`Imported the album “${album.name}”: ${photos.length} photo${photos.length === 1 ? '' : 's'}.`);
     startNoticeTimer();
   } catch (err) {
