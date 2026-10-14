@@ -506,16 +506,28 @@ function albumMenu(id, li, button) {
 
 // Copies photos (scan.js entries) into the library, adding them to the
 // album being shown. Returns the library photos.
-async function importPhotos(entries, { album = state.album } = {}) {
+async function importPhotos(entries, { album = state.album, replace = false } = {}) {
   await libReady;
   if (!entries.length) return [];
   let added = [];
+  const before = new Map(lib.photos.map((p) => [p.id, p.added]));
   try {
     added = await lib.add(entries, {
+      replace,
       onProgress: (e, i, n) => {
         if (e) showProgress(n > 1 ? `Adding ${e.name} to the library (${i + 1} of ${n})` : `Adding ${e.name} to the library`, i / n);
       },
     });
+    // Replaced photos: their thumbnails are new, and an open one opens again
+    // from its new files.
+    const replaced = added.filter((p) => before.has(p.id) && before.get(p.id) !== p.added);
+    for (const p of replaced) {
+      const url = thumbs.get(p.id);
+      if (url) URL.revokeObjectURL(url);
+      thumbs.delete(p.id);
+    }
+    const open = state.current && state.current.photo;
+    if (open && replaced.includes(open)) openItem(open);
     if (album && lib.album(album)) await lib.addToAlbum(album, added.map((p) => p.id));
   } catch (err) {
     showError(err);
@@ -1664,7 +1676,8 @@ async function importFolder() {
   await libReady;
   const albumName = picked.name.replace(/\.lytrolibrary$/i, '');
   const album = lib.albums.find((a) => a.name === albumName) || (await lib.createAlbum(albumName));
-  const added = await importPhotos(entries, { album: album.id });
+  // Photos imported before with the same names are replaced by these.
+  const added = await importPhotos(entries, { album: album.id, replace: true });
   state.album = album.id;
   showGrid(true);
   const withEdits = entries.filter((e) => e.sidecar).length;

@@ -134,8 +134,11 @@ export class Library {
 
   // Copies photos into the library. entries: [{ name, label, file, sidecar,
   // thumb }] (scan.js). A photo already in the library (same photo id) is
-  // not copied again. Returns the library photo for each entry, in order.
-  async add(entries, { onProgress = () => {} } = {}) {
+  // not copied again; with `replace`, one with the same name (or photo id)
+  // is replaced by the new files, keeping its place in albums, and its
+  // edits start over from the new files. Returns the library photo for
+  // each entry, in order.
+  async add(entries, { onProgress = () => {}, replace = false } = {}) {
     const out = [];
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
@@ -145,6 +148,15 @@ export class Library {
         summary = await this.readSummary(e.file);
       } catch {
         // Not readable as an LFP (a .raw dump): no id, no thumbnail.
+      }
+      const sameName = (p) => p.name.toLowerCase() === String(e.name).toLowerCase();
+      const old = replace && (this.photos.find(sameName) || (summary.photoId && this.photos.find((p) => p.photoId === summary.photoId)));
+      if (old) {
+        await this.store.remove(`${PHOTOS}/${old.id}`);
+        Object.assign(old, await this.copyFiles(e, old.id, summary), { name: e.name, size: e.file.size, photoId: summary.photoId, added: new Date().toISOString() });
+        out.push(old);
+        await this.save();
+        continue;
       }
       const existing = summary.photoId && this.photos.find((p) => p.photoId === summary.photoId);
       if (existing) {
@@ -156,33 +168,38 @@ export class Library {
         continue;
       }
       const id = this.uniqueId(e.label || stem(e.name));
-      const dir = `${PHOTOS}/${id}`;
-      const fileName = e.file.name || e.name;
-      await this.store.copyIn(e.file, `${dir}/${fileName}`);
-      let sidecar = null;
-      if (e.sidecar && e.sidecar.name.toLowerCase() !== fileName.toLowerCase()) {
-        sidecar = e.sidecar.name;
-        await this.store.copyIn(e.sidecar, `${dir}/${sidecar}`);
-      }
-      let thumb = null;
-      try {
-        if (e.thumb) {
-          thumb = /\.png$/i.test(e.thumb.name) ? 'thumb.png' : 'thumb.jpg';
-          await this.store.copyIn(e.thumb, `${dir}/${thumb}`);
-        } else if (summary.thumbnail) {
-          thumb = summary.thumbnail.mime === 'image/png' ? 'thumb.png' : 'thumb.jpg';
-          await this.store.writeBlob(`${dir}/${thumb}`, new Blob([summary.thumbnail.bytes], { type: summary.thumbnail.mime }));
-        }
-      } catch {
-        thumb = null;
-      }
-      const photo = { id, name: e.name, file: fileName, sidecar, thumb, size: e.file.size, photoId: summary.photoId, added: new Date().toISOString() };
+      const photo = { id, name: e.name, ...(await this.copyFiles(e, id, summary)), size: e.file.size, photoId: summary.photoId, added: new Date().toISOString() };
       this.photos.push(photo);
       out.push(photo);
       await this.save();
     }
     onProgress(null, entries.length, entries.length);
     return out;
+  }
+
+  // Copies an entry's photo, edits and thumbnail into the folder `id`.
+  async copyFiles(e, id, summary) {
+    const dir = `${PHOTOS}/${id}`;
+    const file = e.file.name || e.name;
+    await this.store.copyIn(e.file, `${dir}/${file}`);
+    let sidecar = null;
+    if (e.sidecar && e.sidecar.name.toLowerCase() !== file.toLowerCase()) {
+      sidecar = e.sidecar.name;
+      await this.store.copyIn(e.sidecar, `${dir}/${sidecar}`);
+    }
+    let thumb = null;
+    try {
+      if (e.thumb) {
+        thumb = /\.png$/i.test(e.thumb.name) ? 'thumb.png' : 'thumb.jpg';
+        await this.store.copyIn(e.thumb, `${dir}/${thumb}`);
+      } else if (summary.thumbnail) {
+        thumb = summary.thumbnail.mime === 'image/png' ? 'thumb.png' : 'thumb.jpg';
+        await this.store.writeBlob(`${dir}/${thumb}`, new Blob([summary.thumbnail.bytes], { type: summary.thumbnail.mime }));
+      }
+    } catch {
+      thumb = null;
+    }
+    return { file, sidecar, thumb };
   }
 
   async remove(ids) {

@@ -136,3 +136,30 @@ test('an album exports to a zip and imports into another library', async () => {
   assert.ok(photos.find((p) => p.name === 'Beach').sidecar);
   assert.deepEqual(new Uint8Array(await (await b.file(photos[0])).arrayBuffer()), bytes);
 });
+
+test('re-importing a library replaces photos with the same names', async () => {
+  const store = memoryStorage();
+  const lib = await new Library(store, { readSummary }).load();
+  const first = file('raw.lfp', 100);
+  summaries.set(first, { photoId: 'sha1-old', thumbnail: null });
+  const [p] = await lib.add([{ name: 'Beach', label: 'Beach', file: first }]);
+  await lib.saveEdits(p, { format: 'illuminator-edits', camera: { fstop: 3 } });
+  const album = await lib.createAlbum('Lytro Library');
+  await lib.addToAlbum(album.id, [p.id]);
+  const second = file('raw.lfp', 200);
+  summaries.set(second, { photoId: 'sha1-new', thumbnail: null });
+  const view = file('stack.view.lfp', 5);
+  const [q] = await lib.add([{ name: 'Beach', label: 'Beach', file: second, sidecar: view }], { replace: true });
+  assert.equal(q, p);
+  assert.equal(lib.photos.length, 1);
+  assert.equal((await lib.file(q)).size, 200);
+  assert.equal(q.photoId, 'sha1-new');
+  assert.equal(q.sidecar, 'stack.view.lfp');
+  assert.equal(await lib.loadEdits(q), null);
+  assert.deepEqual(lib.list(album.id), [q]);
+  // Without replace, a same-named photo is added beside it.
+  const third = file('raw.lfp', 300);
+  summaries.set(third, { photoId: 'sha1-third', thumbnail: null });
+  await lib.add([{ name: 'Beach', label: 'Beach', file: third }]);
+  assert.equal(lib.photos.length, 2);
+});
