@@ -4446,6 +4446,12 @@ function showVideoCodecs() {
 }
 $('video-format').addEventListener('change', showVideoCodecs);
 showVideoCodecs();
+$('video-quality').oninput = () => showSliderValue($('video-quality'));
+$('video-quality').ondblclick = () => {
+  $('video-quality').value = $('video-quality').dataset.default;
+  showSliderValue($('video-quality'));
+  scheduleSave();
+};
 $('upscale-sharpen').oninput = () => showSliderValue($('upscale-sharpen'));
 $('upscale-sharpen').ondblclick = () => {
   $('upscale-sharpen').value = $('upscale-sharpen').dataset.default;
@@ -4535,7 +4541,7 @@ async function exportVideo() {
     if (!pick) throw new Error('This browser cannot record video.');
     const mime = pick.type;
     if (pick.fallback) showNotice(`Recording as ${VIDEO_FORMATS[pick.format].name} ${VIDEO_CODECS[pick.codec].name}: this browser cannot record the chosen kind.`);
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: videoBitrate($('video-quality').value, c.width, c.height) });
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: videoBitrate($('video-quality').value) });
     const chunks = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     const done = new Promise((r) => { recorder.onstop = r; });
@@ -5148,6 +5154,7 @@ function showSliderValue(input) {
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
+  else if (input.id === 'video-quality') out.textContent = `${v} Mbit/s`;
   else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;

@@ -28,7 +28,7 @@ A stereo pair from two viewpoints across the lens.
 
 - *File format:* *WebM* (plays in browsers and most players) or *MP4* (plays nearly everywhere).
 - *Compression:* the codec. WebM: *VP9*, *VP8* or *AV1*; MP4: *H.264*, *H.265 (HEVC)* or *AV1*. Only the kinds this browser or computer can record are offered; the others are marked *not available here*. H.265 depends on the computer's video hardware.
-- *Quality:* *Low* (4 Mbit/s), *Medium* (8), *High* (16, the default) or *Maximum* (40), at 1080p; larger sizes get proportionally more. Higher quality keeps more detail and makes bigger files.
+- *Quality:* the video's bitrate, 1 to 40 Mbit/s (16 by default). Higher keeps more detail and makes bigger files; for 4K, 30 or more works well.
 - *Size:* the height of exported videos (their short side): 1080p (the default), 1440p or 4K (2160p). Each frame is enlarged to it with the *Upscaling* settings.
 - *Export video* saves the animation, at the current *Resolution*, or with *Full resolution* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
 

@@ -25,8 +25,9 @@ test('every format codec has a type to try', () => {
   assert.equal(videoType('webm', 'h264', () => true), null);
 });
 
-test('bitrate scales with the quality and the picture size', () => {
-  assert.equal(videoBitrate('high', 1920, 1080), 16e6);
-  assert.equal(videoBitrate('low', 3840, 2160), 16e6);
-  assert.equal(videoBitrate('unknown', 1920, 1080), 16e6);
+test('bitrate from the quality slider, 1 to 40 Mbit/s', () => {
+  assert.equal(videoBitrate(16), 16e6);
+  assert.equal(videoBitrate('40'), 40e6);
+  assert.equal(videoBitrate(90), 40e6);
+  assert.equal(videoBitrate('high'), 16e6);
 });

@@ -756,13 +756,8 @@
               <option value="av1">AV1</option>
             </select>
           </label>
-          <label title="Higher quality keeps more detail and makes bigger files (bitrate at 1080p; larger sizes get more)">Quality
-            <select id="video-quality">
-              <option value="low">Low (4 Mbit/s)</option>
-              <option value="medium">Medium (8 Mbit/s)</option>
-              <option value="high" selected>High (16 Mbit/s)</option>
-              <option value="max">Maximum (40 Mbit/s)</option>
-            </select>
+          <label title="The video's bitrate: higher keeps more detail and makes bigger files">Quality <output data-for="video-quality" for="video-quality">16 Mbit/s</output>
+            <input id="video-quality" type="range" min="1" max="40" step="1" value="16" data-default="16">
           </label>
           <label title="The height of exported videos (their short side); frames are enlarged to it with the Upscaling settings">Size
             <select id="video-size">

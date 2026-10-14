@@ -15,9 +15,8 @@ export const VIDEO_CODECS = {
   h265: { name: 'H.265 (HEVC)', types: { mp4: ['video/mp4;codecs=hvc1.1.6.L153.B0', 'video/mp4;codecs=hev1.1.6.L153.B0', 'video/mp4;codecs=hvc1'] } },
 };
 
-// Bitrate at 1080p (1920 x 1080), in megabits a second; other sizes scale
-// with their pixel count.
-export const VIDEO_QUALITY = { low: 4, medium: 8, high: 16, max: 40 };
+// Quality: the bitrate in megabits a second.
+export const VIDEO_QUALITY = { min: 1, max: 40, default: 16 };
 
 // The first type this browser records for a format and codec, or null.
 export function videoType(format, codec, supported) {
@@ -41,8 +40,9 @@ export function chooseVideoType(format, codec, supported) {
   return null;
 }
 
-// Bits a second for a video of w x h pixels at the chosen quality.
-export function videoBitrate(quality, w, h) {
-  const mbps = VIDEO_QUALITY[quality] || VIDEO_QUALITY.high;
-  return Math.round(mbps * 1e6 * (w * h) / (1920 * 1080));
+// Bits a second for a quality setting (megabits a second), kept within
+// the slider's range.
+export function videoBitrate(mbps) {
+  const v = Number.isFinite(+mbps) && +mbps > 0 ? +mbps : VIDEO_QUALITY.default;
+  return Math.round(Math.min(VIDEO_QUALITY.max, Math.max(VIDEO_QUALITY.min, v)) * 1e6);
 }
