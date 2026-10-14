@@ -31,6 +31,7 @@
     <button id="open-btn" class="primary">Open…</button>
     <button id="camera-btn">Import from camera…</button>
     <button id="sample-btn" hidden>Synthetic sample</button>
+    <button id="usb-watch-btn" hidden title="With the camera plugged in and switched on: lets ILLUMinator notice when it is plugged in (Chrome and Edge)">Detect camera…</button>
     <span id="camera-status" class="hint"></span>
     <span class="spacer"></span>
     <button id="fullscreen-btn" class="icon-only" title="Full screen" aria-label="Full screen" aria-pressed="false">
@@ -883,6 +884,7 @@
       <div id="camera-grid" class="camera-grid"></div>
       <menu>
         <button type="button" id="camera-select-all">Select all</button>
+        <button type="button" id="camera-choose" hidden>Choose camera drive…</button>
         <span class="spacer"></span>
         <button value="cancel">Cancel</button>
         <button id="camera-import" value="import" class="primary">Import selected</button>

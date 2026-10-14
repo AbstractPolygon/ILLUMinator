@@ -4649,6 +4649,7 @@ async function importFromCameraFolder() {
     return;
   }
   const { files, source } = result;
+  $('camera-choose').hidden = false;
   $('camera-select-row').hidden = true;
   $('camera-dest').hidden = true;
   $('camera-dialog-source').textContent = files.length
@@ -4669,6 +4670,7 @@ async function importFromCameraFolder() {
 // `preferId` picks that camera first (the one just plugged in).
 async function importFromConnectedCamera(preferId) {
   const cameras = await native.listCameras();
+  $('camera-choose').hidden = true;
   // Opened by a plug-in, but the camera has gone again: stay quiet.
   if (preferId && !cameras.some((c) => c.id === preferId)) return;
   const select = $('camera-select');
@@ -5402,6 +5404,69 @@ if (native) {
     }).catch(() => {});
   }
 }
+
+// Browser: WebUSB tells the page when a Lytro is plugged in, once the user
+// has allowed this site to see it (Detect camera…, Chrome and Edge). It
+// cannot read the photos over USB (browsers keep USB drives to the OS), so
+// a plug-in opens the import dialog, ready to choose the camera's drive.
+if (!native && navigator.usb) {
+  const isLytro = (d) => d.vendorId === LYTRO_USB_VENDOR;
+  const allowedKey = 'illuminator.usbWatch';
+  let allowed = false;
+  try {
+    allowed = localStorage.getItem(allowedKey) === '1';
+  } catch {
+    allowed = false;
+  }
+  let connected = 0;
+  const showUsbStatus = () => {
+    $('camera-status').textContent = connected ? 'Lytro camera connected' : '';
+    $('camera-status').classList.toggle('connected', connected > 0);
+    $('usb-watch-btn').hidden = allowed;
+  };
+  const promptImport = () => {
+    if (document.querySelector('dialog[open]')) return;
+    $('camera-select-row').hidden = true;
+    $('camera-dest').hidden = true;
+    $('camera-choose').hidden = false;
+    $('camera-dialog-source').textContent = 'Lytro camera connected. Choose its drive (or the DCIM folder on it) to see the photos.';
+    showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
+  };
+  navigator.usb.addEventListener('connect', (e) => {
+    if (!isLytro(e.device)) return;
+    connected++;
+    showUsbStatus();
+    promptImport();
+  });
+  navigator.usb.addEventListener('disconnect', (e) => {
+    if (!isLytro(e.device)) return;
+    connected = Math.max(0, connected - 1);
+    showUsbStatus();
+  });
+  navigator.usb.getDevices().then((devices) => {
+    connected = devices.filter(isLytro).length;
+    if (connected) allowed = true;
+    showUsbStatus();
+  }).catch(() => showUsbStatus());
+  $('usb-watch-btn').onclick = async () => {
+    try {
+      const device = await navigator.usb.requestDevice({ filters: [{ vendorId: LYTRO_USB_VENDOR }] });
+      allowed = true;
+      try {
+        localStorage.setItem(allowedKey, '1');
+      } catch {
+        // Only hides the button next time.
+      }
+      if (isLytro(device)) connected = Math.max(connected, 1);
+      showUsbStatus();
+      showNotice('ILLUMinator will now notice when this camera is plugged in.');
+      startNoticeTimer();
+    } catch (err) {
+      if (err.name !== 'NotFoundError') showError(err);
+    }
+  };
+}
+$('camera-choose').onclick = () => importFromCameraFolder();
 
 // Test hook: ?sample opens the synthetic sample on load.
 if (new URLSearchParams(location.search).has('sample')) $('sample-btn').click();
