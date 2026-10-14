@@ -1,0 +1,42 @@
+# Publishes the browser version on GitHub Pages
+# (https://abstractpolygon.github.io/ILLUMinator/), the site's "Try online":
+# after every successful desktop build, and on demand (Actions → Run
+# workflow). Pages must be set to deploy from GitHub Actions once:
+# Settings → Pages → Source: GitHub Actions.
+name: Web app on GitHub Pages
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Build desktop apps']
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: node scripts/build-web.mjs --out dist/web
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/web
+      - id: deploy
+        uses: actions/deploy-pages@v4
