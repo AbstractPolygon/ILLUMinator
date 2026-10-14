@@ -741,6 +741,29 @@
         </details>
         <details class="subpanel">
           <summary><h3>Video</h3></summary>
+          <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
+            <select id="video-format">
+              <option value="webm" selected>WebM</option>
+              <option value="mp4">MP4</option>
+            </select>
+          </label>
+          <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
+            <select id="video-codec">
+              <option value="vp9" selected>VP9</option>
+              <option value="vp8">VP8</option>
+              <option value="h264">H.264</option>
+              <option value="h265">H.265 (HEVC)</option>
+              <option value="av1">AV1</option>
+            </select>
+          </label>
+          <label title="Higher quality keeps more detail and makes bigger files (bitrate at 1080p; larger sizes get more)">Quality
+            <select id="video-quality">
+              <option value="low">Low (4 Mbit/s)</option>
+              <option value="medium">Medium (8 Mbit/s)</option>
+              <option value="high" selected>High (16 Mbit/s)</option>
+              <option value="max">Maximum (40 Mbit/s)</option>
+            </select>
+          </label>
           <label title="The height of exported videos (their short side); frames are enlarged to it with the Upscaling settings">Size
             <select id="video-size">
               <option value="1080" selected>1080p</option>

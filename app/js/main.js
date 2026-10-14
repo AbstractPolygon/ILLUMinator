@@ -4,6 +4,7 @@ import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { upscaleImage } from './gpu/upscale.js';
+import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate } from './core/video-format.js';
 import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -4415,6 +4416,36 @@ function savePng() {
     showError(err);
   }
 }
+// Video: the compression kinds of the chosen file format, those this
+// browser cannot record marked and disabled.
+const canRecord = (t) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t);
+function showVideoCodecs() {
+  for (const o of $('video-format').options) {
+    const ok = VIDEO_FORMATS[o.value].codecs.some((c) => videoType(o.value, c, canRecord));
+    o.disabled = !ok;
+    o.textContent = VIDEO_FORMATS[o.value].name + (ok ? '' : ' (not available here)');
+  }
+  if ($('video-format').selectedOptions[0].disabled) {
+    const usable = [...$('video-format').options].find((o) => !o.disabled);
+    if (usable) $('video-format').value = usable.value;
+  }
+  const format = $('video-format').value;
+  const select = $('video-codec');
+  const fits = VIDEO_FORMATS[format].codecs;
+  for (const o of select.options) {
+    const ok = fits.includes(o.value) && !!videoType(format, o.value, canRecord);
+    o.hidden = !fits.includes(o.value);
+    o.disabled = !ok;
+    o.textContent = VIDEO_CODECS[o.value].name + (fits.includes(o.value) && !ok ? ' (not available here)' : '');
+  }
+  const current = select.selectedOptions[0];
+  if (!current || current.hidden || current.disabled) {
+    const first = fits.find((c) => videoType(format, c, canRecord)) || fits[0];
+    select.value = first;
+  }
+}
+$('video-format').addEventListener('change', showVideoCodecs);
+showVideoCodecs();
 $('upscale-sharpen').oninput = () => showSliderValue($('upscale-sharpen'));
 $('upscale-sharpen').ondblclick = () => {
   $('upscale-sharpen').value = $('upscale-sharpen').dataset.default;
@@ -4500,8 +4531,11 @@ async function exportVideo() {
     const nctx = native.getContext('2d');
     const opts = upscaleSettings();
     const stream = c.captureStream(state.fps);
-    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Math.round(12e6 * (c.width * c.height) / (1920 * 1080)) });
+    const pick = chooseVideoType($('video-format').value, $('video-codec').value, canRecord);
+    if (!pick) throw new Error('This browser cannot record video.');
+    const mime = pick.type;
+    if (pick.fallback) showNotice(`Recording as ${VIDEO_FORMATS[pick.format].name} ${VIDEO_CODECS[pick.codec].name}: this browser cannot record the chosen kind.`);
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: videoBitrate($('video-quality').value, c.width, c.height) });
     const chunks = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     const done = new Promise((r) => { recorder.onstop = r; });
@@ -4525,7 +4559,7 @@ async function exportVideo() {
     await new Promise((r) => setTimeout(r, 1000 / state.fps));
     recorder.stop();
     await done;
-    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const ext = VIDEO_FORMATS[pick.format].ext;
     download(new Blob(chunks, { type: mime }), `${baseName()}-${$('anim').value}.${ext}`);
   } catch (err) {
     showError(err);
@@ -4978,6 +5012,7 @@ async function restoreEdits(info) {
     state.customFps = false;
     showFrameRate();
     showAnimationEnabled();
+    showVideoCodecs();
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;
     renderMasks();
