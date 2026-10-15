@@ -1402,19 +1402,17 @@ function showLensSampling(msg, scale) {
   const patch = $('lens-patch');
   const cctx = cov.getContext('2d');
   const pctx = patch.getContext('2d');
-  for (const id of ['lens-patch', 'lens-patch-title', 'lens-patch-note']) $(id).hidden = false;
+  for (const id of ['lens-patch', 'lens-patch-title']) $(id).hidden = false;
   // Coverage: the splat weight each output pixel gets, against the mean.
   const { cw, ch } = msg;
   const data = new Float32Array(msg.coverage);
   let sum = 0;
   for (const v of data) sum += v;
   const mean = sum / data.length || 1;
-  let thin = 0;
   const img = new ImageData(cw, ch);
   const STOPS = [[18, 12, 28], [150, 40, 60], [230, 120, 40], [240, 210, 90], [250, 250, 225]];
   for (let i = 0; i < data.length; i++) {
     const t = Math.min(1, data[i] / mean / 2);
-    if (data[i] < 0.5 * mean) thin++;
     const f = t * (STOPS.length - 1);
     const k = Math.min(STOPS.length - 2, Math.floor(f));
     const a = f - k;
@@ -1441,14 +1439,12 @@ function showLensSampling(msg, scale) {
   const tmp = Object.assign(document.createElement('canvas'), { width: cw, height: ch });
   tmp.getContext('2d').putImageData(img, 0, 0);
   place(cctx, tmp, 0, 0, cw, ch);
-  const px = msg.bin > 1 ? `${cw * msg.bin}×${ch * msg.bin} pixels of a ${scale}× render, in ${msg.bin}×${msg.bin} blocks` : `${cw}×${ch} pixels of a ${scale}× render`;
-  $('lens-coverage-note').textContent = `${px}. Dark: few samples (filled in from the standard picture); ${Math.round((100 * thin) / data.length)}% get less than half the average.`;
 
   // The same part of the last full sensor render, or else of the picture.
   const still = state.lensStill;
   const src = still ? still.img : state.lensPicture;
   if (!src) {
-    for (const id of ['lens-patch', 'lens-patch-title', 'lens-patch-note']) $(id).hidden = true;
+    for (const id of ['lens-patch', 'lens-patch-title']) $(id).hidden = true;
     return;
   }
   const k = src.width / msg.baseW;
@@ -1462,9 +1458,6 @@ function showLensSampling(msg, scale) {
   }
   place(pctx, drawable, bx0 * k, by0 * k, sw, sh);
   $('lens-patch-title').textContent = still ? `Last Full sensor render (${still.scale}×)` : 'Camera view';
-  $('lens-patch-note').textContent = still
-    ? `${Math.round(sw)}×${Math.round(sh)} pixels of the render.`
-    : 'Render with Full sensor in the camera view to compare its pixels here.';
 }
 
 // ---------------------------------------------------------------- modes
