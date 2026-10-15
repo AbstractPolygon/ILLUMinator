@@ -168,7 +168,7 @@ function renderLibrary() {
     const img = url ? Object.assign(document.createElement('img'), { src: url, alt: '' }) : Object.assign(document.createElement('div'), { className: 'noimg' });
     const name = document.createElement('span');
     name.textContent = photo.name;
-    const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Albums, delete' });
+    const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Albums, copy and paste settings, delete' });
     more.setAttribute('aria-label', `Actions for ${photo.name}`);
     more.setAttribute('aria-haspopup', 'menu');
     more.onclick = (e) => {
@@ -305,7 +305,7 @@ function renderGrid(photos, album) {
     const url = thumbFor(photo);
     if (url) frame.append(Object.assign(document.createElement('img'), { src: url, alt: '' }));
     const name = Object.assign(document.createElement('div'), { className: 'name', textContent: photo.name, title: photo.name });
-    const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Albums, delete' });
+    const more = Object.assign(document.createElement('button'), { className: 'more', type: 'button', textContent: '•••', title: 'Albums, copy and paste settings, delete' });
     more.setAttribute('aria-label', `Actions for ${photo.name}`);
     more.setAttribute('aria-haspopup', 'menu');
     more.onclick = (e) => {
@@ -418,6 +418,7 @@ function fillMenu(items) {
     b.setAttribute('role', it.checked === undefined ? 'menuitem' : 'menuitemcheckbox');
     if (it.checked !== undefined) b.setAttribute('aria-checked', String(it.checked));
     if (it.danger) b.classList.add('danger');
+    if (it.disabled) b.disabled = true;
     if (it.checked !== undefined) b.append(Object.assign(document.createElement('span'), { className: 'tick', textContent: it.checked ? '✓' : '' }));
     b.append(document.createTextNode(it.label));
     b.onclick = async (e) => {
@@ -459,6 +460,41 @@ document.addEventListener('keydown', (e) => {
 }, true);
 window.addEventListener('resize', closeMenu);
 
+// Copy settings / Paste settings (a photo's ••• menu): every setting of one
+// photo onto another, except where it was focused by clicking and its
+// viewpoint, which belong to the scene.
+let copiedSettings = null;
+async function copySettings(photo) {
+  let edits;
+  if (state.current && state.current.photo === photo && state.info) {
+    flushSave();
+    edits = currentEdits();
+  } else {
+    edits = await lib.loadEdits(photo);
+    if (edits && edits.reset) edits = null;
+  }
+  copiedSettings = { id: photo.id, name: photo.name, edits: edits ? JSON.parse(JSON.stringify(edits)) : null };
+}
+async function pasteSettings(photo) {
+  if (!copiedSettings) return;
+  const open = state.current && state.current.photo === photo && state.info;
+  const { view, focusPoint, ...rest } = copiedSettings.edits || { format: EDITS_FORMAT, version: EDITS_VERSION };
+  const mine = open ? { view: { ...state.camera }, focusPoint: { ...state.focusPoint } } : (await lib.loadEdits(photo)) || {};
+  const edits = { ...rest, photo: { id: photo.id, name: photo.name }, view: mine.view, focusPoint: mine.focusPoint, modified: new Date().toISOString() };
+  if (!copiedSettings.edits) {
+    // Copied from a photo never edited: its defaults.
+    for (const group of Object.keys(DEFAULT_EDITS || {})) edits[group] = DEFAULT_EDITS[group];
+  }
+  if (open) {
+    flushSave();
+    await applyEdits(state.info, edits);
+    // One undo step, saved like any change.
+    scheduleSave();
+  } else {
+    await lib.saveEdits(photo, edits);
+  }
+}
+
 function photoMenu(photo, button) {
   const items = [];
   items.push({ heading: 'Albums' });
@@ -476,6 +512,12 @@ function photoMenu(photo, button) {
   }
   items.push({ label: 'New album…', action: () => newAlbum([photo.id]) });
   items.push('-');
+  items.push({ label: 'Copy settings', action: () => copySettings(photo) });
+  items.push({
+    label: copiedSettings ? `Paste settings from ${copiedSettings.name}…` : 'Paste settings',
+    disabled: !copiedSettings || copiedSettings.id === photo.id,
+    action: () => confirmInMenu(`Replace the settings of ${photo.name} with those copied from ${copiedSettings.name}?`, 'Paste', () => pasteSettings(photo)),
+  });
   items.push({
     label: 'Reset settings…',
     action: () => confirmInMenu(`Reset every setting of ${photo.name}? Its adjustments, keyframes and local adjustments go back to how a newly opened photo starts.`, 'Reset', () => resetPhotoSettings(photo)),
