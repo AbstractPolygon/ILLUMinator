@@ -19,9 +19,9 @@ import { makeDetail, applyDetail } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
-import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt } from './core/superres.js';
+import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
-import { parseHotPixels } from './core/calibration.js';
+import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
@@ -316,7 +316,9 @@ function rebuildSampler() {
   state.gen++;
   state.refocusViews = null;
   state.vignetting = null;
-  state.lensOffsets = null;
+  // From the camera's calibration when it has the white image for this photo
+  // (else measured from the photo at the first full render).
+  state.lensOffsets = lf.raw ? calibratedLensOffsets() : null;
   state.depth = null;
   state.depthRaw = null;
   if (state.gpu) {
@@ -744,6 +746,27 @@ async function setCalibrations({ list }) {
   calibrations.clear();
   for (const c of list) calibrations.set(c.serial, c);
   return true;
+}
+
+// A white image measured in the import (core/calibration.js): the camera's
+// real lens centers at one zoom and focus, used for the photos made with it.
+async function measureWhiteImage({ id, bytes, meta }) {
+  const m = measureWhite(new Uint8Array(bytes), meta);
+  post({ id, type: 'result', result: m }, [m.off.buffer]);
+  return undefined;
+}
+
+// Lens centers for the open photo from the white image of its camera's
+// calibration (matched by the geometry file's SHA-1), or null.
+function calibratedLensOffsets() {
+  const { lf } = state;
+  const serial = lf.privateMetadata && lf.privateMetadata.camera && lf.privateMetadata.camera.serialNumber;
+  const cal = serial && calibrations.get(String(serial));
+  const ref = lf.geometryRef && String(lf.geometryRef).replace(/^sha1-/i, '').toLowerCase();
+  const white = cal && ref && (cal.whites || []).find((w) => w.gct === ref);
+  if (!white) return null;
+  const table = lensTable(lf.grid, lf.cam);
+  return whiteOffsets(white, lf.grid, table) > 1000 ? table : null;
 }
 
 // The pixels the open photo's camera lists as defective (null when its
@@ -1339,7 +1362,7 @@ async function setLut({ lut }) {
   return null;
 }
 
-const handlers = { setLut, setCalibrations, open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

@@ -2112,7 +2112,7 @@ async function showCalibrations() {
   for (const k of kept) {
     const li = document.createElement('li');
     const name = document.createElement('span');
-    name.textContent = `Camera ${k.serial}${k.hotPixels ? ' · hot pixel list' : ''}`;
+    name.textContent = `Camera ${k.serial}${k.hotPixels ? ' · hot pixel list' : ''}${k.whites && k.whites.length ? ` · ${k.whites.length} white images` : ''}`;
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'link';
@@ -2135,9 +2135,12 @@ async function addCalibration(source) {
   try {
     const info = await importCalibration(source, lib.store, {
       onProgress: (p, name) => { $('cal-note').textContent = `Reading ${name}…`; },
+      // The white images are measured in the render worker.
+      measure: (bytes, meta) => engine.request('measureWhite', { bytes: bytes.buffer, meta }, { transfer: [bytes.buffer] }),
     });
     $('cal-note').textContent = `Added camera ${info.serial}: ${info.saved} files kept` +
-      (info.hotPixels ? ', including its hot pixel list' : '') +
+      (info.hotPixels ? `, its hot pixel list` : '') +
+      (info.whites.length ? ` and ${info.whites.length} white images` : '') +
       '. Photos from this camera use it the next time they are opened.';
     await showCalibrations();
   } catch (err) {

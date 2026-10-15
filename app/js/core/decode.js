@@ -22,6 +22,8 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
   const result = {
     metadata: picture ? picture.metadata : null,
     privateMetadata: picture ? picture.privateMetadata : null,
+    // Names the camera's geometry calibration file (its SHA-1) the photo was made with.
+    geometryRef: picture && picture.frame ? picture.frame.geometryCorrectionRef || null : null,
     stacks: picture ? picture.stacks : [],
     frameDepth: picture ? picture.frameDepth : null,
     photoId: picture ? photoIdOf(picture.container) : null,

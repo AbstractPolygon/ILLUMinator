@@ -42,5 +42,4 @@ Every camera is calibrated at the factory, and the data is specific to that came
 
 The calibration is kept in your library and applies to every photo taken with the same camera, matched by the serial number stored in the photo. Photos open with it the next time they are opened. **Remove** in the same place deletes it.
 
-Today the camera's hot pixel list is used, together with the search that *Remove hot pixels* does. Lens grid and white image data are added next.
-
+The camera's hot pixel list is used together with the search that *Remove hot pixels* does. The white images (one for each zoom and focus setting, 34 in an ILLUM backup) are measured while the backup is added, which takes a minute or so: each shows where every lens really sits, and only those centers are kept, a few hundred kilobytes per image. A photo made with one of them uses its lens centers directly, so it skips the measuring step it otherwise needs at its first full-resolution render. Lens grid tables and focus tables are added next.

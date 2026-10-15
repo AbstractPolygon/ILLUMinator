@@ -43,7 +43,7 @@ test('a calibration backup is kept per camera: small files stored, big white ima
   const info = await importCalibration(blobOf(tar), store);
   assert.equal(info.serial, 'B5100');
   assert.equal(info.saved, 2);
-  assert.deepEqual(info.left.map((l) => l.name), ['MOD_0000.RAW']);
+  assert.deepEqual(info.left.map((l) => l.name), ['MOD_0000.RAW']); // no .TXT/.GCT with it: not usable
   assert.equal(info.hotPixels, true);
   assert.equal((await listCalibrations(store)).length, 1);
   const cal = await loadCalibration(store, 'B5100');
@@ -55,4 +55,27 @@ test('a calibration backup is kept per camera: small files stored, big white ima
 test('data without a camera serial number is refused', async () => {
   const tar = makeTar({ 'x/other.json': new TextEncoder().encode('{}') });
   await assert.rejects(importCalibration(blobOf(tar), memoryStorage()), /calibration/);
+});
+
+import { whiteOffsets, WHITE_SCALE } from '../app/js/core/calibration.js';
+import { lensTable } from '../app/js/core/superres.js';
+import { lensCenters } from '../app/js/core/lenslet.js';
+
+test('white image offsets fill a photo\'s lens table and drop the shift all lenses share', () => {
+  const cam = { width: 400, height: 300 };
+  const grid = { pitch: 14, rowStep: 14 * Math.sqrt(3) / 2, rotation: 0, ox: 200, oy: 150 };
+  const lc = lensCenters(grid, cam.width, cam.height);
+  const off = new Int8Array(lc.rows * lc.cols * 2);
+  // every lens 0.25 px right of its grid place, one of them a further 0.5 px
+  for (let i = 0; i < lc.rows * lc.cols; i++) off[2 * i] = Math.round(0.25 * WHITE_SCALE);
+  const k = 40;
+  off[2 * k] += Math.round(0.5 * WHITE_SCALE);
+  const white = { grid, r0: lc.r0, c0: lc.c0, rows: lc.rows, cols: lc.cols, off };
+  const table = lensTable(grid, cam);
+  const n = whiteOffsets(white, grid, table);
+  assert.ok(n > 100);
+  const ti = (k / lc.cols | 0) * table.cols + (k % lc.cols) + (lc.c0 - table.c0) + (lc.r0 - table.r0) * table.cols;
+  assert.ok(Math.abs(table.dx[ti] - 0.5) < 0.02, `outlier lens off by ${table.dx[ti]}`);
+  assert.ok(Math.abs(table.dx[ti + 1]) < 0.02);
+  assert.ok(Math.abs(table.dy[ti]) < 0.02);
 });
