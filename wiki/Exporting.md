@@ -2,7 +2,7 @@
 
 From the **Render Settings** section and the buttons below it:
 
-- **Quick export:** the export icon in the bar above the picture, next to Camera and Lenslets, opens a popup with the Photo and Video settings (*Size*, *File format*, *JPEG quality*; *Size*, *Compression*, *File format*, *Quality*) and the *Save* and *Export video* buttons. They are the same settings as under Render Settings: a change in either place shows in the other.
+- **Quick export:** the export icon in the bar above the picture, next to Camera and Lenslets, opens a popup. Choose *Photo* or *Video* at the top; the popup then lists only that kind's settings, one per row: its Photo or Video settings, Quality, Upscaling and 3D. *Save* (or *Export video*) is at the bottom right, *Close* at the bottom left. They are the same settings as under Render Settings: a change in either place shows in the other.
 
 - **Save PNG / Save JPEG** (Photo): the picture as shown, as a PNG or a JPEG (Photo *File format*, with *JPEG quality*), with all edits, crop, rotation and LUT, enlarged by the Photo *Size* (Native saves it as rendered).
 - **Full sensor:** turn it on (or press F), choose a *Scale* and *Detail recovery*, then *Render*. The still uses every pixel the sensor recorded, several times the resolution of the live picture. *Save PNG* (or *Save JPEG*) then saves the full sensor still.

@@ -4,18 +4,21 @@ The *Render Settings* section of the sidebar (3D, Quality, Upscaling, Photo and 
 
 ## 3D
 
-A stereo pair from two viewpoints across the lens.
+A stereo pair from two viewpoints across the lens, for photos and videos.
 
 - *Show 3D* shows the picture in 3D while you edit.
-- *3D type:* *Anaglyph* (red / cyan glasses), *Side by side* (parallel viewing) or *Cross-eyed*.
+- *3D type:* *Anaglyph* (red / cyan glasses), *Side by side* (parallel viewing), *Cross-eyed* or *VR headset* (side by side at full size for headsets such as the Meta Quest 3; files get `_3D_SBS` in their names so headset players recognize them).
 - *Baseline:* how far apart the two viewpoints are.
-- *Save 3D image* saves the pair as an image, in the Photo *File format*.
+- *Save 3D image* saves the pair as an image, in the Photo *File format*. With *Show 3D* on, *Export video* makes a 3D video in the same 3D type.
+- *View in VR* (in a headset's web browser, such as the Meta Quest Browser, with the browser version) shows the 3D picture on a large screen in front of you; press a controller trigger to leave.
 
 ## Quality
 
+These apply to photos and videos alike.
+
 - *High quality depth map:* sharper depth edges that match the photo, about twice as slow to measure. Off, the faster depth map is used.
-- *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
-- *Full sensor* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it; The still is shown at the Photo *Size*, enlarged with the Upscaling settings, just as it will be saved; *Save PNG* then saves it. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
+- *Resolution:* the picture's resolution, 1× (fast), 1.5× or 2×, for editing, photos and every video frame.
+- *Full sensor* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it. The still is shown at the Photo *Size*, enlarged with the Upscaling settings, just as it will be saved; *Save PNG* then saves it. With *Full sensor* on, *Export video* renders every frame this way too (much slower). With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Upscaling
 
@@ -33,7 +36,7 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 
 Photo and Video are the last two subsections of *Render Settings*. Below Render Settings, always shown: *Render*, *Auto render*, *Save PNG* and *Export video*.
 
-- *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings.
+- *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings. Each option shows the size in pixels it gives.
 - *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.
 - *Save PNG* (or *Save JPEG*), below the Render button, saves the picture as shown, at that size.
 
