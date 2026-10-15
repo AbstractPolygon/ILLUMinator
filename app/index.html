@@ -720,6 +720,20 @@
             </select>
           </label>
           <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
+        </details>
+        <details class="subpanel">
+          <summary><h3>Upscaling</h3></summary>
+          <label title="How saved photos, 3D images and video frames are enlarged to their Size: Lanczos keeps edges crisp; Smooth is softer; FSR 1 follows edges and sharpens with the Sharpen setting">Method
+            <select id="upscale-method">
+              <option value="lanczos" selected>Lanczos (sharp)</option>
+              <option value="smooth">Smooth</option>
+              <option value="fsr">FSR 1 (AMD, crisp edges)</option>
+            </select>
+          </label>
+          <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none">Sharpen <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
+            <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
+          </label>
+          <p class="hint">Used for photos and video. Enlarging adds pixels, not detail. For the most detail, turn on Full resolution.</p>
           <div class="stack">
             <label class="check" title="Full resolution on/off (F)"><input id="fullres-on" type="checkbox"> Full resolution</label>
             <div id="fullres-panel" hidden>
@@ -739,20 +753,6 @@
               </label>
             </div>
           </div>
-        </details>
-        <details class="subpanel">
-          <summary><h3>Upscaling</h3></summary>
-          <label title="How saved photos, 3D images and video frames are enlarged to their Size: Lanczos keeps edges crisp; Smooth is softer; FSR 1 follows edges and sharpens with the Sharpen setting">Method
-            <select id="upscale-method">
-              <option value="lanczos" selected>Lanczos (sharp)</option>
-              <option value="smooth">Smooth</option>
-              <option value="fsr">FSR 1 (AMD, crisp edges)</option>
-            </select>
-          </label>
-          <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none">Sharpen <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
-            <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
-          </label>
-          <p class="hint">Used for photos and video. Enlarging adds pixels, not detail. For the most detail, turn on Full resolution under Quality.</p>
         </details>
         <details class="subpanel">
           <summary><h3>Photo</h3></summary>
@@ -777,6 +777,7 @@
         </details>
         <details class="subpanel">
           <summary><h3>Video</h3></summary>
+          <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
             <select id="video-size">
               <option value="1080" selected>1080p</option>
               <option value="1440">1440p</option>
@@ -791,6 +792,7 @@
               </optgroup>
             </select>
           </label>
+          <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
             <select id="video-codec">
               <option value="vp9" selected>VP9</option>
               <option value="vp8">VP8</option>
@@ -799,14 +801,12 @@
               <option value="av1">AV1</option>
             </select>
           </label>
+          <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
             <select id="video-format">
               <option value="webm" selected>WebM</option>
               <option value="mp4">MP4</option>
             </select>
           </label>
-          <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
-          <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
-          <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
           <label title="The video's bitrate: higher keeps more detail and makes bigger files">Quality <output data-for="video-quality" for="video-quality">16 Mbit/s</output>
             <input id="video-quality" type="range" min="1" max="40" step="1" value="16" data-default="16">
           </label>

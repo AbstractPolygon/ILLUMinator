@@ -941,7 +941,7 @@ async function renderCamera() {
 function refresh() {
   if (!state.info) return;
   if (state.mode === 'lenslets') renderLenslets();
-  else if (state.fullRes && state.still) draw(state.still);
+  else if (state.fullRes && state.still) draw(stillView());
   else if (state.fullRes) renderStill();
   else if (state.depthShown) renderDepth();
   else if (state.showingFrames) showFrame(state.index);
@@ -1154,6 +1154,38 @@ function backToCamera() {
 
 // ---------------------------------------------------------------- full resolution, depth
 
+// The rendered still at Render > Photo > Size, enlarged with the Upscaling
+// settings (kept until the still or those settings change).
+let stillCache = null;
+function stillView() {
+  const still = state.still;
+  const k = +$('photo-size').value || 1;
+  if (!still || k === 1) return still;
+  const key = [k, $('upscale-method').value, $('upscale-sharpen').value];
+  if (stillCache && stillCache.still === still && stillCache.key.join() === key.join()) return stillCache.img;
+  const big = upscaleImage(still, Math.round(still.width * k), Math.round(still.height * k), upscaleSettings());
+  // The upscaler draws on a canvas it reuses: keep a copy.
+  const img = document.createElement('canvas');
+  img.width = big.width;
+  img.height = big.height;
+  img.getContext('2d').drawImage(big, 0, 0);
+  stillCache = { still, key, img };
+  return img;
+}
+
+function showStill() {
+  const img = stillView();
+  if (!img) return;
+  draw(img);
+  $('frame-label').textContent = `${img.width}×${img.height}`;
+}
+// Size and Upscaling apply to a rendered still straight away.
+for (const id of ['photo-size', 'upscale-method', 'upscale-sharpen']) {
+  $(id).addEventListener('change', () => {
+    if (state.fullRes && state.still) showStill();
+  });
+}
+
 async function renderStill() {
   const scale = +$('still-scale').value;
   try {
@@ -1163,8 +1195,7 @@ async function renderStill() {
     // Ignore a result that arrives after full resolution was switched off.
     if (msg && (msg.pixels || msg.bitmap) && state.fullRes) {
       state.still = toImageData(msg);
-      draw(state.still);
-      $('frame-label').textContent = `${msg.width}×${msg.height}`;
+      showStill();
     }
   } catch (err) {
     showError(err);
@@ -4480,10 +4511,10 @@ function enlargeForSave(source) {
 }
 
 // Photo > File format: PNG, or JPEG at its quality.
-function savePhoto(source, name) {
+function savePhoto(source, name, { enlarge = true } = {}) {
   const jpeg = $('photo-format').value === 'jpeg';
   const type = jpeg ? 'image/jpeg' : 'image/png';
-  enlargeForSave(source).toBlob((blob) => download(blob, `${name}.${jpeg ? 'jpg' : 'png'}`), type, jpeg ? +$('photo-quality').value / 100 : undefined);
+  (enlarge ? enlargeForSave(source) : source).toBlob((blob) => download(blob, `${name}.${jpeg ? 'jpg' : 'png'}`), type, jpeg ? +$('photo-quality').value / 100 : undefined);
 }
 
 function showPhotoFormat() {
@@ -4501,7 +4532,8 @@ $('photo-quality').ondblclick = () => {
 
 function savePng() {
   try {
-    savePhoto(canvas, baseName());
+    // A rendered still is already at the Photo Size.
+    savePhoto(canvas, baseName(), { enlarge: !(state.fullRes && state.still) });
   } catch (err) {
     showError(err);
   }

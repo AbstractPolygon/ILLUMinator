@@ -13,7 +13,6 @@ A stereo pair from two viewpoints across the lens.
 
 - *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
 - *High quality depth map:* sharper depth edges that match the photo, about twice as slow to measure. Off, the faster depth map is used.
-- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, at the bottom of the panel below *Video*, starts it. With *Auto render* (under *Render*) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Upscaling
 
@@ -22,6 +21,8 @@ Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*
 - *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's own sharpening. It has no effect at *Native* size.
 
 Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.
+
+- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, at the bottom of the panel below *Video*, starts it, and the still is shown at the Photo *Size*, enlarged with these Upscaling settings; *Save PNG* saves it as shown. With *Auto render* (under *Render*) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Speed
 
