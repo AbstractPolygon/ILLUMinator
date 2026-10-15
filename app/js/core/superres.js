@@ -147,10 +147,12 @@ function sampleBilinear(img, w, h, x, y) {
 // Output size and splat settings of a full resolution render (shared with
 // the GPU version in gpu/renderer.js).
 export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, sigma, aperture } = {}) {
-  // At higher output scales there are fewer samples per output pixel; use a
-  // little more of each lens and wider splats so they still cover evenly.
+  // At higher output scales there are fewer samples per output pixel; wider
+  // splats keep them covering evenly.
   sigma ??= 0.6 * Math.max(1, scale / 3);
-  aperture ??= scale >= 4 ? 0.42 : 0.38;
+  // 0.45 of each lens disc: measured against Lytro Desktop's pictures, more
+  // of the fine detail they show and less noise than 0.38.
+  aperture ??= 0.45;
   const { grid: g, outW, outH, detail } = sampler;
   const rUse = g.pitch * aperture;
   return {
@@ -279,8 +281,26 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       const dv = v - v0;
       const conf = (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
       if (conf < 1e-3) return;
-      const ox = ((lensX - xMin) / unit - lensAlpha * du) * scale;
-      const oy = ((lensY - yMin) / unit - lensAlpha * dv) * scale;
+      const lx = (lensX - xMin) / unit;
+      const ly = (lensY - yMin) / unit;
+      let rayAlpha = lensAlpha;
+      if (allInFocus && depth) {
+        // Every ray takes the depth of the surface it meets, not the one
+        // under its lens: at an edge a lens sees both sides (Lytro's
+        // extended depth of field projection). Where a ray's depth does not
+        // settle it meets two surfaces: the nearer one wins if the ray
+        // lands on it, else the farther.
+        const at = (a) => sampleBilinear(depth, bw, bh, (lx - a * du) * detail, (ly - a * dv) * detail);
+        const a1 = at(rayAlpha);
+        const a2 = at(a1);
+        if (Math.abs(a2 - a1) <= RAY_DEPTH_TOLERANCE) rayAlpha = a2;
+        else {
+          const near = Math.min(a1, a2);
+          rayAlpha = Math.abs(at(near) - near) <= RAY_DEPTH_TOLERANCE ? near : Math.max(a1, a2);
+        }
+      }
+      const ox = (lx - rayAlpha * du) * scale;
+      const oy = (ly - rayAlpha * dv) * scale;
       const px = Math.round(ox);
       const py = Math.round(oy);
       if (px < reach || py < reach || px >= W - reach || py >= H - reach) return;
@@ -347,6 +367,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // lens's samples spread (in lens spacings): 0 below COVER_LOW, 1 above
 // COVER_HIGH.
 const COVER_LOW = 0.35;
+// How far (in focus units) a ray's depth may still move after two steps of
+// following it to the surface it meets; beyond that it is left out.
+export const RAY_DEPTH_TOLERANCE = 0.08;
 const COVER_HIGH = 0.9;
 export function coverage(spread) {
   const t = Math.min(1, Math.max(0, (spread - COVER_LOW) / (COVER_HIGH - COVER_LOW)));

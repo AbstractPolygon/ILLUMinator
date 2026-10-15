@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1127,6 +1127,17 @@ void main() {
   if (conf < 1e-3) return;
   vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
   float alpha = uAllInFocus == 1 ? depthAt(lens * uDetail) : uAlpha;
+  if (uAllInFocus == 1) {
+    // Each ray at the depth of the surface it meets (core/superres.js).
+    float a1 = depthAt((lens - alpha * vec2(du, dv)) * uDetail);
+    float a2 = depthAt((lens - a1 * vec2(du, dv)) * uDetail);
+    if (abs(a2 - a1) <= ${RAY_DEPTH_TOLERANCE.toFixed(3)}) alpha = a2;
+    else {
+      // Two surfaces: the nearer wins if the ray lands on it.
+      float nearA = min(a1, a2);
+      alpha = abs(depthAt((lens - nearA * vec2(du, dv)) * uDetail) - nearA) <= ${RAY_DEPTH_TOLERANCE.toFixed(3)} ? nearA : max(a1, a2);
+    }
+  }
   vec2 o = (lens - alpha * vec2(du, dv)) * uOutScale;
   ivec2 pp = ivec2(floor(o + 0.5));
   if (pp.x < uReach || pp.y < uReach || pp.x >= uOutSize.x - uReach || pp.y >= uOutSize.y - uReach) return;

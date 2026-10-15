@@ -13,23 +13,26 @@
 
 // Exposure applied to linear color before the curve (ev 0).
 export const LYTRO_EXPOSURE = 1.46;
+// A slight balance of the linear color before the curve (red, green, blue):
+// without it the look leans yellow-green on grays next to Lytro Desktop's.
+export const LYTRO_BALANCE = [1.0084, 0.9893, 1.0810];
 // Color after the curve, per hue: for 12 hues around the opponent plane
 // (u = (R - G) / sqrt 2, v = (R + G - 2B) / sqrt 6; 30 degrees is red, 90
 // yellow, 150 green, 210 cyan, 270 blue, 330 magenta) the factor [re, im]
 // that scales and turns a color's offset from gray there.
 export const LYTRO_HUE = [
-  [0.855, -0.222],
-  [0.839, -0.081],
-  [0.807, -0.089],
-  [0.824, -0.131],
-  [0.838, -0.214],
-  [0.860, 0.000],
-  [0.966, 0.098],
-  [1.060, 0.026],
-  [1.034, 0.008],
-  [0.888, 0.002],
-  [0.634, -0.094],
-  [0.719, -0.249],
+  [0.839, -0.076],
+  [0.793, -0.073],
+  [0.714, -0.066],
+  [0.920, -0.086],
+  [1.020, -0.094],
+  [0.976, -0.088],
+  [0.940, -0.084],
+  [0.946, -0.083],
+  [0.927, -0.080],
+  [0.914, -0.079],
+  [0.898, -0.079],
+  [0.874, -0.078],
 ];
 // Curve: encoded output (0..1) for linear input 2^x, x from CURVE_START in
 // steps of CURVE_STEP.

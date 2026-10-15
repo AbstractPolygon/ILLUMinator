@@ -10,7 +10,7 @@ import {
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { userDepthAlpha } from './core/userdepth.js';
-import { LYTRO_EXPOSURE } from './core/base.js';
+import { LYTRO_EXPOSURE, LYTRO_BALANCE } from './core/base.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -157,7 +157,8 @@ function updateColor() {
   state.lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
   const ccm = colorMatrix(lf.cam, state.lytro ? { ...s, saturation: 1 } : s);
   // Fold the white balance gains into the matrix columns.
-  state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
+  // The Lytro Desktop look balances the result slightly (core/base.js).
+  state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3] * (state.lytro ? LYTRO_BALANCE[Math.floor(i / 3)] : 1));
   // Reduce flare: the veil is measured once on the center view.
   const { outW, outH } = state.sampler;
   if (!(s.flare && s.flare.on)) state.veil = null;
@@ -192,7 +193,7 @@ function colorState(color) {
   }
   const gains = auto.map((g, i) => g * manual[i]);
   const lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
-  const matrix = colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3]);
+  const matrix = colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3] * (lytro ? LYTRO_BALANCE[Math.floor(i / 3)] : 1));
   // The veil is measured once (with Reduce flare on); its amount animates.
   const veil = s.flare && s.flare.on ? state.veil : null;
   const veilAmount = veil ? s.flare.amount : 0;
@@ -528,6 +529,41 @@ function refocusRGB(alpha, opts) {
   return refocus(state.refocusViews, state.sampler.outW, state.sampler.outH, alpha, { ...opts, ring: state.refocusViews.ring, clip: state.dev.clip });
 }
 
+// Every depth in focus at view size, as Lytro Desktop's pictures are: the
+// views refocused at steps across the photo's depth range, each pixel taken
+// from the two steps around its own depth. A single view alone leaves what
+// is far from the camera's focus (a fence just in front of the lens) soft.
+const FOCUS_STEP = 0.15;
+async function allInFocusBase(id, u, v) {
+  if (!state.depth || !(await ensureRefocusViews(id))) return equalize(render(u, v));
+  const depth = state.depth.alpha;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const d of depth) {
+    if (d < lo) lo = d;
+    if (d > hi) hi = d;
+  }
+  const steps = Math.max(1, Math.min(32, Math.ceil((hi - lo) / FOCUS_STEP)));
+  const step = (hi - lo) / steps || 1;
+  const n = depth.length;
+  const out = new Float32Array(n * 3);
+  const opts = apertureOptions({ u, v, aperture: 1 });
+  for (let k = 0; k <= steps; k++) {
+    const a = lo + k * step;
+    const rgb = refocusRGB(a, opts);
+    for (let i = 0; i < n; i++) {
+      const w = 1 - Math.abs((depth[i] - a) / step);
+      if (w <= 0) continue;
+      out[3 * i] += w * rgb[3 * i];
+      out[3 * i + 1] += w * rgb[3 * i + 1];
+      out[3 * i + 2] += w * rgb[3 * i + 2];
+    }
+    post({ id, type: 'progress', stage: 'Focusing every depth', progress: (k + 1) / (steps + 1) });
+    await tick();
+  }
+  return out;
+}
+
 // Synthetic aperture options from a request: viewpoint (u, v) and aperture
 // size as a fraction of the lens aperture (0 = a single view).
 function apertureOptions({ u = 0, v = 0, aperture = 1 }) {
@@ -587,7 +623,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   if (!(await ensureDepth(id))) return { cancelled: true };
   const allInFocus = aperture <= 0;
   const opts = apertureOptions({ u, v, aperture });
-  const base = allInFocus ? equalize(render(u, v)) : refocusRGB(alpha, opts);
+  const base = allInFocus ? await allInFocusBase(id, u, v) : refocusRGB(alpha, opts);
   if (state.gpu) {
     // The whole render on the GPU: the picture stays there for the color pass.
     progress('Rendering from the full sensor', 0);
