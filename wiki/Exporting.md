@@ -1,6 +1,6 @@
 # Exporting
 
-From the **Photo**, **Video** and **Render Settings** sections and the buttons below them:
+From the **Render Settings** section and the buttons below it:
 
 - **Save PNG / Save JPEG** (Photo): the picture as shown, as a PNG or a JPEG (Photo *File format*, with *JPEG quality*), with all edits, crop, rotation and LUT, enlarged by the Photo *Size* (Native saves it as rendered).
 - **Full resolution:** turn it on (or press F), choose a *Scale* and *Detail recovery*, then *Render*. The still uses every pixel the sensor recorded, several times the resolution of the live picture. *Save PNG* (or *Save JPEG*) then saves the full resolution still.

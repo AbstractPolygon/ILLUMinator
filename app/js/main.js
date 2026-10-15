@@ -4467,8 +4467,8 @@ function baseName() {
   return state.current ? state.current.name.replace(/\.[^.]+$/, '') : 'lytro';
 }
 
-// Saved photos and 3D images are enlarged by Photo > Size, and video
-// frames to Video > Size, both with Render Settings > Upscaling.
+// Saved photos and 3D images are enlarged by Render Settings > Photo >
+// Size, and video frames to Video > Size, both with Upscaling.
 function upscaleSettings() {
   return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
 }

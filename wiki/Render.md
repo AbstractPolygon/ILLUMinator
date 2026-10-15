@@ -1,6 +1,6 @@
 # Render
 
-The *Render Settings* section of the sidebar, with the *Photo* and *Video* sections above it and the Render, Save and Export buttons below it.
+The *Render Settings* section of the sidebar (3D, Quality, Upscaling, Photo and Video) and the Render, Save and Export buttons below it.
 
 ## 3D
 
@@ -31,7 +31,7 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 
 ## Photo
 
-Photo and Video are sections of their own in the sidebar, just above *Render Settings* (which holds 3D, Quality and Upscaling). Below Render Settings, always shown: *Render*, *Auto render*, *Save PNG* and *Export video*.
+Photo and Video are the last two subsections of *Render Settings*. Below Render Settings, always shown: *Render*, *Auto render*, *Save PNG* and *Export video*.
 
 - *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings.
 - *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.
