@@ -4669,13 +4669,13 @@ async function importFromCameraFolder() {
     rememberedFailed = false;
     rememberCameraFolder(result.dir);
   }
-  if (files.length) setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: source, files } });
+  if (files.length) setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: webCameraLabel(source), files } });
   $('camera-choose').hidden = false;
   $('camera-select-row').hidden = true;
   $('camera-dest').hidden = true;
   $('camera-dialog-source').textContent = files.length
     ? `${files.length} light field photo(s) found on ${source}.`
-    : `No .LFR files found on ${source}. Pick the camera drive or its DCIM folder.`;
+    : `No .LFR files found on ${source}. Open the camera's drive and choose its DCIM folder.`;
   showCameraDialog({
     files,
     thumb: (f) => readThumbnail(blobReader(f.file)),
@@ -4762,7 +4762,7 @@ function renderCameraSection() {
   $('camera-section-note').textContent = cam ? '' : note;
   $('camera-section-note').hidden = !!cam || !note;
   $('camera-show').hidden = !show || !!cam;
-  $('camera-show').textContent = rememberedFailed ? 'Choose camera drive…' : 'Show photos…';
+  $('camera-show').textContent = rememberedFailed ? 'Choose DCIM folder…' : 'Show photos…';
   const rows = cam || note ? [{ name: cam ? cam.label : 'Lytro camera', count: cam ? cam.files.length : '' }] : [];
   $('camera-rows').replaceChildren(...rows.map((row) => {
     const li = document.createElement('li');
@@ -4830,7 +4830,7 @@ function renderCameraGrid() {
   $('grid-empty').textContent = cam
     ? `No photos found on ${cam.label}.`
     : native ? 'Looking for the photos on the camera…'
-    : 'To see the photos on the camera, choose its drive (or the DCIM folder on it). Browsers can read a camera only through a drive you choose; it is remembered for next time.';
+    : 'To see the photos on the camera, open the camera\'s drive in the folder picker and choose its DCIM folder. (Browsers read a camera only through a folder you choose, and do not let a page choose a whole drive.) It is remembered for next time.';
 }
 
 // Imports photos from a camera into the library: a camera drive (desktop
@@ -4861,13 +4861,19 @@ async function importCameraFiles(cam, picked) {
   return added;
 }
 
+// The name shown for a camera folder chosen in a browser: its DCIM folder
+// (what browsers let a page choose) reads as the camera.
+function webCameraLabel(source) {
+  return /^dcim$/i.test(source) ? 'Lytro camera' : source;
+}
+
 // Browser: lists a camera drive (a folder handle) in the Camera section.
 // False when it has no photos or cannot be read (not mounted yet, gone).
 async function showWebCamera(dir) {
   try {
     const { source, files } = await listCameraFolder(dir);
     if (!files.length) return false;
-    setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: source, files } });
+    setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: webCameraLabel(source), files } });
     return true;
   } catch {
     return false;
@@ -4899,7 +4905,7 @@ async function showCameraPhotos() {
     rememberCameraFolder(result.dir);
   }
   if (result.dir && (await showWebCamera(result.dir))) return;
-  setCameraSection({ ...cameraSection, cam: { kind: 'web', id: `web:${result.source}`, label: result.source, files: result.files } });
+  setCameraSection({ ...cameraSection, cam: { kind: 'web', id: `web:${result.source}`, label: webCameraLabel(result.source), files: result.files } });
 }
 
 $('camera-show').onclick = () => {
