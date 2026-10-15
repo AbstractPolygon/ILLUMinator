@@ -70,7 +70,9 @@ function guidedFilter(guide, p, w, h, r, eps) {
 // Edge-aware weighted median: each depth becomes the median of its
 // neighbourhood, counting neighbours that look like it in the photo more.
 // Depth edges snap to the photo's edges and thin halos disappear.
-function weightedMedian(alpha, guide, w, h, r = 4, sigma = 0.06, levels = 96) {
+// `color` (optional, from depthColorGuide): compare neighbours by color
+// instead of brightness, so edges between colors of similar brightness hold.
+function weightedMedian(alpha, guide, w, h, r = 4, sigma = 0.06, levels = 96, color = null) {
   let lo = Infinity;
   let hi = -Infinity;
   for (const a of alpha) {
@@ -86,6 +88,7 @@ function weightedMedian(alpha, guide, w, h, r = 4, sigma = 0.06, levels = 96) {
   const out = new Float32Array(alpha.length);
   const g8 = new Uint8Array(guide.length);
   for (let i = 0; i < g8.length; i++) g8[i] = Math.min(255, Math.max(0, Math.round(guide[i] * 255)));
+  const c8 = color ? Uint8Array.from(color, (v) => Math.min(255, Math.max(0, Math.round(v * 255)))) : null;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       hist.fill(0);
@@ -98,7 +101,13 @@ function weightedMedian(alpha, guide, w, h, r = 4, sigma = 0.06, levels = 96) {
           const xx = x + dx;
           if (xx < 0 || xx >= w) continue;
           const j = yy * w + xx;
-          const wt = lut[Math.abs(g8[j] - gi)];
+          let d = Math.abs(g8[j] - gi);
+          if (c8) {
+            const i3 = 3 * (y * w + x);
+            const j3 = 3 * j;
+            d = Math.max(Math.abs(c8[j3] - c8[i3]), Math.abs(c8[j3 + 1] - c8[i3 + 1]), Math.abs(c8[j3 + 2] - c8[i3 + 2]));
+          }
+          const wt = lut[d];
           hist[q[j]] += wt;
           total += wt;
         }
@@ -118,8 +127,8 @@ function weightedMedian(alpha, guide, w, h, r = 4, sigma = 0.06, levels = 96) {
 // from different parts of the lens can differ in overall brightness (lens
 // flare veils some more than others); comparing only detail ignores that.
 // Returns { detail, local } where local is the local average.
-function detailOf(lum, w, h) {
-  const local = boxSum(lum, w, h, 4);
+function detailOf(lum, w, h, r = DEPTH_SEARCH.detail) {
+  const local = boxSum(lum, w, h, r);
   const detail = new Float32Array(lum.length);
   for (let i = 0; i < lum.length; i++) detail[i] = lum[i] - local[i];
   return { detail, local };
@@ -151,12 +160,11 @@ function angularVariance(lums, views, w, h, alpha, floor, level, occlusion = tru
     for (const hv of halves) if (hv[i] < best) best = hv[i];
     // A half has fewer views and so less noise averaging: it wins only when
     // clearly better than the whole aperture.
-    out[i] = Math.min(full[i], OCCLUSION_MARGIN * best);
+    out[i] = Math.min(full[i], DEPTH_SEARCH.occlusion * best);
   }
   return out;
 }
 
-const OCCLUSION_MARGIN = 1.6;
 
 function angularVarianceOf(lums, views, w, h, alpha, floor, level, keep) {
   const sum = new Float32Array(w * h);
@@ -216,6 +224,63 @@ function fillSmooth(values, conf, w, h, r) {
   return out;
 }
 
+// Edge-aware normalized convolution (domain transform, Gastal and Oliveira
+// 2011, recursive filter): spreads `values`, weighted by `conf`, along the
+// picture but not across its edges (`guide`, 0..1). `sigmaS` (pixels) sets
+// how far values travel, `sigmaR` how strong an edge in `guide` must be to
+// stop them. Fills unreliable regions from reliable ones on the same surface.
+function edgeAwareFill(values, conf, guide, w, h, sigmaS, sigmaR, iterations = 3, color = null) {
+  const n = w * h;
+  const num = new Float32Array(n);
+  const den = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    num[i] = values[i] * conf[i];
+    den[i] = conf[i];
+  }
+  // Distance between neighbours in the transformed domain.
+  const ratio = sigmaS / sigmaR;
+  const dx = new Float32Array(n);
+  const dy = new Float32Array(n);
+  // Difference between two pixels: in brightness, or the largest of the
+  // color channels' differences.
+  const diff = color
+    ? (i, j) => Math.max(Math.abs(color[3 * i] - color[3 * j]), Math.abs(color[3 * i + 1] - color[3 * j + 1]), Math.abs(color[3 * i + 2] - color[3 * j + 2]))
+    : (i, j) => Math.abs(guide[i] - guide[j]);
+  for (let y = 0; y < h; y++) {
+    for (let x = 1; x < w; x++) dx[y * w + x] = 1 + ratio * diff(y * w + x, y * w + x - 1);
+  }
+  for (let y = 1; y < h; y++) {
+    for (let x = 0; x < w; x++) dy[y * w + x] = 1 + ratio * diff(y * w + x, (y - 1) * w + x);
+  }
+  const pass = (arr, a, d, step, count, starts) => {
+    for (const s0 of starts) {
+      for (let k = 1; k < count; k++) {
+        const i = s0 + k * step;
+        const f = a ** d[i];
+        arr[i] += f * (arr[i - step] - arr[i]);
+      }
+      for (let k = count - 2; k >= 0; k--) {
+        const i = s0 + k * step;
+        const f = a ** d[i + step];
+        arr[i] += f * (arr[i + step] - arr[i]);
+      }
+    }
+  };
+  const rows = Array.from({ length: h }, (_, y) => y * w);
+  const cols = Array.from({ length: w }, (_, x) => x);
+  for (let it = 0; it < iterations; it++) {
+    const sigmaH = (sigmaS * Math.sqrt(3) * 2 ** (iterations - it - 1)) / Math.sqrt(4 ** iterations - 1);
+    const a = Math.exp(-Math.SQRT2 / sigmaH);
+    for (const arr of [num, den]) {
+      pass(arr, a, dx, 1, w, rows);
+      pass(arr, a, dy, w, h, cols);
+    }
+  }
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = den[i] > 1e-12 ? num[i] / den[i] : values[i];
+  return out;
+}
+
 // 5x5 median: removes isolated speckles of wrong depth.
 function median5(src, w, h) {
   const out = new Float32Array(src.length);
@@ -237,8 +302,12 @@ function median5(src, w, h) {
 // Replaces blobs that disagree strongly with their wider neighborhood (a
 // confidence-weighted smooth reference): depth edges between real objects
 // differ far less than these failures, which jump to the ends of the range.
-function removeOutliers(alpha, confidence, w, h, threshold = 0.45) {
-  const reference = fillSmooth(alpha, confidence.map((c) => c + 1e-3), w, h, 10);
+function removeOutliers(alpha, confidence, w, h, threshold = 0.45, guide = null, color = null) {
+  // The reference stays within the photo's edges when it has them, so a
+  // replaced value is never a blend of two surfaces.
+  const reference = guide
+    ? edgeAwareFill(alpha, confidence.map((c) => c + 1e-3), guide, w, h, 12, DEPTH_FILL.edge, 3, color)
+    : fillSmooth(alpha, confidence.map((c) => c + 1e-3), w, h, 10);
   const out = new Float32Array(alpha);
   for (let i = 0; i < out.length; i++) {
     if (Math.abs(out[i] - reference[i]) > threshold) out[i] = reference[i];
@@ -246,8 +315,12 @@ function removeOutliers(alpha, confidence, w, h, threshold = 0.45) {
   return out;
 }
 
+// Filling unreliable depths: how far (share of the picture) and how
+// strictly within the photo's edges, and how much confidence counts as sure.
+export const DEPTH_FILL = { reach: 0.2, edge: 0.12, trust: 2 };
+
 // The trial depths and cost window of the depth measurement.
-export const DEPTH_SEARCH = { min: -1.6, max: 1.6, steps: 33, window: 3 };
+export const DEPTH_SEARCH = { min: -1.6, max: 1.6, steps: 33, window: 1, detail: 2, occlusion: 1.6 };
 
 // The photo's brightness (square root, 0..1) from the center view's
 // luminance: guides the edge-aware steps.
@@ -261,6 +334,20 @@ export function depthGuide(center) {
   }
   for (let i = 0; i < n; i++) guide[i] /= gmax;
   return guide;
+}
+
+// The photo's color (square root per channel, 0..1) from the center view's
+// linear RGB: lets the edge-aware steps tell apart colors of similar
+// brightness.
+export function depthColorGuide(rgb) {
+  const out = new Float32Array(rgb.length);
+  let m = 1e-9;
+  for (let i = 0; i < rgb.length; i++) {
+    out[i] = Math.sqrt(Math.max(0, rgb[i]));
+    if (out[i] > m) m = out[i];
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= m;
+  return out;
 }
 
 // views: [{ u, v, rgb, gain, detail }] as used by refocus().
@@ -311,13 +398,15 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
     confidence[i] = -scores[best][i];
   }
   if (onProgress) onProgress(1);
-  return finishDepth({ alpha, cost: confidence, meanCost }, width, height, guide, { refine, min, max });
+  const cv = views[Math.floor(views.length / 2)];
+  const color = depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain));
+  return finishDepth({ alpha, cost: confidence, meanCost }, width, height, guide, { refine, min, max, color });
 }
 
 // The finishing steps of the depth measurement, from the best trial depth
 // per pixel (`alpha`), its cost and the mean cost over the trial depths
 // (measured here or on the GPU): confidence, filling in, outlier removal.
-export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max } = {}) {
+export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null } = {}) {
   const n = width * height;
   const confidence = Float32Array.from(cost);
   // A pronounced minimum is trustworthy; in blank regions every depth looks
@@ -328,14 +417,16 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
     const gain = Math.max(0, meanCost[i] - confidence[i]);
     confidence[i] = (gain / (meanCost[i] + floor)) ** 2;
   }
-  // Keep confident estimates; fill the rest from confident neighbours.
-  const smooth = fillSmooth(alpha, confidence, width, height, 2);
+  // Keep confident estimates; fill the rest from confident parts of the
+  // same surface (as far as it reaches, but not across the photo's edges).
+  const reach = Math.max(width, height) * DEPTH_FILL.reach;
+  const smooth = edgeAwareFill(alpha, confidence, guide, width, height, reach, DEPTH_FILL.edge, 3, color);
   for (let i = 0; i < n; i++) {
-    const c = Math.min(1, confidence[i] * 4);
+    const c = Math.min(1, confidence[i] * DEPTH_FILL.trust);
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
-  const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height);
-  const result = refine ? weightedMedian(cleaned, guide, width, height) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
+  const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color);
+  const result = refine ? weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
   return { alpha: result, confidence, range: [min, max] };
 }
 

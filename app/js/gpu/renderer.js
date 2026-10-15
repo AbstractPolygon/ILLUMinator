@@ -2015,7 +2015,7 @@ export class GpuRenderer {
   // returns { alpha, cost, meanCost } for finishDepth(). `guide` (0..1 per
   // pixel) and `floor` come from the center view (depthGuide,
   // brightnessFloor).
-  measureDepth({ min, max, steps, window, occlusion, guided, floor, guide }) {
+  measureDepth({ min, max, steps, window, detail: detailRadius = 4, occlusion, guided, floor, guide }) {
     const gl = this.gl;
     const P = this.programs;
     const { outW: w, outH: h } = this.sampler;
@@ -2036,7 +2036,7 @@ export class GpuRenderer {
       this.bindTex(2, views, gl.TEXTURE_2D_ARRAY);
       gl.uniform1i(P.depthLum.u.uLayer, k);
       this.draw();
-      this.boxMean(lum, w, h, 4, k === mid ? level : local);
+      this.boxMean(lum, w, h, detailRadius, k === mid ? level : local);
       this.target(detailTex, w, h, k);
       gl.useProgram(P.depthDetail.p);
       gl.uniform1i(P.depthDetail.u.uLum, 1);
