@@ -2,7 +2,7 @@
 
 ## From Lytro Desktop
 
-**Settings → Import Lytro Desktop library…**, then choose your Lytro Desktop library folder. It is usually:
+*+ Import Lytro library…* in the left sidebar (under *+ New album*), or **Settings → Import Lytro Desktop library…**, then choose your Lytro Desktop library folder. It is usually:
 
 - macOS: `Pictures/Lytro Desktop/Libraries/Lytro Library.lytrolibrary`
 - Windows: `Pictures\Lytro Desktop\Libraries\Lytro Library.lytrolibrary`
