@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1297,6 +1297,36 @@ void main() {
 // The lattice pattern divided out of the splatted brightness: per tile
 // gain tables (core/superres.js latticeTables), bilinear in phase and
 // between tile centers.
+// Sharpening of the splatted brightness (core/superres.js sharpenLuma), one
+// direction per pass: pass 0 blurs across, pass 1 blurs down and sharpens.
+const SR_SHARPEN_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uSharp;
+uniform sampler2D uBlur;
+uniform float uSigma;
+uniform float uAmount;
+uniform int uPass;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uSharp, 0);
+  int r = int(ceil(3.0 * uSigma));
+  ivec2 d = uPass == 0 ? ivec2(1, 0) : ivec2(0, 1);
+  float v = 0.0;
+  float ws = 0.0;
+  for (int i = -24; i <= 24; i++) {
+    if (i < -r || i > r) continue;
+    float w = exp(-float(i * i) / (2.0 * uSigma * uSigma));
+    ivec2 q = clamp(p + d * i, ivec2(0), sz - 1);
+    v += w * (uPass == 0 ? texelFetch(uSharp, q, 0).r : texelFetch(uBlur, q, 0).r);
+    ws += w;
+  }
+  v /= ws;
+  if (uPass == 0) { outColor = vec4(v, 0.0, 0.0, 1.0); return; }
+  float s = texelFetch(uSharp, p, 0).r;
+  outColor = vec4(max(0.0, s + uAmount * (s - v)), 0.0, 0.0, 1.0);
+}`;
+
 const SR_DIVIDE = `#version 300 es
 precision highp float;
 precision highp int;
@@ -1669,6 +1699,7 @@ export class GpuRenderer {
       srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
       srFinal: program(gl, SR_FINAL),
       srDivide: program(gl, SR_DIVIDE),
+      srSharpen: program(gl, SR_SHARPEN_FS),
     };
     // Additive blending into 32-bit floats needs EXT_float_blend; otherwise
     // accumulate in half floats (enough for these sums).
@@ -2808,6 +2839,26 @@ export class GpuRenderer {
       gl.deleteTexture(residual);
     }
     removePattern();
+    {
+      // Final sharpening (core/superres.js sharpenLuma).
+      const blur = this.texture(W, H, gl.R32F);
+      owned.push(blur);
+      Q = P.srSharpen;
+      gl.useProgram(Q.p);
+      gl.uniform1f(Q.u.uSigma, SR_SHARPEN.radius * p.scale);
+      gl.uniform1f(Q.u.uAmount, SR_SHARPEN.amount);
+      gl.uniform1i(Q.u.uSharp, 1);
+      this.bindTex(1, sharp);
+      gl.uniform1i(Q.u.uBlur, 2);
+      this.target(blur, W, H);
+      gl.uniform1i(Q.u.uPass, 0);
+      this.draw();
+      this.target(next, W, H);
+      this.bindTex(2, blur);
+      gl.uniform1i(Q.u.uPass, 1);
+      this.draw();
+      [sharp, next] = [next, sharp];
+    }
     histogram(sums, 1, 1, 1);
     const [[sumUp], [sumSharp]] = this.readChannels(sums, 1, 1, 2);
 
