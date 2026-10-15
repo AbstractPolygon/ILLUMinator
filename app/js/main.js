@@ -177,6 +177,10 @@ function renderLibrary() {
     };
     li.append(img, name, more);
     li.onclick = () => openItem(photo);
+    li.oncontextmenu = (e) => {
+      e.preventDefault();
+      photoMenu(photo, more, { x: e.clientX, y: e.clientY });
+    };
     return li;
   }));
   if (state.cameraView && !cameraSection.note && !cameraSection.cam) state.cameraView = false;
@@ -314,6 +318,10 @@ function renderGrid(photos, album) {
     };
     tile.append(frame, name, more);
     tile.onclick = () => openItem(photo);
+    tile.oncontextmenu = (e) => {
+      e.preventDefault();
+      photoMenu(photo, more, { x: e.clientX, y: e.clientY });
+    };
     tile.onkeydown = (e) => {
       if (e.target === tile && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
@@ -374,6 +382,7 @@ $('album-new').onclick = () => newAlbum();
 
 let menuEl = null;
 let menuButton = null;
+let menuAt = null;
 
 function closeMenu() {
   if (!menuEl) return;
@@ -383,8 +392,8 @@ function closeMenu() {
   menuButton = null;
 }
 
-function placeMenu(anchor) {
-  const r = anchor.getBoundingClientRect();
+function placeMenu(anchor, at = null) {
+  const r = at ? { left: at.x, top: at.y, bottom: at.y } : anchor.getBoundingClientRect();
   const m = menuEl;
   const left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8));
   let top = r.bottom + 4;
@@ -395,17 +404,19 @@ function placeMenu(anchor) {
 
 // items: { label, action, checked?, danger? } | { heading } | '-'. An action
 // that returns true keeps the menu open.
-function showMenu(anchor, items) {
+// at: { x, y } to open at the pointer (right-click) instead of below anchor.
+function showMenu(anchor, items, at = null) {
   closeMenu();
   const m = document.createElement('div');
   m.className = 'menu';
   m.setAttribute('role', 'menu');
   menuEl = m;
   menuButton = anchor;
+  menuAt = at;
   anchor.setAttribute('aria-expanded', 'true');
   fillMenu(items);
   document.body.append(m);
-  placeMenu(anchor);
+  placeMenu(anchor, at);
   const first = m.querySelector('button');
   if (first) first.focus();
 }
@@ -442,7 +453,7 @@ function confirmInMenu(text, label, onYes) {
   };
   row.append(no, yes);
   menuEl.replaceChildren(p, row);
-  placeMenu(menuButton);
+  placeMenu(menuButton, menuAt);
   yes.focus();
   return true;
 }
@@ -495,8 +506,20 @@ async function pasteSettings(photo) {
   }
 }
 
-function photoMenu(photo, button) {
+function photoMenu(photo, button, at = null) {
   const items = [];
+  // Settings first, so they stay in view however many albums there are.
+  items.push({ label: 'Copy settings', action: () => copySettings(photo) });
+  items.push({
+    label: copiedSettings ? `Paste settings from ${copiedSettings.name}…` : 'Paste settings',
+    disabled: !copiedSettings || copiedSettings.id === photo.id,
+    action: () => confirmInMenu(`Replace the settings of ${photo.name} with those copied from ${copiedSettings.name}?`, 'Paste', () => pasteSettings(photo)),
+  });
+  items.push({
+    label: 'Reset settings…',
+    action: () => confirmInMenu(`Reset every setting of ${photo.name}? Its adjustments, keyframes and local adjustments go back to how a newly opened photo starts.`, 'Reset', () => resetPhotoSettings(photo)),
+  });
+  items.push('-');
   items.push({ heading: 'Albums' });
   for (const a of lib.albums) {
     const inside = a.photos.includes(photo.id);
@@ -511,17 +534,6 @@ function photoMenu(photo, button) {
     });
   }
   items.push({ label: 'New album…', action: () => newAlbum([photo.id]) });
-  items.push('-');
-  items.push({ label: 'Copy settings', action: () => copySettings(photo) });
-  items.push({
-    label: copiedSettings ? `Paste settings from ${copiedSettings.name}…` : 'Paste settings',
-    disabled: !copiedSettings || copiedSettings.id === photo.id,
-    action: () => confirmInMenu(`Replace the settings of ${photo.name} with those copied from ${copiedSettings.name}?`, 'Paste', () => pasteSettings(photo)),
-  });
-  items.push({
-    label: 'Reset settings…',
-    action: () => confirmInMenu(`Reset every setting of ${photo.name}? Its adjustments, keyframes and local adjustments go back to how a newly opened photo starts.`, 'Reset', () => resetPhotoSettings(photo)),
-  });
   items.push('-');
   const where = lib.store.kind === 'folder'
     ? 'Its folder (the photo and its edits) is moved to the trash.'
@@ -542,7 +554,7 @@ function photoMenu(photo, button) {
       return confirmInMenu(`Delete ${photo.name} from the library? ${where}`, 'Delete', remove);
     },
   });
-  showMenu(button, items);
+  showMenu(button, items, at);
 }
 
 function albumMenu(id, li, button) {
