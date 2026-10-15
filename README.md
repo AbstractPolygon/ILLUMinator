@@ -2,6 +2,8 @@
 
 Open, refocus and animate Lytro ILLUM light field photos.
 
+**Website:** [abstractpolygon.github.io/ILLUMinator](https://abstractpolygon.github.io/ILLUMinator/): downloads for Windows, macOS and Linux, and a version that runs in your browser.
+
 ```
 npm install
 npm start          # desktop app
