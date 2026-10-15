@@ -4,6 +4,7 @@ import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { upscaleImage } from './gpu/upscale.js';
+import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
 import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
@@ -1572,6 +1573,7 @@ function setMode(mode) {
   $('png-btn').disabled = !state.info;
   $('quick-export-btn').disabled = !state.info;
   $('stereo-btn').disabled = !(state.info && state.info.hasRaw) || !camera;
+  $('vr-btn').disabled = !(state.info && state.info.hasRaw) || !camera;
   $('stereo-on').disabled = !(state.info && state.info.hasRaw) || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
@@ -4560,28 +4562,42 @@ $('stereo-baseline').addEventListener('input', () => {
 // A stereo pair from two viewpoints across the lens aperture: anaglyph
 // (red / cyan glasses), side by side (parallel viewing) or cross-eyed.
 // Crop, rotation and the pivot apply to both eyes alike.
+// Both eyes of the current picture as canvases [left, right], each through
+// the crop and rotation (and the pivot, for its own viewpoint).
+async function stereoPair() {
+  const p = cameraParams();
+  const b = eyeOffset();
+  const eyes = [p.u - b, p.u + b];
+  const shots = [];
+  for (const u of eyes) {
+    showProgress('Rendering 3D', shots.length / 2);
+    const msg = await engine.request('view', eyeParams(p, u), { onProgress: () => {} });
+    shots.push(toImageData(msg));
+  }
+  const pivots = withPivotZoom(eyes.map((u) => pivotFor(u, p.v, p.alpha, eyeParams(p, u).aperture)));
+  const base = { orientation: +$('orientation').value || 1, angle: +$('straighten').value, crop: cropValues() };
+  return shots.map((img, i) => {
+    const g = geometry(img.width, img.height, { ...base, ...(pivots[i] || {}) });
+    const c = Object.assign(document.createElement('canvas'), { width: g.width, height: g.height });
+    drawGeometry(c.getContext('2d'), img, g);
+    return c;
+  });
+}
+
+// File name tag for a 3D type: VR players recognize side by side files by
+// "_3D_SBS" in the name.
+function stereoTag(mode) {
+  return mode === 'vr' ? '_3D_SBS' : `-3d-${mode}`;
+}
+
+// A stereo pair from two viewpoints across the lens aperture: anaglyph
+// (red / cyan glasses), side by side (parallel viewing or a VR headset) or
+// cross-eyed. Crop, rotation and the pivot apply to both eyes alike.
 async function saveStereo() {
   if (!canRender() || !state.info.hasRaw) return;
   $('stereo-btn').disabled = true;
   try {
-    const p = cameraParams();
-    const b = eyeOffset();
-    const eyes = [p.u - b, p.u + b];
-    const shots = [];
-    for (const u of eyes) {
-      showProgress('Rendering 3D', shots.length / 2);
-      const msg = await engine.request('view', eyeParams(p, u), { onProgress: () => {} });
-      shots.push(toImageData(msg));
-    }
-    const pivots = withPivotZoom(eyes.map((u) => pivotFor(u, p.v, p.alpha, eyeParams(p, u).aperture)));
-    const base = { orientation: +$('orientation').value || 1, angle: +$('straighten').value, crop: cropValues() };
-    const views = shots.map((img, i) => {
-      const g = geometry(img.width, img.height, { ...base, ...(pivots[i] || {}) });
-      const c = Object.assign(document.createElement('canvas'), { width: g.width, height: g.height });
-      drawGeometry(c.getContext('2d'), img, g);
-      return c;
-    });
-    const [L, R] = views;
+    const [L, R] = await stereoPair();
     const mode = $('stereo-mode').value;
     let out;
     if (mode === 'anaglyph') {
@@ -4601,7 +4617,7 @@ async function saveStereo() {
       o.drawImage(first, 0, 0);
       o.drawImage(second, L.width, 0);
     }
-    savePhoto(out, `${baseName()}-3d-${mode}`);
+    savePhoto(out, `${baseName()}${stereoTag(mode)}`);
   } catch (err) {
     showError(err);
   } finally {
@@ -4610,6 +4626,24 @@ async function saveStereo() {
     refresh();
   }
 }
+
+// View in VR (browsers with WebXR, such as the Meta Quest Browser): the 3D
+// picture on a large screen in front of you, each eye seeing its own view.
+async function viewInVr() {
+  if (!canRender() || !state.info.hasRaw) return;
+  try {
+    const [L, R] = await stereoPair();
+    hideProgress();
+    await showInVr(L, R);
+  } catch (err) {
+    hideProgress();
+    showError(err);
+  }
+}
+$('vr-btn').onclick = viewInVr;
+vrSupported().then((ok) => {
+  $('vr-btn').hidden = !ok;
+});
 $('stereo-btn').onclick = saveStereo;
 $('stereo-baseline').oninput = () => showSliderValue($('stereo-baseline'));
 
@@ -5036,7 +5070,7 @@ async function exportVideo() {
     recorder.stop();
     await done;
     const ext = VIDEO_FORMATS[pick.format].ext;
-    download(new Blob(chunks, { type: mime }), `${baseName()}-${$('anim').value}.${ext}`);
+    download(new Blob(chunks, { type: mime }), `${baseName()}-${$('anim').value}${stereo ? stereoTag(mode) : ''}.${ext}`);
   } catch (err) {
     showError(err);
   } finally {
