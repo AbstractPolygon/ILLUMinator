@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, depthFilter } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1223,7 +1223,8 @@ out vec4 outColor;
 void main() {
   vec2 e = gl_FragCoord.xy - 0.5 - vCenter;
   float w = exp(-dot(e, e) * uInv2s2) * vConf;
-  outColor = vec4(vY * w, w, 0.0, 0.0);
+  // b: squared samples, for how well the rays agree (edge snapping).
+  outColor = vec4(vY * w, w, vY * vY * w, 0.0);
 }`;
 
 // ---------------------------------------------------------------- full resolution
@@ -1293,6 +1294,49 @@ void main() {
   } else {
     outColor = vec4(max(0.0, texelFetch(uSharp, p, 0).r + 0.8 * acc.r / (acc.g + LAMBDA)), 0.0, 0.0, 0.0);
   }
+}`;
+
+// Edge snapping (core/superres.js EDGE_SNAP): the splat with the depth map
+// as is and with the nearest and farthest depth around each pixel, blended
+// by how well the rays landing on the pixel agree.
+const SR_SNAP = `#version 300 es
+precision highp float;
+uniform sampler2D uAcc0;   // r: sum, g: weight, b: sum of squares
+uniform sampler2D uAcc1;
+uniform sampler2D uAcc2;
+uniform sampler2D uPrep;
+uniform int uSmooth;
+uniform float uMargin;
+uniform float uKeep;
+out vec4 outColor;
+const float LAMBDA = 0.15;
+float disagree(vec3 a) {
+  float m = a.g > 1e-6 ? a.r / a.g : 0.0;
+  return a.g > 0.5 ? min(10.0, max(0.0, a.b / a.g - m * m) / (m * m + 1e-4)) : 10.0;
+}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uAcc0, 0);
+  vec3 d = vec3(0.0);
+  float n = 0.0;
+  for (int j = -uSmooth; j <= uSmooth; j++) {
+    for (int i = -uSmooth; i <= uSmooth; i++) {
+      ivec2 q = p + ivec2(i, j);
+      if (q.x < 0 || q.y < 0 || q.x >= sz.x || q.y >= sz.y) continue;
+      d += vec3(disagree(texelFetch(uAcc0, q, 0).rgb), disagree(texelFetch(uAcc1, q, 0).rgb), disagree(texelFetch(uAcc2, q, 0).rgb));
+      n += 1.0;
+    }
+  }
+  d /= n;
+  float best = min(d.x, min(d.y, d.z));
+  vec3 w = exp(-(d - best) / (uMargin * best + 1e-6)) * vec3(uKeep, 1.0, 1.0);
+  float upY = dot(texelFetch(uPrep, p, 0).rgb, vec3(0.2126, 0.7152, 0.0722));
+  vec2 a0 = texelFetch(uAcc0, p, 0).rg;
+  vec2 a1 = texelFetch(uAcc1, p, 0).rg;
+  vec2 a2 = texelFetch(uAcc2, p, 0).rg;
+  vec3 y = vec3(a0.x, a1.x, a2.x) + upY * LAMBDA;
+  y /= vec3(a0.y, a1.y, a2.y) + LAMBDA;
+  outColor = vec4(dot(w, y) / (w.x + w.y + w.z), 0.0, 0.0, 0.0);
 }`;
 
 const SR_PHASE = `
@@ -1757,6 +1801,7 @@ export class GpuRenderer {
       lensProbe: program(gl, LENS_PROBE_FRAGMENT, SPLAT_VERTEX),
       srPrep: program(gl, SR_PREP),
       srCombine: program(gl, SR_COMBINE),
+      srSnap: program(gl, SR_SNAP),
       srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
       srFinal: program(gl, SR_FINAL),
       srDivide: program(gl, SR_DIVIDE),
@@ -2314,7 +2359,9 @@ export class GpuRenderer {
   // returns { alpha, cost, meanCost } for finishDepth(). `guide` (0..1 per
   // pixel) and `floor` come from the center view (depthGuide,
   // brightnessFloor).
-  measureDepth({ min, max, steps, window, detail: detailRadius = 4, occlusion, guided, floor, guide }) {
+  // `blur`: box radius applied to each view first (the coarse match of
+  // core/depth.js DEPTH_COARSE).
+  measureDepth({ min, max, steps, window, detail: detailRadius = 4, occlusion, guided, floor, guide, blur = 0 }) {
     const gl = this.gl;
     const P = this.programs;
     const { outW: w, outH: h } = this.sampler;
@@ -2327,6 +2374,7 @@ export class GpuRenderer {
     const lum = this.scratch32(w, h, 'depthLum');
     const local = this.scratch32(w, h, 'depthLocal');
     const level = this.scratch32(w, h, 'depthLevel');
+    const blurred = blur > 0 ? this.scratch32(w, h, 'depthBlurred') : null;
     const mid = Math.floor(count / 2);
     for (let k = 0; k < count; k++) {
       this.target(lum, w, h);
@@ -2335,11 +2383,13 @@ export class GpuRenderer {
       this.bindTex(2, views, gl.TEXTURE_2D_ARRAY);
       gl.uniform1i(P.depthLum.u.uLayer, k);
       this.draw();
-      this.boxMean(lum, w, h, detailRadius, k === mid ? level : local);
+      if (blurred) this.boxMean(lum, w, h, blur, blurred);
+      const src = blurred || lum;
+      this.boxMean(src, w, h, detailRadius, k === mid ? level : local);
       this.target(detailTex, w, h, k);
       gl.useProgram(P.depthDetail.p);
       gl.uniform1i(P.depthDetail.u.uLum, 1);
-      this.bindTex(1, lum);
+      this.bindTex(1, src);
       gl.uniform1i(P.depthDetail.u.uLocal, 3);
       this.bindTex(3, k === mid ? level : local);
       this.draw();
@@ -2670,7 +2720,7 @@ export class GpuRenderer {
   // One splat of every raw pixel into a new W x H texture (r: brightness
   // sum, g: weight); with `estimate` (a linearly filtered texture of the
   // current result) the residuals instead.
-  splatInto(p, { base, vig, estimate = null, lens = null }) {
+  splatInto(p, { base, vig, estimate = null, lens = null, depthTex = null }) {
     const gl = this.gl;
     const { W, H } = p;
     const acc = this.texture(W, H, this.floatBlend ? gl.RGBA32F : gl.RGBA16F);
@@ -2679,7 +2729,7 @@ export class GpuRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
-    this.splatPoints(this.programs.splat, p, { base, vig, estimate, lens });
+    this.splatPoints(this.programs.splat, p, { base, vig, estimate, lens, depthTex });
     gl.disable(gl.BLEND);
     return acc;
   }
@@ -2736,7 +2786,7 @@ export class GpuRenderer {
   }
 
   // The point draw shared by the splat and the lens measurement.
-  splatPoints(P, p, { base, vig, estimate = null, lens = null, probe = null }) {
+  splatPoints(P, p, { base, vig, estimate = null, lens = null, probe = null, depthTex = null }) {
     const gl = this.gl;
     const { cam, dev, sampler } = this;
     const g = sampler.grid;
@@ -2770,7 +2820,7 @@ export class GpuRenderer {
     this.bindTex(2, base);
     gl.uniform2f(U.uBaseSize, p.baseW, p.baseH);
     gl.uniform1i(U.uDepth, 3);
-    this.bindTex(3, this.depthTex);
+    this.bindTex(3, depthTex || this.depthTex);
     gl.uniform1i(U.uAllInFocus, p.allInFocus && p.depth ? 1 : 0);
     gl.uniform1f(U.uAlpha, p.alpha);
     gl.uniform2f(U.uMin, p.xMin, p.yMin);
@@ -2961,6 +3011,34 @@ export class GpuRenderer {
       const again = this.splatInto(p, inputs);
       owned.push(inputs.lens.tex, again);
       combine(again, 0);
+    }
+    if (p.allInFocus && p.depth && EDGE_SNAP.on) {
+      // Edge snapping (core/superres.js EDGE_SNAP).
+      const depthTex = (values) => {
+        const t = this.texture(p.baseW, p.baseH, gl.R32F);
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, p.baseW, p.baseH, gl.RED, gl.FLOAT, values);
+        owned.push(t);
+        return t;
+      };
+      const near = depthTex(depthFilter(p.depth, p.baseW, p.baseH, EDGE_SNAP.radius, Math.min));
+      const far = depthTex(depthFilter(p.depth, p.baseW, p.baseH, EDGE_SNAP.radius, Math.max));
+      const accs = [null, near, far].map((t) => this.splatInto(p, { ...inputs, depthTex: t }));
+      owned.push(...accs);
+      Q = P.srSnap;
+      this.target(next, W, H);
+      gl.useProgram(Q.p);
+      accs.forEach((t, k) => {
+        gl.uniform1i(Q.u[`uAcc${k}`], 1 + k);
+        this.bindTex(1 + k, t);
+      });
+      gl.uniform1i(Q.u.uPrep, 4);
+      this.bindTex(4, prep);
+      gl.uniform1i(Q.u.uSmooth, EDGE_SNAP.smooth);
+      gl.uniform1f(Q.u.uMargin, EDGE_SNAP.margin);
+      gl.uniform1f(Q.u.uKeep, EDGE_SNAP.keep);
+      this.draw();
+      [sharp, next] = [next, sharp];
     }
     for (let pass = 0; pass < (p.passes || 0); pass++) {
       // Divided out before each pass too, or the passes build it up.

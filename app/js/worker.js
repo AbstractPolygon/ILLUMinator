@@ -11,7 +11,7 @@ import {
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { userDepthAlpha } from './core/userdepth.js';
 import { LYTRO_EXPOSURE, LYTRO_BALANCE } from './core/base.js';
-import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH } from './core/depth.js';
+import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
@@ -993,7 +993,13 @@ async function ensureDepth(id) {
       const rgb = centerView();
       const center = luminance(rgb);
       const guide = depthGuide(center);
-      const measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor: brightnessFloor(center), guide });
+      const floor = brightnessFloor(center);
+      let measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor, guide });
+      if (!fast && DEPTH_COARSE.on) {
+        // The coarse match for far out-of-focus texture (core/depth.js).
+        const coarse = state.gpu.measureDepth({ ...DEPTH_SEARCH, window: DEPTH_SEARCH.window + 1, detail: DEPTH_COARSE.detail, blur: DEPTH_COARSE.blur, occlusion: false, guided: true, floor, guide });
+        measured = combineCoarse(measured, coarse);
+      }
       state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb) });
     } else {
       state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {

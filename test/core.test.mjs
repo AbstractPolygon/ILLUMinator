@@ -8,7 +8,7 @@ import { unpack10, unpack12, cameraInfo } from '../app/js/core/raw.js';
 import { decodeLightField } from '../app/js/core/decode.js';
 import { makeSyntheticLfr } from '../app/js/core/synthetic.js';
 import { buildSampler, renderView, makeDevelopParams, apertureSamples, refocus, sharpness, sensorToOutput } from '../app/js/core/render.js';
-import { renderSuperRes, estimateVignetting, lensCandidates, lensTable, lensIndex, chooseLensOffsets, LENS_CAL } from '../app/js/core/superres.js';
+import { renderSuperRes, estimateVignetting, lensCandidates, lensTable, lensIndex, chooseLensOffsets, LENS_CAL, depthFilter } from '../app/js/core/superres.js';
 
 test('unpack10 reads four high bytes and a byte of low bits', () => {
   // Pixels 0x3ff, 0x001, 0x200, 0x155
@@ -191,6 +191,31 @@ test('full resolution measures lens centers from the photo itself and reuses the
   const again = renderSuperRes(lf.raw, lf.cam, dev, sampler, { ...opts, lensOffsets: sr.lensOffsets, calibrate: true });
   assert.equal(again.lensOffsets, sr.lensOffsets);
   assert.deepEqual(again.rgb, sr.rgb);
+});
+
+test('edge snapping finds the nearest and farthest depth around each pixel', () => {
+  const d = Float32Array.from([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0]);
+  const near = depthFilter(d, 4, 4, 1, Math.min);
+  const far = depthFilter(d, 4, 4, 1, Math.max);
+  assert.equal(near[0], 0);
+  assert.equal(near[15], -1);
+  assert.equal(far[0], 0);
+  assert.equal(far[5], 1);
+  assert.equal(far[15], 0);
+});
+
+test('all in focus full resolution with a depth map stays near the standard brightness', async () => {
+  const lf = await synthetic;
+  const dev = makeDevelopParams(lf.cam);
+  const sampler = buildSampler(lf.grid, lf.cam, 1);
+  const base = renderView(lf.raw, lf.cam, dev, sampler, 0, 0);
+  const vg = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
+  const depth = new Float32Array(sampler.outW * sampler.outH).map((_, i) => (i % sampler.outW < sampler.outW / 2 ? -0.3 : 0.3));
+  const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, { allInFocus: true, depth, scale: 2, vignetting: vg, base, baseW: sampler.outW, baseH: sampler.outH });
+  const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const ratio = mean(sr.rgb) / mean(base);
+  assert.ok(sr.rgb.every(Number.isFinite));
+  assert.ok(ratio > 0.85 && ratio < 1.15, `brightness ratio ${ratio}`);
 });
 
 // Real camera files, if available: LYTRO_SAMPLES=/path/to/dir npm test
