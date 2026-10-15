@@ -1475,7 +1475,7 @@ viewer.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 // Drag to pan when zoomed in (Shift+drag in camera mode, where a plain drag
-// changes the viewpoint). A drag suppresses the click that follows it.
+// changes the viewpoint; a middle button drag anywhere). A drag suppresses the click that follows it.
 let suppressClick = false;
 function startPan(event) {
   const scale = fitScale() * view.k;
@@ -1494,7 +1494,8 @@ function startPan(event) {
   canvas.onpointerup = () => {
     canvas.onpointermove = null;
     canvas.classList.remove('panning');
-    suppressClick = moved;
+    // A middle button drag is followed by no click to suppress.
+    suppressClick = moved && event.button === 0;
   };
 }
 
@@ -1545,6 +1546,17 @@ canvas.addEventListener('click', (event) => {
   }
   if (!state.info || state.mode !== 'camera' || state.depthShown) return;
   focusAt(event);
+});
+
+// Middle button drag pans the picture in any mode (instead of the browser's
+// autoscroll).
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 1 || !state.info) return;
+  event.preventDefault();
+  startPan(event);
+});
+canvas.addEventListener('mousedown', (event) => {
+  if (event.button === 1) event.preventDefault();
 });
 
 canvas.addEventListener('pointerdown', (event) => {
