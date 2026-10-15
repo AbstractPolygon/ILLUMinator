@@ -6454,3 +6454,84 @@ $('lut-amount').addEventListener('input', () => {
 });
 $('lut-amount').addEventListener('change', () => scheduleSave());
 showLut();
+
+// ---------------------------------------------------------------- updates
+
+// Desktop app: on startup, the newest release on GitHub is compared with
+// this version; when it is newer, a popup lists that release's files with
+// direct download links, this computer's first. "Don't remind me" skips
+// that version.
+const RELEASES_API = 'https://api.github.com/repos/AbstractPolygon/ILLUMinator/releases/latest';
+const BUILDS = [
+  { re: /-win-x64\.exe$/, os: 'win', name: 'Windows', detail: 'Intel and AMD' },
+  { re: /-win-arm64\.exe$/, os: 'win', name: 'Windows', detail: 'ARM, such as Snapdragon' },
+  { re: /-mac-arm64\.dmg$/, os: 'mac', name: 'macOS', detail: 'Apple Silicon' },
+  { re: /-mac-x64\.dmg$/, os: 'mac', name: 'macOS', detail: 'Intel' },
+  { re: /-linux-amd64\.deb$/, os: 'linux', name: 'Linux', detail: '.deb for Debian and Ubuntu' },
+  { re: /-linux-x86_64\.AppImage$/, os: 'linux', name: 'Linux', detail: 'AppImage for other distributions' },
+];
+
+export function newerVersion(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+function thisOs() {
+  const p = `${navigator.userAgentData?.platform || navigator.platform || ''} ${navigator.userAgent}`.toLowerCase();
+  return p.includes('win') ? 'win' : p.includes('mac') ? 'mac' : p.includes('linux') ? 'linux' : '';
+}
+
+async function checkForUpdate() {
+  if (!window.lytroNative) return;
+  let release;
+  try {
+    const r = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });
+    if (!r.ok) return;
+    release = await r.json();
+  } catch {
+    return;
+  }
+  const latest = String(release.tag_name || '').replace(/^v/, '');
+  if (!newerVersion(latest, VERSION)) return;
+  try {
+    if (localStorage.getItem('illuminator.skipVersion') === latest) return;
+  } catch {
+    // No storage: ask every time.
+  }
+  const os = thisOs();
+  const files = (release.assets || [])
+    .map((a) => ({ a, b: BUILDS.find((b) => b.re.test(a.name)) }))
+    .filter((x) => x.b)
+    .sort((x, y) => (y.b.os === os) - (x.b.os === os));
+  if (!files.length) return;
+  $('update-title').textContent = `ILLUMinator ${latest} is available`;
+  $('update-note').textContent = `You have ${VERSION}. Download the one for your computer and install it over this version; your library and edits stay as they are.`;
+  $('update-links').replaceChildren(...files.map(({ a, b }) => {
+    const li = document.createElement('li');
+    if (b.os === os) li.className = 'mine';
+    const link = Object.assign(document.createElement('a'), { href: a.browser_download_url, target: '_blank', rel: 'noopener', textContent: b.name });
+    const detail = Object.assign(document.createElement('span'), { textContent: b.detail });
+    const spacer = Object.assign(document.createElement('span'), { className: 'spacer' });
+    const size = Object.assign(document.createElement('span'), { className: 'size', textContent: `${Math.round(a.size / 1e6)} MB` });
+    li.append(link, detail, spacer);
+    if (b.os === os) li.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: 'this computer' }));
+    li.append(size);
+    return li;
+  }));
+  $('update-skip').checked = false;
+  $('update-dialog').onclose = () => {
+    try {
+      if ($('update-skip').checked) localStorage.setItem('illuminator.skipVersion', latest);
+    } catch {
+      // Ignore: the reminder comes back next time.
+    }
+  };
+  $('update-dialog').showModal();
+}
+setTimeout(checkForUpdate, 3000);

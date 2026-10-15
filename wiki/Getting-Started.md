@@ -52,3 +52,7 @@ Every photo you open is added to your library, so it is there next time ([[Libra
 ## Your edits are saved
 
 Every change is saved with the photo as you make it; there is no Save button. Open the photo again and it looks as you left it. *Reset* buttons and double-clicking a slider put things back.
+
+## Updates
+
+The desktop app checks for a newer version when it starts. If there is one, a popup lists that release's downloads (Windows, macOS and Linux, with this computer's first), each a direct link to the file. Install it over the current version; your library and edits stay as they are. *Don't remind me about this version* skips that release.

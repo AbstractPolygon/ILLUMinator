@@ -255,6 +255,13 @@ dialog form { display: flex; flex-direction: column; gap: 10px; max-height: calc
 dialog h2 { margin: 0; }
 dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
 #quick-export-dialog { width: min(480px, 94vw); }
+#update-dialog { width: min(520px, 94vw); }
+.update-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.update-links li { display: flex; align-items: baseline; gap: 10px; padding: 6px 8px; border-radius: 6px; }
+.update-links li.mine { background: #262a31; }
+.update-links a { font-weight: 600; }
+.update-links .size, .update-links .tag { color: var(--muted); font-size: 12px; }
+.update-links .spacer { flex: 1; }
 /* One column: a heading per group, then one row per setting (name on the
    left, control on the right). */
 .qe-list { display: flex; flex-direction: column; overflow-y: auto; min-height: 0; padding-right: 4px; }
