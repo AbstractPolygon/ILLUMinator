@@ -15,7 +15,7 @@
 export const LYTRO_EXPOSURE = 1.46;
 // A slight balance of the linear color before the curve (red, green, blue):
 // without it the look leans yellow-green on grays next to Lytro Desktop's.
-export const LYTRO_BALANCE = [1.0084, 0.9893, 1.0810];
+export const LYTRO_BALANCE = [1.0223, 0.9836, 1.0965];
 // Color after the curve, per hue: for 12 hues around the opponent plane
 // (u = (R - G) / sqrt 2, v = (R + G - 2B) / sqrt 6; 30 degrees is red, 90
 // yellow, 150 green, 210 cyan, 270 blue, 330 magenta) the factor [re, im]

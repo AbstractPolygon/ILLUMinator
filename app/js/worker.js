@@ -315,6 +315,7 @@ function rebuildSampler() {
   state.gen++;
   state.refocusViews = null;
   state.vignetting = null;
+  state.lensOffsets = null;
   state.depth = null;
   state.depthRaw = null;
   if (state.gpu) {
@@ -622,6 +623,13 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   }
   if (!(await ensureDepth(id))) return { cancelled: true };
   const allInFocus = aperture <= 0;
+  // Each lens's center is measured once per photo from an all-in-focus
+  // render (core/superres.js LENS_CAL), then used by every render.
+  if (!state.lensOffsets && !allInFocus) {
+    progress('Measuring lens centers', 0);
+    await renderFullSensor({ alpha: 0, allInFocus: true, u: 0, v: 0, scale, passes: 0, base: await allInFocusBase(id, 0, 0) }, () => {});
+    if (state.jobs.superres !== job) return { cancelled: true };
+  }
   const opts = apertureOptions({ u, v, aperture });
   const base = allInFocus ? await allInFocusBase(id, u, v) : refocusRGB(alpha, opts);
   if (state.gpu) {
@@ -631,19 +639,16 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     const tex = state.gpu.superRes({
       ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
       vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes,
+      lensOffsets: state.lensOffsets, calibrate: true,
     });
     if (tex) {
+      state.lensOffsets = state.gpu.lensOffsets;
       if (state.jobs.superres !== job) return { cancelled: true };
       await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
       return undefined;
     }
   }
-  const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
-    alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
-    scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
-    onProgress: (p) => progress('Rendering from the full sensor', p),
-    gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
-  });
+  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma }, (p) => progress('Rendering from the full sensor', p));
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
@@ -655,6 +660,33 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) }, colorState(color));
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
+}
+
+// renderSuperRes on the CPU (with GPU splats where available), measuring the
+// lens centers first if they are not known yet.
+async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma = Infinity }, onProgress) {
+  const { lf, dev, sampler } = state;
+  if (state.gpu && !state.lensOffsets && allInFocus) {
+    // The GPU measures them in its own render; drop the picture.
+    const params = superResParams(sampler, { scale, apertureSigma: Infinity });
+    const tex = state.gpu.superRes({
+      ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: Infinity, vignetting: state.vignetting, base,
+      baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes: 0, calibrate: true,
+    });
+    if (tex) {
+      state.lensOffsets = state.gpu.lensOffsets;
+      state.gpu.gl.deleteTexture(tex);
+      return null;
+    }
+  }
+  const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
+    alpha, allInFocus, u0: u, v0: v, apertureSigma: sigma,
+    scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
+    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus,
+    gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
+  });
+  state.lensOffsets = sr.lensOffsets;
+  return sr;
 }
 
 // One picture for the interactive camera: a single view when the aperture

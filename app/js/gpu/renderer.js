@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1060,9 +1060,16 @@ uniform ivec2 uOutSize;
 uniform int uReach;
 uniform sampler2D uEstimate;  // back-projection: current result (linear)
 uniform int uResidual;        // 1: splat the difference from uEstimate
+uniform highp sampler2D uLensOff; // per-lens center offsets (rg)
+uniform ivec4 uLensTable;     // first row, first column, rows, columns
+uniform int uUseLens;         // 1: move each lens's center by uLensOff
+uniform int uProbe;           // 1: one point per sample at its lens's texel
 flat out vec2 vCenter;
 flat out float vY;
 flat out float vConf;
+flat out vec2 vLens;
+flat out vec2 vD;
+flat out float vAlpha;
 
 float rawAt(ivec2 p) { return float(texelFetch(uRaw, p, 0).r); }
 
@@ -1121,6 +1128,14 @@ void main() {
   if (bu < 0 || bv < 0 || bu >= uVigBins || bv >= uVigBins) return;
   float gain = texelFetch(uVig, ivec2(bu, bv), 0)[ch];
   if (!(gain > 0.0)) return;
+  ivec2 lensCell = ivec2(bc, br) - uLensTable.yx;
+  bool inTable = all(greaterThanEqual(lensCell, ivec2(0))) && all(lessThan(lensCell, uLensTable.wz));
+  if (uProbe == 1 && !inTable) return;
+  if (uUseLens == 1 && inTable) {
+    vec2 off = texelFetch(uLensOff, lensCell, 0).rg;
+    u -= off.x;
+    v -= off.y;
+  }
   float du = u - uUV0.x;
   float dv = v - uUV0.y;
   float conf = (1.0 - (u * u + v * v) / (uRUse * uRUse)) * (uInv2a2 > 0.0 ? exp(-(du * du + dv * dv) * uInv2a2) : 1.0);
@@ -1150,7 +1165,52 @@ void main() {
   if (uResidual == 1) vY -= texture(uEstimate, (o + 0.5) / vec2(uOutSize)).r;
   vConf = conf;
   vCenter = o;
+  vLens = lens;
+  vD = vec2(du, dv);
+  vAlpha = alpha;
+  if (uProbe == 1) {
+    gl_PointSize = 1.0;
+    gl_Position = vec4((vec2(lensCell) + 0.5) / vec2(uLensTable.wz) * 2.0 - 1.0, 0.0, 1.0);
+    return;
+  }
   gl_Position = vec4((vec2(pp) + 0.5) / vec2(uOutSize) * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+// Per-lens center measurement (core/superres.js LENS_CAL): for four of the
+// candidate center offsets, each sample's squared distance from the picture
+// at where it would land, added up per lens by blending.
+const LENS_PROBE_FRAGMENT = `#version 300 es
+precision highp float;
+uniform highp sampler2D uEst;  // the picture so far (R32F)
+uniform float uOutScale;
+uniform int uCandStart;
+uniform float uStep;
+uniform int uReachCand;
+flat in vec2 vLens;
+flat in vec2 vD;
+flat in float vAlpha;
+flat in float vY;
+flat in float vConf;
+out vec4 outColor;
+float estAt(vec2 p) {
+  ivec2 sz = textureSize(uEst, 0);
+  vec2 f = clamp(p, vec2(0.0), vec2(sz) - 1.001);
+  ivec2 i = ivec2(floor(f));
+  vec2 a = f - vec2(i);
+  return mix(mix(texelFetch(uEst, i, 0).r, texelFetch(uEst, i + ivec2(1, 0), 0).r, a.x),
+             mix(texelFetch(uEst, i + ivec2(0, 1), 0).r, texelFetch(uEst, i + ivec2(1, 1), 0).r, a.x), a.y);
+}
+void main() {
+  int side = 2 * uReachCand + 1;
+  vec4 e = vec4(0.0);
+  for (int j = 0; j < 4; j++) {
+    int k = uCandStart + j;
+    if (k >= side * side) break;
+    vec2 c = vec2(float(k / side - uReachCand), float(k % side - uReachCand)) * uStep;
+    float d = vY - estAt((vLens - vAlpha * (vD - c)) * uOutScale);
+    e[j] = vConf * d * d;
+  }
+  outColor = e;
 }`;
 
 const SPLAT_FRAGMENT = `#version 300 es
@@ -1694,6 +1754,7 @@ export class GpuRenderer {
       present: program(gl, PRESENT),
       localSpatial: program(gl, LOCAL_SPATIAL),
       splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
+      lensProbe: program(gl, LENS_PROBE_FRAGMENT, SPLAT_VERTEX),
       srPrep: program(gl, SR_PREP),
       srCombine: program(gl, SR_COMBINE),
       srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
@@ -2609,21 +2670,86 @@ export class GpuRenderer {
   // One splat of every raw pixel into a new W x H texture (r: brightness
   // sum, g: weight); with `estimate` (a linearly filtered texture of the
   // current result) the residuals instead.
-  splatInto(p, { base, vig, estimate = null }) {
+  splatInto(p, { base, vig, estimate = null, lens = null }) {
     const gl = this.gl;
-    const { cam, dev, sampler } = this;
-    const g = sampler.grid;
     const { W, H } = p;
-    const vg = p.vignetting;
     const acc = this.texture(W, H, this.floatBlend ? gl.RGBA32F : gl.RGBA16F);
     this.target(acc, W, H);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
-    const P = this.programs.splat;
+    this.splatPoints(this.programs.splat, p, { base, vig, estimate, lens });
+    gl.disable(gl.BLEND);
+    return acc;
+  }
+
+  // Per-lens center offsets as a texture: { tex, table } for splatInto.
+  lensOffsetsTexture(table) {
+    const gl = this.gl;
+    const tex = this.texture(table.cols, table.rows, gl.RG32F);
+    const data = new Float32Array(table.rows * table.cols * 2);
+    for (let i = 0; i < table.dx.length; i++) {
+      data[2 * i] = table.dx[i];
+      data[2 * i + 1] = table.dy[i];
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, table.cols, table.rows, gl.RG, gl.FLOAT, data);
+    return { tex, table };
+  }
+
+  // Each lens's center measured against `est` (an R32F texture of the
+  // picture so far): returns the filled table (core/superres.js
+  // chooseLensOffsets).
+  measureLensOffsets(p, inputs, est) {
+    const gl = this.gl;
+    const table = lensTable(this.sampler.grid, this.cam);
+    const cand = lensCandidates();
+    const err = new Float64Array(table.dx.length * cand.length);
+    const out = this.texture(table.cols, table.rows, gl.RGBA32F);
+    const P = this.programs.lensProbe;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    for (let start = 0; start < cand.length; start += 4) {
+      this.target(out, table.cols, table.rows);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(P.p);
+      gl.uniform1i(P.u.uProbe, 1);
+      gl.uniform4i(P.u.uLensTable, table.r0, table.c0, table.rows, table.cols);
+      gl.uniform1i(P.u.uEst, 5);
+      this.bindTex(5, est);
+      gl.uniform1i(P.u.uCandStart, start);
+      gl.uniform1f(P.u.uStep, LENS_CAL.step);
+      gl.uniform1i(P.u.uReachCand, LENS_CAL.reach);
+      this.splatPoints(P, p, { ...inputs, lens: null, probe: table });
+      const buf = new Float32Array(table.rows * table.cols * 4);
+      this.target(out, table.cols, table.rows);
+      gl.readPixels(0, 0, table.cols, table.rows, gl.RGBA, gl.FLOAT, buf);
+      for (let i = 0; i < table.dx.length; i++) {
+        for (let j = 0; j < 4 && start + j < cand.length; j++) err[i * cand.length + start + j] = buf[4 * i + j];
+      }
+    }
+    gl.disable(gl.BLEND);
+    gl.deleteTexture(out);
+    return chooseLensOffsets(table, cand, err);
+  }
+
+  // The point draw shared by the splat and the lens measurement.
+  splatPoints(P, p, { base, vig, estimate = null, lens = null, probe = null }) {
+    const gl = this.gl;
+    const { cam, dev, sampler } = this;
+    const g = sampler.grid;
+    const { W, H } = p;
+    const vg = p.vignetting;
     const U = P.u;
     gl.useProgram(P.p);
+    const t = probe || (lens && lens.table);
+    gl.uniform1i(U.uProbe, probe ? 1 : 0);
+    gl.uniform1i(U.uUseLens, lens ? 1 : 0);
+    gl.uniform4i(U.uLensTable, t ? t.r0 : 0, t ? t.c0 : 0, t ? t.rows : 0, t ? t.cols : 0);
+    gl.uniform1i(U.uLensOff, 6);
+    this.bindTex(6, lens ? lens.tex : vig);
     gl.uniform1i(U.uRaw, 0);
     this.bindTex(0, this.rawTex);
     gl.uniform2i(U.uRawSize, cam.width, cam.height);
@@ -2665,8 +2791,6 @@ export class GpuRenderer {
       gl.uniform1i(U.uStart, start);
       gl.drawArrays(gl.POINTS, 0, Math.min(chunk, total - start));
     }
-    gl.disable(gl.BLEND);
-    return acc;
   }
 
   // Full resolution accumulation (see renderSuperRes' gpuSplat option):
@@ -2684,9 +2808,10 @@ export class GpuRenderer {
       estimate = this.texture(W, H, gl.R16F, gl.LINEAR);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
     }
-    const acc = this.splatInto(p, { base, vig, estimate });
+    const lens = p.lensOffsets ? this.lensOffsetsTexture(p.lensOffsets) : null;
+    const acc = this.splatInto(p, { base, vig, estimate, lens });
     const [accY, wsum] = this.readChannels(acc, W, H, 2);
-    for (const t of [acc, base, vig, estimate]) if (t) gl.deleteTexture(t);
+    for (const t of [acc, base, vig, estimate, lens && lens.tex]) if (t) gl.deleteTexture(t);
     return { accY, wsum };
   }
 
@@ -2702,6 +2827,10 @@ export class GpuRenderer {
     const { W, H } = p;
     const inputs = this.splatInputs(p);
     const owned = [inputs.base, inputs.vig];
+    if (p.lensOffsets) {
+      inputs.lens = this.lensOffsetsTexture(p.lensOffsets);
+      owned.push(inputs.lens.tex);
+    }
 
     // Upsampled colors and the detail weight.
     const prep = this.texture(W, H);
@@ -2823,6 +2952,16 @@ export class GpuRenderer {
     };
 
     combine(acc, 0);
+    this.lensOffsets = p.lensOffsets || null;
+    if (p.calibrate && !p.lensOffsets) {
+      // Each lens's center measured against the picture just made, then
+      // the splat again (core/superres.js LENS_CAL).
+      this.lensOffsets = this.measureLensOffsets(p, inputs, sharp);
+      inputs.lens = this.lensOffsetsTexture(this.lensOffsets);
+      const again = this.splatInto(p, inputs);
+      owned.push(inputs.lens.tex, again);
+      combine(again, 0);
+    }
     for (let pass = 0; pass < (p.passes || 0); pass++) {
       // Divided out before each pass too, or the passes build it up.
       removePattern();

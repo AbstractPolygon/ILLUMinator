@@ -12,4 +12,6 @@ How a *Full sensor* render (see [[Render]]) uses the part of the sensor shown, a
 - *Coverage at the current focus*: how many samples land on each pixel of the render, at the focus set in the Camera view. Dark pixels get few samples and are filled in from the standard picture; at some focus depths the samples bunch up into a lattice, which is why those depths render softer and what *Detail recovery* helps with.
 - *Last Full sensor render* (or *Camera view* before one is made): the same part of the picture, to compare with the raw pixels.
 
+The grid places every lens on a regular pattern, but each real lens sits slightly off it. A *Full sensor* render measures each lens's true center from the photo itself (moving it at most 0.3 sensor pixels, and only where that clearly sharpens the picture) and keeps it for the rest of that photo's renders; nothing is carried over from other photos.
+
 Both views follow what the main view shows at any zoom and keep their size; zoomed far out, the coverage is shown in blocks of render pixels.

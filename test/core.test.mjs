@@ -8,7 +8,7 @@ import { unpack10, unpack12, cameraInfo } from '../app/js/core/raw.js';
 import { decodeLightField } from '../app/js/core/decode.js';
 import { makeSyntheticLfr } from '../app/js/core/synthetic.js';
 import { buildSampler, renderView, makeDevelopParams, apertureSamples, refocus, sharpness, sensorToOutput } from '../app/js/core/render.js';
-import { renderSuperRes, estimateVignetting } from '../app/js/core/superres.js';
+import { renderSuperRes, estimateVignetting, lensCandidates, lensTable, lensIndex, chooseLensOffsets, LENS_CAL } from '../app/js/core/superres.js';
 
 test('unpack10 reads four high bytes and a byte of low bits', () => {
   // Pixels 0x3ff, 0x001, 0x200, 0x155
@@ -160,6 +160,37 @@ test('high resolution render is larger and keeps the scene', async () => {
   const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
   const ratio = mean(sr.rgb) / mean(base);
   assert.ok(ratio > 0.85 && ratio < 1.15, `brightness ratio ${ratio}`);
+});
+
+test('each lens keeps the center offset that fits best, only when clearly better', () => {
+  const g = { pitch: 10, rowStep: 10 * Math.sqrt(3) / 2, rotation: 0, ox: 0, oy: 0 };
+  const table = lensTable(g, { width: 200, height: 200 });
+  const cand = lensCandidates();
+  assert.equal(cand.length, (2 * LENS_CAL.reach + 1) ** 2);
+  const err = new Float64Array(table.dx.length * cand.length).fill(1);
+  const want = cand.findIndex(([a, b]) => a === LENS_CAL.step && b === -LENS_CAL.step);
+  err[want] = 0.5; // lens 0: a clear winner
+  err[cand.length + want] = 0.99; // lens 1: too small a gain
+  chooseLensOffsets(table, cand, err);
+  assert.deepEqual([table.dx[0], table.dy[0]], [LENS_CAL.step, -LENS_CAL.step].map(Math.fround));
+  assert.deepEqual([table.dx[1], table.dy[1]], [0, 0]);
+  const i = lensIndex(table, g, 3 * g.pitch + 0.5 * g.pitch, 1 * g.rowStep);
+  assert.equal(i, (1 - table.r0) * table.cols + (3 - table.c0));
+});
+
+test('full resolution measures lens centers from the photo itself and reuses them', async () => {
+  const lf = await synthetic;
+  const dev = makeDevelopParams(lf.cam);
+  const sampler = buildSampler(lf.grid, lf.cam, 1);
+  const base = renderView(lf.raw, lf.cam, dev, sampler, 0, 0);
+  const vg = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
+  const opts = { alpha: -0.3, scale: 2, vignetting: vg, base, baseW: sampler.outW, baseH: sampler.outH };
+  const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, { ...opts, calibrate: true });
+  assert.ok(sr.lensOffsets && sr.lensOffsets.dx.length > 0);
+  for (const d of [...sr.lensOffsets.dx, ...sr.lensOffsets.dy]) assert.ok(Math.abs(d) <= LENS_CAL.reach * LENS_CAL.step + 1e-6);
+  const again = renderSuperRes(lf.raw, lf.cam, dev, sampler, { ...opts, lensOffsets: sr.lensOffsets, calibrate: true });
+  assert.equal(again.lensOffsets, sr.lensOffsets);
+  assert.deepEqual(again.rgb, sr.rgb);
 });
 
 // Real camera files, if available: LYTRO_SAMPLES=/path/to/dir npm test
