@@ -206,11 +206,15 @@ function findCamera(id) {
 }
 
 function registerIpc() {
-  ipcMain.handle('open-files', async () => {
+  ipcMain.handle('open-files', async (_e, options) => {
+    // `options` picks another kind of file (camera calibration backups).
+    const kind = options && options.kind === 'calibration';
     const res = await dialog.showOpenDialog(win, {
-      title: 'Open light field photos',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Lytro photos and album archives', extensions: ['lfr', 'lfp', 'raw', 'zip', 'LFR', 'LFP', 'RAW', 'ZIP'] }],
+      title: kind ? 'Add camera calibration data' : 'Open light field photos',
+      properties: kind ? ['openFile'] : ['openFile', 'multiSelections'],
+      filters: kind
+        ? [{ name: 'Camera calibration backup', extensions: ['tar', 'TAR'] }]
+        : [{ name: 'Lytro photos and album archives', extensions: ['lfr', 'lfp', 'raw', 'zip', 'LFR', 'LFP', 'RAW', 'ZIP'] }],
     });
     if (res.canceled) return [];
     res.filePaths.forEach(allow);

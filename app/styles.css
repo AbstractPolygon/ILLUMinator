@@ -425,6 +425,9 @@ a.button {
   background: #262a31; border: 1px solid var(--line); color: var(--text); text-decoration: none;
 }
 a.button:hover { border-color: #4a515c; }
+.cal-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.cal-list li { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.cal-list .link { background: none; border: 0; color: var(--accent, inherit); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
 .setting h3 { margin: 0 0 6px; font-size: 13px; }
 .setting .path { margin: 0 0 6px; font-size: 13px; word-break: break-all; color: var(--text); }
 .setting .path.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }

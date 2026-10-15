@@ -10,7 +10,7 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('lytroNative', {
-  openFiles: () => ipcRenderer.invoke('open-files'),
+  openFiles: (options) => ipcRenderer.invoke('open-files', options),
   readFile: (path) => ipcRenderer.invoke('read-file', path),
   findSidecar: (path) => ipcRenderer.invoke('find-sidecar', path),
   readRange: (path, offset, length) => ipcRenderer.invoke('read-range', path, offset, length),

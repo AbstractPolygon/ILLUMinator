@@ -7,7 +7,8 @@ import { decodePngGray, parseDepthRange, stackDepth } from './core/userdepth.js'
 import { upscaleImage } from './gpu/upscale.js';
 import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
-import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
+import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
+import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
@@ -85,6 +86,7 @@ function showError(err) {
 // imported is copied into it, in a folder of its own.
 let lib = null;
 let libReady = null;
+let calReady = Promise.resolve();
 const thumbs = new Map(); // photo id -> object URL (null while loading)
 const PHOTO_DRAG = 'application/x-illuminator-photo';
 
@@ -624,6 +626,7 @@ async function importPhotos(entries, { album = state.album, replace = false } = 
 
 async function openItem(photo) {
   closeMenu();
+  await calReady;
   const file = await lib.file(photo).catch(() => null);
   if (!file) {
     showError(new Error(`${photo.name} is missing from the library folder.`));
@@ -2090,8 +2093,68 @@ async function importFolder() {
 
 $('import-folder').onclick = importFolder;
 
+// ---- camera calibration
+
+// Kept calibration goes to the render worker, keyed by camera serial number.
+async function sendCalibrations() {
+  await libReady;
+  const kept = await listCalibrations(lib.store).catch(() => []);
+  const list = [];
+  for (const k of kept) list.push(await loadCalibration(lib.store, k.serial).catch(() => null));
+  await engine.request('setCalibrations', { list: list.filter(Boolean) });
+  return kept;
+}
+
+async function showCalibrations() {
+  const kept = await sendCalibrations();
+  const ul = $('cal-list');
+  ul.replaceChildren();
+  for (const k of kept) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = `Camera ${k.serial}${k.hotPixels ? ' · hot pixel list' : ''}`;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'link';
+    del.textContent = 'Remove';
+    del.onclick = async () => {
+      await removeCalibration(lib.store, k.serial);
+      $('cal-note').textContent = `Removed the calibration for camera ${k.serial}.`;
+      showCalibrations();
+    };
+    li.append(name, del);
+    ul.append(li);
+  }
+  if (!kept.length) $('cal-note').textContent ||= 'No camera calibration added yet.';
+}
+
+async function addCalibration(source) {
+  if (!source) return;
+  await libReady;
+  $('cal-note').textContent = 'Reading calibration data…';
+  try {
+    const info = await importCalibration(source, lib.store, {
+      onProgress: (p, name) => { $('cal-note').textContent = `Reading ${name}…`; },
+    });
+    $('cal-note').textContent = `Added camera ${info.serial}: ${info.saved} files kept` +
+      (info.hotPixels ? ', including its hot pixel list' : '') +
+      '. Photos from this camera use it the next time they are opened.';
+    await showCalibrations();
+  } catch (err) {
+    $('cal-note').textContent = err.message || String(err);
+  }
+}
+
+$('cal-add').onclick = async () => addCalibration(await openCalibrationFile().catch(() => null));
+$('cal-folder').onclick = async () => {
+  const picked = await pickFolder('Choose the camera’s calibration folder', { calibration: true }).catch(() => null);
+  if (picked && picked.files.length) addCalibration(picked.files.map((f) => ({ path: f.path, file: f.file })));
+};
+
 $('settings-btn').onclick = async () => {
   await showLibraryLocation();
+  $('cal-note').textContent = '';
+  showCalibrations();
   $('settings-btn').setAttribute('aria-expanded', 'true');
   $('settings-dialog').showModal();
 };
@@ -2132,6 +2195,7 @@ $('library-choose').onclick = async () => {
   state.album = null;
   state.cameraView = false;
   libReady = openLibrary();
+  calReady = libReady.then(() => sendCalibrations()).catch(() => {});
   await showLibraryLocation();
 };
 
@@ -6223,6 +6287,7 @@ document.addEventListener('drop', (e) => {
 canvas.classList.add('hidden');
 setMode('camera');
 libReady = openLibrary();
+calReady = libReady.then(() => sendCalibrations()).catch(() => {});
 $('version').textContent = VERSION;
 
 // Desktop app: the camera's photos show in the Camera section as soon as

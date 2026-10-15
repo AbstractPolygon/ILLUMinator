@@ -25,3 +25,34 @@ test('listed pixels are always repaired, even when mild', () => {
   assert.equal(listed.raw[5 * w + 6], 100);
   assert.equal(listed.count, 1);
 });
+
+import { makeTar } from '../app/js/core/tar.js';
+import { memoryStorage } from '../app/js/library/storage.js';
+import { importCalibration, listCalibrations, loadCalibration, removeCalibration, KEEP_BYTES } from '../app/js/core/calibration.js';
+
+const blobOf = (bytes) => ({ size: bytes.length, slice: (a, b) => ({ arrayBuffer: async () => bytes.slice(a, b).buffer }) });
+
+test('a calibration backup is kept per camera: small files stored, big white images left', async () => {
+  const enc = new TextEncoder();
+  const tar = makeTar({
+    'B5100/unitdata/unit_info.json': enc.encode('{"camera":{"serialNumber":"B5100"}}'),
+    'B5100/unitdata/HOTPIXEL.BIN': makeHotPixelFile([[3, 5, 9]]),
+    'B5100/unitdata/MOD_0000.RAW': new Uint8Array(KEEP_BYTES + 1),
+  });
+  const store = memoryStorage();
+  const info = await importCalibration(blobOf(tar), store);
+  assert.equal(info.serial, 'B5100');
+  assert.equal(info.saved, 2);
+  assert.deepEqual(info.left.map((l) => l.name), ['MOD_0000.RAW']);
+  assert.equal(info.hotPixels, true);
+  assert.equal((await listCalibrations(store)).length, 1);
+  const cal = await loadCalibration(store, 'B5100');
+  assert.equal(parseHotPixels(cal.hotPixelFile, 10, 30).length, 2);
+  await removeCalibration(store, 'B5100');
+  assert.equal((await listCalibrations(store)).length, 0);
+});
+
+test('data without a camera serial number is refused', async () => {
+  const tar = makeTar({ 'x/other.json': new TextEncoder().encode('{}') });
+  await assert.rejects(importCalibration(blobOf(tar), memoryStorage()), /calibration/);
+});

@@ -52,8 +52,15 @@ export async function openFiles() {
   return pickWithInput(document.getElementById('file-input'));
 }
 
+// A camera calibration backup (.tar), or null when cancelled.
+export async function openCalibrationFile() {
+  if (native) return (await native.openFiles({ kind: 'calibration' }).then((f) => f.map((x) => new NativeFile(x))))[0] || null;
+  return (await pickWithInput(document.getElementById('cal-input')))[0] || null;
+}
+
 const PHOTO_FILE = /\.(lfr|lfp)$/i;
 const FOLDER_FILE = /\.(lfr|lfp|raw|jpe?g|png)$/i;
+const CALIBRATION_FILE = /\.(json|bin|txt|gct|hst|raw)$/i;
 
 async function walkDirectory(handle, prefix, out, wanted = PHOTO_FILE) {
   for await (const entry of handle.values()) {
@@ -137,7 +144,8 @@ export async function recallCameraFolder() {
 // lists the photos and thumbnails in it and all its subfolders:
 // { name, files: [{ path, file }] } with paths relative to the folder, or
 // null when cancelled.
-export async function pickFolder(title) {
+export async function pickFolder(title, { calibration = false } = {}) {
+  const wanted = calibration ? CALIBRATION_FILE : FOLDER_FILE;
   if (native) {
     const r = await native.pickFolder(title);
     return r ? { name: r.name, files: r.files.map((f) => ({ path: f.rel, file: new NativeFile(f) })) } : null;
@@ -146,7 +154,7 @@ export async function pickFolder(title) {
     try {
       const dir = await window.showDirectoryPicker({ id: 'lytro-library', mode: 'read' });
       const out = [];
-      await walkDirectory(dir, '', out, FOLDER_FILE);
+      await walkDirectory(dir, '', out, wanted);
       return { name: dir.name, files: out.map((e) => ({ path: e.path, file: e.file })) };
     } catch (err) {
       if (err && err.name === 'AbortError') return null;
@@ -157,7 +165,7 @@ export async function pickFolder(title) {
   const strip = (p) => p.split('/').slice(1).join('/');
   return {
     name: files[0].webkitRelativePath.split('/')[0],
-    files: files.filter((f) => FOLDER_FILE.test(f.name)).map((f) => ({ path: strip(f.webkitRelativePath), file: f })),
+    files: files.filter((f) => wanted.test(f.name)).map((f) => ({ path: strip(f.webkitRelativePath), file: f })),
   };
 }
 

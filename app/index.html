@@ -47,6 +47,7 @@
       <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
     </button>
     <input id="file-input" type="file" accept=".lfr,.lfp,.raw,.LFR,.LFP,.RAW,.zip" multiple hidden>
+    <input id="cal-input" type="file" accept=".tar,.TAR" hidden>
     <input id="dir-input" type="file" webkitdirectory multiple hidden>
   </header>
 
@@ -891,6 +892,16 @@
         <div class="row">
           <button type="button" id="import-folder">Import Lytro Desktop library…</button>
         </div>
+      </section>
+      <section class="setting">
+        <h3>Camera calibration</h3>
+        <p class="hint">Each camera has its calibration data: which pixels are defective, its lens grid at every zoom and focus, and white images. Add yours (a camera backup <code>.tar</code> file, or its unpacked folder) so photos from that camera render with it. It is kept in your library and used for photos with the same camera serial number.</p>
+        <ul id="cal-list" class="cal-list"></ul>
+        <div class="row">
+          <button type="button" id="cal-add">Add calibration backup…</button>
+          <button type="button" id="cal-folder">Add from a folder…</button>
+        </div>
+        <p id="cal-note" class="hint" aria-live="polite"></p>
       </section>
       <menu>
         <span class="spacer"></span>

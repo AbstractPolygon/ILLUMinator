@@ -35,3 +35,12 @@ An album exported with *Export album…* (see [[Library and Albums]]) is a `.zip
 ## From files
 
 Drag files onto the window (in the desktop app, also *File → Import Lytro File…*). To bring Lytro Desktop's edits for a single picture, open its `raw.lfp` together with its `stack.view.lfp`; an exported `IMG_0001.LFP` opened with `IMG_0001.LFR` works the same way.
+
+## Camera calibration
+
+Every camera is calibrated at the factory, and the data is specific to that camera: a list of defective pixels, the lens grid at each zoom and focus setting, and white images. Open **Settings** (the gear at the top right) and use **Camera calibration** to add it, either from the camera's backup (a `.tar` file) or from its unpacked folder. Backups are over a gigabyte, so the app reads the file in place and keeps only the small files: the tables and the hot pixel list. The big white images stay where they are.
+
+The calibration is kept in your library and applies to every photo taken with the same camera, matched by the serial number stored in the photo. Photos open with it the next time they are opened. **Remove** in the same place deletes it.
+
+Today the camera's hot pixel list is used, together with the search that *Remove hot pixels* does. Lens grid and white image data are added next.
+

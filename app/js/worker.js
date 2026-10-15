@@ -21,6 +21,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
+import { parseHotPixels } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
@@ -736,11 +737,31 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
   return undefined;
 }
 
+// Calibration kept for each camera, by serial number: { hotPixelFile }.
+const calibrations = new Map();
+
+async function setCalibrations({ list }) {
+  calibrations.clear();
+  for (const c of list) calibrations.set(c.serial, c);
+  return true;
+}
+
+// The pixels the open photo's camera lists as defective (null when its
+// calibration has not been imported).
+function cameraHotPixels() {
+  const { lf } = state;
+  const serial = lf.privateMetadata && lf.privateMetadata.camera && lf.privateMetadata.camera.serialNumber;
+  const cal = serial && calibrations.get(String(serial));
+  if (!cal || !cal.hotPixelFile) return null;
+  if (!cal.hotPixels) cal.hotPixels = parseHotPixels(cal.hotPixelFile, lf.cam.width, lf.cam.height) || [];
+  return cal.hotPixels.length ? cal.hotPixels : null;
+}
+
 // Remove hot pixels: the raw image with hot and dead pixels fixed (made
 // once per photo) or the original.
 function useHotPixelFix(on) {
   const { lf } = state;
-  if (on && !state.rawFixed) state.rawFixed = fixHotPixels(state.rawOriginal, lf.cam.width, lf.cam.height);
+  if (on && !state.rawFixed) state.rawFixed = fixHotPixels(state.rawOriginal, lf.cam.width, lf.cam.height, cameraHotPixels());
   lf.raw = on ? state.rawFixed.raw : state.rawOriginal;
   lf.hotPixels = on ? state.rawFixed.count : 0;
 }
@@ -1318,7 +1339,7 @@ async function setLut({ lut }) {
   return null;
 }
 
-const handlers = { setLut, open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { setLut, setCalibrations, open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {
