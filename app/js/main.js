@@ -1909,6 +1909,12 @@ async function showLibraryLocation() {
 
 // A Lytro Desktop library (or any folder of photos), into a new album.
 async function importFolder() {
+  // Libraries are imported by the desktop app; the browser version points
+  // there.
+  if (!native) {
+    $('desktop-only-dialog').showModal();
+    return;
+  }
   const picked = await pickFolder('Import a Lytro Desktop library or a folder of photos').catch((err) => {
     showError(err);
     return null;

@@ -49,7 +49,7 @@ button {
 }
 button:hover:not(:disabled) { border-color: #4a515c; }
 button:disabled { opacity: 0.45; cursor: default; }
-button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button.primary, a.button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.active, button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 select { background: #262a31; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; width: 100%; }
@@ -678,3 +678,5 @@ label.lut-amount { margin-top: 14px; }
 
 /* No photo open: the sidebar's settings are shown disabled. */
 .controls.no-photo > .panel > :not(summary), .controls.no-photo > .render-actions { opacity: 0.45; }
+
+#desktop-only-dialog { max-width: 480px; }
