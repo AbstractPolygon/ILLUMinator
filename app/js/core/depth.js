@@ -1,3 +1,5 @@
+import { segmentDepth } from './segments.js';
+
 // Depth from the light field: for a range of refocus depths (alpha), shift
 // every view as refocusing would and measure how well they agree. At the
 // right depth all views see the same scene point, so their spread (angular
@@ -319,6 +321,9 @@ function removeOutliers(alpha, confidence, w, h, threshold = 0.45, guide = null,
 // strictly within the photo's edges, and how much confidence counts as sure.
 export const DEPTH_FILL = { reach: 0.2, edge: 0.12, trust: 2 };
 
+// Region cleanup of high quality depth maps (core/segments.js).
+export const DEPTH_REGIONS = { on: true, count: 2500, compactness: 8, strength: 1, colorSigma: 8 };
+
 // The trial depths and cost window of the depth measurement.
 export const DEPTH_SEARCH = { min: -1.6, max: 1.6, steps: 33, window: 1, detail: 2, occlusion: 1.6 };
 
@@ -426,7 +431,9 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
   const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color);
-  const result = refine ? weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
+  let result = refine ? weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
+  // High quality: region cleanup (core/segments.js).
+  if (refine && color && DEPTH_REGIONS.on) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
   return { alpha: result, confidence, range: [min, max] };
 }
 
