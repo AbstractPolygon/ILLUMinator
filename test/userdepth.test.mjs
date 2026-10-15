@@ -66,4 +66,11 @@ test('a Lytro picture folder brings its edited depth map', () => {
   assert.equal(p.depthRange.name, 'stack.userdepthmap.txt');
   const [q] = groupPhotos(['raw.lfp', 'stack.userdepthmap.png'].map((n) => ({ path: `Sea/${n}`, file: f(n) })));
   assert.equal(q.depthMap, null);
+  assert.equal(p.stack, null);
+  const [r] = groupPhotos(['raw.lfp', 'stack.lfp'].map((n) => ({ path: `Dune/${n}`, file: f(n) })));
+  assert.equal(r.stack.name, 'stack.lfp');
+  // A folder with only stack.lfp: that is the photo itself.
+  const [s] = groupPhotos(['stack.lfp'].map((n) => ({ path: `Cove/${n}`, file: f(n) })));
+  assert.equal(s.file.name, 'stack.lfp');
+  assert.equal(s.stack, null);
 });

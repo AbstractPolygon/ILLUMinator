@@ -4,12 +4,13 @@
 // stored beside it.
 //
 // entries: [{ path: 'a/b/IMG_0001.LFR', file }] (path relative, '/' separated)
-// returns: [{ name, label, file, sidecar, thumb, depthMap, depthRange }]
+// returns: [{ name, label, file, sidecar, thumb, depthMap, depthRange, stack }]
 //
 // Lytro Desktop keeps each picture in its own folder: raw.lfp (the light
 // field), stack.view.lfp (the edits), stack.lfp (a rendered focal stack),
 // thumbnails and, when its depth map was edited, stack.userdepthmap.png with
-// stack.userdepthmap.txt (core/userdepth.js). Everywhere else photos are IMG_0001.LFR files, optionally with
+// stack.userdepthmap.txt (core/userdepth.js). stack.lfp also holds the depth
+// Lytro Desktop computed, kept as `stack` beside raw.lfp. Everywhere else photos are IMG_0001.LFR files, optionally with
 // an IMG_0001.LFP exported next to them.
 
 const LIGHT_FIELD = /\.(lfr|lfp|raw)$/i;
@@ -48,7 +49,8 @@ export function groupPhotos(entries) {
       const depthMap = find(DEPTH_MAP);
       const depthRange = find(DEPTH_RANGE);
       const depth = depthMap && depthRange ? { depthMap: depthMap.file, depthRange: depthRange.file } : { depthMap: null, depthRange: null };
-      photos.push({ name: label, label, file: main.file, sidecar: view ? view.file : null, thumb: thumb ? thumb.file : null, ...depth });
+      const stack = /^raw\.lfp$/i.test(main.name) ? find(/^stack\.lfp$/i) : null;
+      photos.push({ name: label, label, file: main.file, sidecar: view ? view.file : null, thumb: thumb ? thumb.file : null, ...depth, stack: stack ? stack.file : null });
       continue;
     }
     const photoFiles = lf.filter((f) => /\.(lfr|raw)$/i.test(f.name));

@@ -7,7 +7,7 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 - *Aperture:* f/22 to f/0.5. Small apertures keep everything sharp; wide ones blur what is away from the focus (click the picture to choose what is in focus). Beyond f/2, the widest the camera can record, the blur is synthetic, using the depth map.
 - *Depth:* how quickly things blur away from the focus.
 - *Smoothing:* smooths the depth map, following the picture's edges.
-- *Lytro Desktop depth map:* shown for photos imported from a Lytro Desktop library whose depth map was edited there. On, that edited map is used for blur and depth masks; off, depth is measured from the light field as for any other photo.
+- *Lytro Desktop depth map:* shown for photos imported from a Lytro Desktop library. On, the depth map Lytro Desktop computed (or the one edited there) is used for blur and depth masks; off, depth is measured from the light field as for any other photo. Lytro's map is usually the better one where the picture is blank or out of focus, such as a plain wall behind the subject.
 - *Show depth map:* warm colors are near, cool colors are far.
 
 How carefully the depth map is measured is set in [[Render]] (*High quality depth map*).

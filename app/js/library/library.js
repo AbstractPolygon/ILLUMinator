@@ -12,7 +12,7 @@
 //
 // library.json:
 // { "format": "illuminator-library", "version": 1,
-//   "photos": [{ "id", "name", "file", "sidecar", "thumb", "depthMap", "depthRange", "size", "photoId", "added" }],
+//   "photos": [{ "id", "name", "file", "sidecar", "thumb", "depthMap", "depthRange", "stack", "size", "photoId", "added" }],
 //   "albums": [{ "id", "name", "photos": [photo id, ...] }] }
 //
 // A photo's id is its folder name. The folder is the truth: photos found in
@@ -87,6 +87,7 @@ export class Library {
       this.photos.push({
         id: dir, name: found.name === 'raw' ? dir : found.name, file: found.file.name, sidecar: found.sidecar ? found.sidecar.name : null,
         depthMap: found.depthMap ? found.depthMap.name : null, depthRange: found.depthRange ? found.depthRange.name : null,
+        stack: found.stack ? found.stack.name : null,
         thumb: thumb ? thumb.name : null, size: found.file.size, photoId: null, added: new Date().toISOString(),
       });
       changed = true;
@@ -166,8 +167,10 @@ export class Library {
           await this.store.copyIn(e.sidecar, `${PHOTOS}/${existing.id}/${e.sidecar.name}`);
           existing.sidecar = e.sidecar.name;
         }
-        if (e.depthMap && e.depthRange && !existing.depthMap) {
-          Object.assign(existing, await this.copyDepth(e, `${PHOTOS}/${existing.id}`));
+        if ((e.depthMap && e.depthRange && !existing.depthMap) || (e.stack && !existing.stack)) {
+          const dir = `${PHOTOS}/${existing.id}`;
+          if (e.depthMap && e.depthRange && !existing.depthMap) Object.assign(existing, await this.copyDepth(e, dir));
+          if (e.stack && !existing.stack) existing.stack = await this.copyStack(e, dir);
           await this.save();
         }
         out.push(existing);
@@ -205,7 +208,18 @@ export class Library {
     } catch {
       thumb = null;
     }
-    return { file, sidecar, thumb, ...(await this.copyDepth(e, dir)) };
+    return { file, sidecar, thumb, ...(await this.copyDepth(e, dir)), stack: await this.copyStack(e, dir) };
+  }
+
+  // Lytro Desktop's rendered stack (stack.lfp), for the depth it computed.
+  async copyStack(e, dir) {
+    if (!e.stack) return null;
+    try {
+      await this.store.copyIn(e.stack, `${dir}/stack.lfp`);
+      return 'stack.lfp';
+    } catch {
+      return null;
+    }
   }
 
   // A Lytro Desktop depth map: the image and its lambda range.
@@ -238,6 +252,11 @@ export class Library {
     const dir = `${PHOTOS}/${photo.id}`;
     const [image, range] = await Promise.all([this.store.file(`${dir}/${photo.depthMap}`), this.store.file(`${dir}/${photo.depthRange}`)]);
     return image && range ? { image, range } : null;
+  }
+
+  // The photo's Lytro Desktop stack.lfp (holding the depth Lytro computed), or null.
+  stack(photo) {
+    return photo.stack ? this.store.file(`${PHOTOS}/${photo.id}/${photo.stack}`).catch(() => null) : Promise.resolve(null);
   }
 
   thumbnail(photo) {
@@ -335,9 +354,11 @@ export class Library {
         files.push({ path: `${dir}/${p.depthMap}`, data: await asBlob(depth.image) });
         files.push({ path: `${dir}/${p.depthRange}`, data: await asBlob(depth.range) });
       }
+      const stack = await this.stack(p);
+      if (stack) files.push({ path: `${dir}/${p.stack}`, data: await asBlob(stack) });
       const edits = await this.store.readText(`${dir}/${EDITS_FILE}`).catch(() => null);
       if (edits) files.push({ path: `${dir}/${EDITS_FILE}`, data: edits });
-      photos.push({ folder: p.id, name: p.name, file: p.file, sidecar: sidecar ? p.sidecar : null, thumb: thumb ? p.thumb : null, depthMap: depth ? p.depthMap : null, depthRange: depth ? p.depthRange : null, edits: !!edits });
+      photos.push({ folder: p.id, name: p.name, file: p.file, sidecar: sidecar ? p.sidecar : null, thumb: thumb ? p.thumb : null, depthMap: depth ? p.depthMap : null, depthRange: depth ? p.depthRange : null, stack: stack ? p.stack : null, edits: !!edits });
     }
     const index = { format: ARCHIVE_FORMAT, version: ARCHIVE_VERSION, name: album.name, exported: new Date().toISOString(), photos };
     return writeZip([{ path: 'album.json', data: JSON.stringify(index, null, 2) }, ...files], { onProgress });
@@ -355,7 +376,7 @@ export class Library {
     if (index.format !== ARCHIVE_FORMAT) throw new Error('Not an ILLUMinator album');
     const at = (folder, name) => (name ? entries.get(`${PHOTOS}/${folder}/${name}`) || null : null);
     const items = (index.photos || [])
-      .map((p) => ({ meta: p, entry: { name: p.name, label: p.folder, file: at(p.folder, p.file), sidecar: at(p.folder, p.sidecar), thumb: at(p.folder, p.thumb), depthMap: at(p.folder, p.depthMap), depthRange: at(p.folder, p.depthRange) } }))
+      .map((p) => ({ meta: p, entry: { name: p.name, label: p.folder, file: at(p.folder, p.file), sidecar: at(p.folder, p.sidecar), thumb: at(p.folder, p.thumb), depthMap: at(p.folder, p.depthMap), depthRange: at(p.folder, p.depthRange), stack: at(p.folder, p.stack) } }))
       .filter((i) => i.entry.file);
     const photos = await this.add(items.map((i) => i.entry), { onProgress });
     for (let i = 0; i < photos.length; i++) {

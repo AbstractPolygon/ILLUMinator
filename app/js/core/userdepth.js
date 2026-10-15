@@ -13,6 +13,8 @@
 
 import { sensorToOutput } from './render.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
+import { bufferReader, readLightFieldPicture } from './lfp.js';
+import { decodeDepth } from './processed.js';
 
 const FIT = { kx: 1, ky: 0.995, dx: -1 / 2022, dy: -1 / 1404 };
 
@@ -128,4 +130,25 @@ export function userDepthAlpha(map, sampler, cam) {
     }
   }
   return alpha;
+}
+
+// The depth Lytro Desktop computed for a picture, from its stack.lfp (the
+// same size and placement as a user depth map; it follows the user's edits
+// when there are some). Returns a map for userDepthAlpha, or null.
+export async function stackDepth(bytes) {
+  const pic = await readLightFieldPicture(bufferReader(bytes));
+  const desc = pic.stacks.map((s) => s.depth).find((d) => d && d.width && d.height) || pic.frameDepth;
+  if (!desc) return null;
+  const { width, height, lambda } = decodeDepth(desc);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of lambda) {
+    if (!Number.isFinite(v)) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  if (!(max > min)) return null;
+  const data = new Float32Array(lambda.length);
+  for (let i = 0; i < data.length; i++) data[i] = Number.isFinite(lambda[i]) ? (lambda[i] - min) / (max - min) : 0.5;
+  return { width, height, data, min, max };
 }

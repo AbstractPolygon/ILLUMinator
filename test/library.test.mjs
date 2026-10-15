@@ -177,3 +177,15 @@ test('keeps a Lytro Desktop depth map with its photo', async () => {
   const reloaded = await new Library(store).load();
   assert.equal(reloaded.photos[0].depthRange, 'stack.userdepthmap.txt');
 });
+
+test("keeps Lytro Desktop's stack.lfp (its computed depth) with a raw photo", async () => {
+  const store = memoryStorage();
+  const lib = await new Library(store, { readSummary: async () => ({ photoId: 'p1', thumbnail: null }) }).load();
+  const entries = groupPhotos(['raw.lfp', 'stack.lfp', 'stack.view.lfp'].map((n) => ({ path: `Beach/${n}`, file: file(n) })));
+  const [photo] = await lib.add(entries);
+  assert.equal(photo.file, 'raw.lfp');
+  assert.equal((await lib.stack(photo)).name, 'stack.lfp');
+  await store.remove('library.json');
+  const reloaded = await new Library(store).load();
+  assert.equal(reloaded.photos[0].stack, 'stack.lfp');
+});

@@ -3,7 +3,7 @@ import { readEdits, writeEdits, editsStore, EDITS_FORMAT, EDITS_VERSION } from '
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
-import { decodePngGray, parseDepthRange } from './core/userdepth.js';
+import { decodePngGray, parseDepthRange, stackDepth } from './core/userdepth.js';
 import { upscaleImage } from './gpu/upscale.js';
 import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
@@ -640,12 +640,16 @@ async function openItem(photo) {
   if (state.info && state.current && state.current.photo === photo) lib.setPhotoId(photo, state.info.photoId).catch(() => {});
 }
 
-// A depth map edited in Lytro Desktop, kept with the photo when its library
-// was imported: used instead of measuring depth (core/userdepth.js).
+// The depth map from Lytro Desktop, kept with the photo when its library
+// was imported: used instead of measuring depth (core/userdepth.js). An
+// edited one if there is one, else the one Lytro computed (in stack.lfp).
 async function readUserDepth(photo) {
   try {
     const files = await lib.userDepth(photo);
-    if (!files) return null;
+    if (!files) {
+      const stack = await lib.stack(photo);
+      return stack ? await stackDepth(new Uint8Array(await stack.arrayBuffer())) : null;
+    }
     const range = parseDepthRange(new TextDecoder().decode(await files.range.arrayBuffer()));
     if (!range) return null;
     const bytes = new Uint8Array(await files.image.arrayBuffer());

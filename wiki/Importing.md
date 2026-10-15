@@ -20,7 +20,7 @@ What carries over from Lytro Desktop:
 - *Animation:* every animated setting becomes keyframes, curves included, with Keyframe animation turned on: focus, focus point, aperture, focus spread, tilt, viewpoint, pivot, zoom, pan, exposure, white balance, the tone sliders, saturation and defringe threshold. Zoom and pan carry over when they are not animated too.
 - *Effects:* each of Lytro Desktop's effect layers becomes a local adjustment, named *Lytro effect 1*, *2* and so on: its ellipse or depth range as the mask, and its exposure, contrast, brightness, saturation and black and white as the effects. Lytro's living filters Film Noir, Carnival, Mosaic, Crayon, Blur+ and Pop become ILLUMinator's filters of the same kind.
 - *3D:* the stereo baseline.
-- *Depth map:* a depth map edited in Lytro Desktop (`stack.userdepthmap.png`) is kept with the photo and used for blur and depth masks. *Lytro Desktop depth map* under [[Camera]] → Depth turns it off.
+- *Depth map:* the depth map Lytro Desktop computed (in `stack.lfp`) is kept with the photo and used for blur and depth masks; one edited in Lytro Desktop (`stack.userdepthmap.png`) is kept too and used first. *Lytro Desktop depth map* under [[Camera]] → Depth turns it off.
 
 Some things have no equivalent yet and are listed in the note: animated sharpening, noise reduction, defringe radius and 3D (they keep their starting value), the 3D pivot, the Glass, Line Art and 8-Track filters, and effects that shift hues, fill with a color, insert an image or combine a place and a depth mask (these keep the place). Depth ranges of effects are matched to a typical picture's depth, so check them on photos with a very deep or very shallow scene.
 

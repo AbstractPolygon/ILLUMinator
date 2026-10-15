@@ -16,6 +16,7 @@ Photos/IMG_0001/IMG_0001.LFR        the photo
                /thumb.jpg           its thumbnail
 Photos/Beach/raw.lfp                imported from Lytro Desktop
             /stack.view.lfp         with Lytro Desktop's edits
+            /stack.lfp              Lytro Desktop's picture, with the depth it computed
             /stack.userdepthmap.png a depth map edited in Lytro Desktop, with its .txt
 ```
 
