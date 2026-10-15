@@ -1173,7 +1173,7 @@ async function renderStill() {
 
 // Full resolution re-renders what the camera shows (viewpoint, focus,
 // aperture, depth of field) from every sensor pixel. The checkbox turns the
-// mode on (Scale and Render appear); Render makes the still. Any change to
+// mode on (Scale appears, Render is enabled); Render makes the still. Any change to
 // the picture returns to the live view until Render is pressed again.
 function setFullResMode(on) {
   if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) on = false;
@@ -4421,7 +4421,7 @@ function baseName() {
 }
 
 // Saved photos and 3D images are enlarged by Render > Photo > Size, and
-// video frames to Render > Video > Size, with the Upscaling settings.
+// video frames to Render > Video > Size, both with Render > Upscaling.
 function upscaleSettings() {
   return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
 }
@@ -4429,13 +4429,8 @@ function upscaleSettings() {
 function enlargeForSave(source) {
   const k = +$('photo-size').value || 1;
   if (k === 1) return source;
-  return upscaleImage(source, Math.round(source.width * k), Math.round(source.height * k), { ...upscaleSettings(), method: $('photo-upscale').value });
+  return upscaleImage(source, Math.round(source.width * k), Math.round(source.height * k), upscaleSettings());
 }
-// Photo > Upscaling applies only when the photo is enlarged.
-function showPhotoUpscale() {
-  $('photo-upscale').disabled = (+$('photo-size').value || 1) === 1;
-}
-$('photo-size').addEventListener('change', showPhotoUpscale);
 
 // Photo > File format: PNG, or JPEG at its quality.
 function savePhoto(source, name) {
@@ -5163,6 +5158,8 @@ async function applySettings() {
       masking: +$('sharp-masking').value,
       luminance: +$('nr-luminance').value,
       color: +$('nr-color').value,
+      dust: +$('nr-dust').value,
+      speckle: +$('nr-speckle').value,
     },
     detail: +$('detail').value,
     local: localSettings(),
@@ -5278,7 +5275,6 @@ async function restoreEdits(info) {
     showFrameRate();
     showAnimationEnabled();
     showVideoCodecs();
-    showPhotoUpscale();
     showPhotoFormat();
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;

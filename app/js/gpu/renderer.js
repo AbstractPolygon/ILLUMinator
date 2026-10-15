@@ -14,7 +14,7 @@
 // Results are read back as linear RGB (Float32Array, w * h * 3) so the rest
 // of the pipeline (depth of field, defringing, tone mapping) is unchanged.
 
-import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT } from '../core/detail.js';
+import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
 import { MAX_MASKS } from '../core/local.js';
 
 // Texture unit used only for making and uploading textures.
@@ -434,6 +434,89 @@ void main() {
     }
   }
   outColor = vec4(m, 0.0, 0.0, 0.0);
+}`;
+
+// Details, spot removal (core/detail.js removeSpeckles): each channel
+// clamped to its eight neighbors' range when it stands out beyond all of
+// them (uThreshold 0 = off). Brightness goes to alpha for the dust passes.
+const DETAIL_SPECKLE = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform float uThreshold;
+out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 c = max(texelFetch(uSrc, p, 0).rgb, vec3(0.0));
+  if (uThreshold > 0.0) {
+    vec3 lo = vec3(1e9);
+    vec3 hi = vec3(-1e9);
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        if (dx == 0 && dy == 0) continue;
+        vec3 v = sqrt(max(texelFetch(uSrc, clamp(p + ivec2(dx, dy), ivec2(0), size - 1), 0).rgb, vec3(0.0)));
+        lo = min(lo, v);
+        hi = max(hi, v);
+      }
+    }
+    vec3 v = sqrt(c);
+    vec3 k = mix(v, hi, step(hi + uThreshold, v));
+    k = mix(k, lo, step(v, lo - uThreshold));
+    c = k * k;
+  }
+  outColor = vec4(c, dot(c, LUMA));
+}`;
+
+// Details, dust: one separable pass over channel uChan (0 = red, 3 =
+// alpha) along uDir, written to red: uMode 0 max, 1 min, 2 Gaussian blur
+// (sigma 1, 5 taps).
+const DETAIL_MORPH = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform ivec2 uDir;
+uniform int uRadius;
+uniform int uMode;
+uniform int uChan;
+out vec4 outColor;
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float m = uMode == 0 ? -1e9 : uMode == 1 ? 1e9 : 0.0;
+  const float BLUR[5] = float[5](0.0545, 0.2442, 0.4026, 0.2442, 0.0545);
+  for (int k = -10; k <= 10; k++) {
+    if (k < -uRadius || k > uRadius) continue;
+    vec4 t = texelFetch(uSrc, clamp(p + uDir * k, ivec2(0), size - 1), 0);
+    float v = uChan == 3 ? t.a : t.r;
+    if (uMode == 0) m = max(m, v);
+    else if (uMode == 1) m = min(m, v);
+    else m += v * BLUR[k + 2];
+  }
+  outColor = vec4(m, 0.0, 0.0, 0.0);
+}`;
+
+// Details, dust: lifts each pixel by its spot's darkening (dustGain in
+// core/detail.js) from the blurred (uBlur) and closed (uClosed) brightness.
+const DETAIL_DUST = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform sampler2D uBlur;
+uniform sampler2D uClosed;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec3 c = texelFetch(uSrc, p, 0).rgb;
+  float b = texelFetch(uBlur, p, 0).r;
+  float cl = texelFetch(uClosed, p, 0).r;
+  float g = 1.0;
+  if (cl > 1e-9) {
+    float r = b / cl;
+    if (r > 0.0 && r < 1.0) g = 1.0 + smoothstep(${DUST_LOW}, ${DUST_HIGH}, r) * (1.0 / r - 1.0);
+  }
+  outColor = vec4(c * g, 1.0);
 }`;
 
 // Details, pass 1 (core/detail.js): luminance noise reduction (bilateral
@@ -1411,6 +1494,9 @@ export class GpuRenderer {
       dofTiles: program(gl, DOF_TILES),
       merge: program(gl, MERGE_PASS),
       detailNr: program(gl, DETAIL_NR),
+      detailSpeckle: program(gl, DETAIL_SPECKLE),
+      detailMorph: program(gl, DETAIL_MORPH),
+      detailDust: program(gl, DETAIL_DUST),
       detailSharpen: program(gl, DETAIL_SHARPEN),
       present: program(gl, PRESENT),
       localSpatial: program(gl, LOCAL_SPATIAL),
@@ -2171,6 +2257,8 @@ export class GpuRenderer {
   // Details panel (see core/detail.js): returns a new texture.
   details(src, w, h, p) {
     const gl = this.gl;
+    if (p.speckle > 0 || p.dust > 0) src = this.spots(src, w, h, p);
+    if (!(p.amount > 0 || p.luminance > 0 || p.color > 0)) return src;
     const mid = this.scratch(w, h, 'detailMid');
     const out = this.scratch(w, h, 'detailOut');
     let P = this.programs.detailNr;
@@ -2192,6 +2280,55 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uDetail, p.detail);
     gl.uniform1f(P.u.uHalo, HALO_LIMIT);
     gl.uniform1f(P.u.uMasking, p.masking || 0);
+    this.draw();
+    return out;
+  }
+
+  // Spot removal (core/detail.js removeSpeckles, removeDust): returns a
+  // new texture.
+  spots(src, w, h, p) {
+    const gl = this.gl;
+    let P = this.programs.detailSpeckle;
+    const clean = this.scratch(w, h, 'spotClean');
+    this.target(clean, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    this.bindTex(1, src);
+    gl.uniform1f(P.u.uThreshold, p.speckle > 0 ? speckleThreshold(p) : 0);
+    this.draw();
+    if (!(p.dust > 0)) return clean;
+    P = this.programs.detailMorph;
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    const a = this.scratch(w, h, 'spotA');
+    const blur = this.scratch(w, h, 'spotBlur');
+    const b = this.scratch(w, h, 'spotB');
+    const r = dustRadius(p);
+    const run = (from, to, dir, radius, mode, chan) => {
+      this.target(to, w, h);
+      this.bindTex(1, from);
+      gl.uniform2i(P.u.uDir, dir[0], dir[1]);
+      gl.uniform1i(P.u.uRadius, radius);
+      gl.uniform1i(P.u.uMode, mode);
+      gl.uniform1i(P.u.uChan, chan);
+      this.draw();
+    };
+    run(clean, a, [1, 0], 2, 2, 3);
+    run(a, blur, [0, 1], 2, 2, 0);
+    run(blur, a, [1, 0], r, 0, 0);
+    run(a, b, [0, 1], r, 0, 0);
+    run(b, a, [1, 0], r, 1, 0);
+    run(a, b, [0, 1], r, 1, 0);
+    P = this.programs.detailDust;
+    const out = this.scratch(w, h, 'spotOut');
+    this.target(out, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    gl.uniform1i(P.u.uBlur, 2);
+    gl.uniform1i(P.u.uClosed, 3);
+    this.bindTex(1, clean);
+    this.bindTex(2, blur);
+    this.bindTex(3, b);
     this.draw();
     return out;
   }

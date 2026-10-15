@@ -53,3 +53,29 @@ test('sharpening increases edge contrast', () => {
   assert.ok(at(7) < 0.1 && at(8) > 0.4, `edge ${at(7)} ${at(8)}`);
   assert.ok(Math.abs(at(1) - 0.1) < 1e-4, 'flat areas unchanged');
 });
+
+const flat = (w, h, v = 0.3) => new Float32Array(w * h * 3).fill(v);
+
+test('speckles: a hot pixel is clamped, a flat image is untouched', () => {
+  const w = 16;
+  const rgb = flat(w, w);
+  const i = 3 * (8 * w + 8);
+  rgb[i] = rgb[i + 1] = rgb[i + 2] = 1;
+  const out = applyDetail(rgb, w, w, makeDetail({ details: { speckle: 50 } }));
+  assert.ok(Math.abs(out[i] - 0.3) < 1e-6);
+  assert.ok(Math.abs(out[3 * 2] - 0.3) < 1e-6);
+});
+
+test('dust: a faint dark spot is lifted, a strong dark mark is kept', () => {
+  const w = 48;
+  const rgb = flat(w, w, 0.5);
+  const set = (cx, cy, v) => {
+    for (let y = cy - 2; y <= cy + 2; y++) for (let x = cx - 2; x <= cx + 2; x++) rgb.fill(v, 3 * (y * w + x), 3 * (y * w + x) + 3);
+  };
+  set(12, 12, 0.4); // faint dust
+  set(36, 36, 0.05); // dark detail
+  const out = applyDetail(rgb, w, w, makeDetail({ details: { dust: 50 } }));
+  assert.ok(out[3 * (12 * w + 12)] > 0.47, `dust ${out[3 * (12 * w + 12)]}`);
+  assert.ok(out[3 * (36 * w + 36)] < 0.1, `detail ${out[3 * (36 * w + 36)]}`);
+  assert.ok(Math.abs(out[3 * (1 * w + 1)] - 0.5) < 1e-6);
+});

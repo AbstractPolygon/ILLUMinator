@@ -13,7 +13,15 @@ A stereo pair from two viewpoints across the lens.
 
 - *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
 - *High quality depth map:* sharper depth edges that match the photo, about twice as slow to measure. Off, the faster depth map is used.
-- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render* starts it.
+- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, below *Upscaling*, starts it.
+
+## Upscaling
+
+Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*, a filter that keeps edges crisp; *Smooth*, the softer ordinary enlarging; or *FSR 1* (AMD FidelityFX Super Resolution 1), which enlarges along the edges it finds and then sharpens with its own contrast-adaptive sharpening. All three run on the graphics card, or on the processor where WebGL 2 is not available (slower). When a picture is made smaller, FSR 1 uses Lanczos.
+
+- *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's own sharpening. It has no effect at *Native* size.
+
+Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.
 
 ## Speed
 
@@ -22,8 +30,7 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 ## Photo
 
 - *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.
-- *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×.
-- *Upscaling:* how they are enlarged: *Lanczos (sharp)*, which keeps edges crisp, *Smooth*, softer, or *FSR 1*, AMD's edge-following upscaler. Used when *Size* is larger than *Native*; the *Sharpen* setting under *Upscaling* applies too.
+- *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings.
 - *Save PNG* (or *Save JPEG*) saves the picture as shown, at that size.
 
 ## Video
@@ -35,16 +42,7 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
   - 1:1, 1080 × 1080: square posts
   - 16:9, 1920 × 1080: YouTube, X, LinkedIn (and 3840 × 2160 for YouTube 4K)
 
-  For a part of the picture other than the center, first crop to the same shape (Crop → *Aspect ratio*).
-- *Upscaling:* how each frame is brought to that size: *Lanczos (sharp)*, *Smooth* or *FSR 1*. Frames larger than the video are reduced with a filter that keeps fine detail from flickering.
+  For a part of the picture other than the center, first crop to the same shape (Crop → *Aspect ratio*). Frames are enlarged with the [Upscaling](#upscaling) settings; frames larger than the video are reduced with a filter that keeps fine detail from flickering.
 - *Compression:* the codec. WebM: *VP9*, *VP8* or *AV1*; MP4: *H.264*, *H.265 (HEVC)* or *AV1*. Only the kinds this browser or computer can record are offered; the others are marked *not available here*. H.265 depends on the computer's video hardware.
 - *Quality:* the video's bitrate, 1 to 40 Mbit/s (16 by default). Higher keeps more detail and makes bigger files; for 4K, 30 or more works well.
 - *Export video* saves the animation, at the current *Resolution*, or with *Full resolution* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
-
-## Upscaling
-
-Settings for every enlarged picture, photo or video. The method is chosen under *Photo* and *Video*: *Lanczos (sharp)*, a filter that keeps edges crisp; *Smooth*, the softer ordinary enlarging; or *FSR 1* (AMD FidelityFX Super Resolution 1), which enlarges along the edges it finds and then sharpens with its own contrast-adaptive sharpening. All three run on the graphics card, or on the processor where WebGL 2 is not available (slower). When a picture is made smaller, FSR 1 uses Lanczos.
-
-- *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's own sharpening. It has no effect at *Native* size.
-
-Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.
