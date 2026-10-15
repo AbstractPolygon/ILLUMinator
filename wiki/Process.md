@@ -14,7 +14,7 @@ A color lookup table applied as the last step of the look, after every other adj
 
 *Look* sets how the picture starts out, before the other sliders:
 
-- *Lytro Desktop* (the starting choice): the camera's exposure with Lytro Desktop's contrast and color, so raw photos open looking as they do in Lytro Desktop, with deep shadows and rich color. Measured against Lytro Desktop's own pictures of the same photos.
+- *Lytro Desktop* (the starting choice): the camera's exposure with Lytro Desktop's contrast and color, so raw photos open looking as they do in Lytro Desktop, with deep shadows and rich color. Measured against Lytro Desktop's pictures of the same photos.
 - *Flat:* an exposure picked for each photo (its brightest parts just below white) and no curve. A neutral start that keeps the most shadow detail, for grading from scratch.
 
 Exported pictures that Lytro Desktop finished already (`.LFP` files without a light field) keep their look.
