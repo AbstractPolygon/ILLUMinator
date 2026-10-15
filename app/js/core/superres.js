@@ -318,7 +318,11 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   for (let p = 0; p < W * H; p++) sharpY[p] = (accY[p] + upY[p] * lambda) / (wsum[p] + lambda);
   // Back-projection: correct the result by how far each raw sample is from
   // what the result predicts for it. Damped, so noise is not amplified.
+  // The lattice pattern is divided out before each pass too: otherwise the
+  // passes, correcting toward samples that carry it, build it up.
+  const lattice = { g, xMin, yMin, unit, scale };
   for (let pass = 0; pass < passes; pass++) {
+    removeLatticePattern(sharpY, upY, focus, wsum, W, H, lattice);
     const r = splat(sharpY, pass + 1);
     for (let p = 0; p < W * H; p++) sharpY[p] = Math.max(0, sharpY[p] + (0.8 * r.accY[p]) / (r.wsum[p] + lambda));
   }
@@ -349,19 +353,83 @@ export function coverage(spread) {
   return t * t * (3 - 2 * t);
 }
 
-const PHASE_BINS = 16;
+export const PHASE_BINS = 16;
+// Lattice pattern tiles: about this many lens pitches across; each tile's
+// table leans on the whole picture's where it has few samples.
+export const LATTICE_TILE_LENSES = 32;
+const LATTICE_PRIOR = 24;
+
+// Lattice pattern tiles for a W x H render: { tx, ty } (shared with the GPU).
+export function latticeTiles(W, H, { g, unit, scale }) {
+  const tile = Math.max(16, Math.round((LATTICE_TILE_LENSES * g.pitch * scale) / unit));
+  return { tx: Math.max(1, Math.round(W / tile)), ty: Math.max(1, Math.round(H / tile)) };
+}
+
+// Per tile gain tables from per tile, per phase bin sums of the splatted to
+// standard brightness ratio and their counts (tx * ty tables of PHASE_BINS
+// x PHASE_BINS): each shrunk toward the whole picture's table where it has
+// few samples and normalized to a mean of 1, so only the pattern (not a
+// tile's brightness) is divided out. Returns { gain, strength } or null
+// when there are too few samples.
+export function latticeTables(sum, cnt, tx, ty) {
+  const nn = PHASE_BINS * PHASE_BINS;
+  const gSum = new Float64Array(nn);
+  const gCnt = new Float64Array(nn);
+  for (let t = 0; t < tx * ty; t++) {
+    for (let i = 0; i < nn; i++) {
+      gSum[i] += sum[t * nn + i];
+      gCnt[i] += cnt[t * nn + i];
+    }
+  }
+  let total = 0;
+  let count = 0;
+  for (let i = 0; i < nn; i++) {
+    total += gSum[i];
+    count += gCnt[i];
+  }
+  if (count < nn * 20) return null;
+  const prior = new Float64Array(nn);
+  let var2 = 0;
+  for (let i = 0; i < nn; i++) {
+    prior[i] = gCnt[i] > 0 ? gSum[i] / gCnt[i] / (total / count) : 1;
+    var2 += (prior[i] - 1) ** 2;
+  }
+  const gain = new Float32Array(tx * ty * nn);
+  for (let t = 0; t < tx * ty; t++) {
+    let tSum = 0;
+    let tCnt = 0;
+    for (let i = 0; i < nn; i++) {
+      tSum += sum[t * nn + i];
+      tCnt += cnt[t * nn + i];
+    }
+    const mean = tCnt > 0 ? tSum / tCnt : 1;
+    let gm = 0;
+    for (let i = 0; i < nn; i++) {
+      const v = (sum[t * nn + i] / mean + prior[i] * LATTICE_PRIOR) / (cnt[t * nn + i] + LATTICE_PRIOR);
+      gain[t * nn + i] = v;
+      gm += v;
+    }
+    gm /= nn;
+    for (let i = 0; i < nn; i++) gain[t * nn + i] /= gm || 1;
+  }
+  return { gain, strength: Math.sqrt(var2 / nn) };
+}
 
 // The splatted samples' density and brightness vary slightly with position
 // inside each lens cell, so the result carries a faint pattern that repeats
 // with the lens grid (hexagons or squares, most visible on smooth surfaces).
-// Measure it: average the ratio of splatted to standard brightness at each
-// position within the cell (its lattice phase) over the whole picture, where
-// the scene evens out, and divide it out. Returns the pattern's strength
-// (relative standard deviation) before correction.
+// It changes with depth across the picture, so it is measured per tile:
+// the ratio of splatted to standard brightness at each position within the
+// cell (its lattice phase), averaged over each tile, where the scene evens
+// out, then divided out (blended between tile centers). Returns the
+// pattern's strength (relative standard deviation, whole picture) before
+// correction.
 function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale }) {
   const n = PHASE_BINS;
-  const sum = new Float64Array(n * n);
-  const cnt = new Float64Array(n * n);
+  const nn = n * n;
+  const { tx, ty } = latticeTiles(W, H, { g, unit, scale });
+  const sum = new Float64Array(tx * ty * nn);
+  const cnt = new Float64Array(tx * ty * nn);
   const phase = (k, j) => {
     const ly = yMin + (j / scale) * unit;
     const lx = xMin + (k / scale) * unit;
@@ -370,32 +438,31 @@ function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, u
     return [fi - Math.floor(fi), fj - Math.floor(fj)];
   };
   for (let j = 0; j < H; j++) {
+    const t0 = Math.min(ty - 1, Math.floor((j / H) * ty)) * tx;
     for (let k = 0; k < W; k++) {
       const p = j * W + k;
       if (focus[p] < 0.5 || !(wsum[p] > 0) || !(upY[p] > 1e-4)) continue;
       const [a, b] = phase(k, j);
-      const bin = Math.min(n - 1, Math.floor(b * n)) * n + Math.min(n - 1, Math.floor(a * n));
-      sum[bin] += sharpY[p] / upY[p];
-      cnt[bin] += 1;
+      const t = (t0 + Math.min(tx - 1, Math.floor((k / W) * tx))) * nn + Math.min(n - 1, Math.floor(b * n)) * n + Math.min(n - 1, Math.floor(a * n));
+      sum[t] += sharpY[p] / upY[p];
+      cnt[t] += 1;
     }
   }
-  let total = 0;
-  let count = 0;
-  for (let i = 0; i < n * n; i++) {
-    total += sum[i];
-    count += cnt[i];
-  }
-  if (count < n * n * 20) return 0;
-  const mean = total / count;
-  const gain = new Float32Array(n * n);
-  let var2 = 0;
-  for (let i = 0; i < n * n; i++) {
-    gain[i] = cnt[i] > 0 ? sum[i] / cnt[i] / mean : 1;
-    var2 += (gain[i] - 1) ** 2;
-  }
-  // Bilinear in phase (wrapping around the cell) to avoid bin edges.
+  const tables = latticeTables(sum, cnt, tx, ty);
+  if (!tables) return 0;
+  const { gain } = tables;
+  // Bilinear in phase (wrapping around the cell) and between tile centers.
+  const at = (t, bb, aa) => gain[t * nn + (((bb % n) + n) % n) * n + (((aa % n) + n) % n)];
   for (let j = 0; j < H; j++) {
+    const fy = Math.min(ty - 1, Math.max(0, (j / H) * ty - 0.5));
+    const y0 = Math.min(ty - 1, Math.floor(fy));
+    const y1 = Math.min(ty - 1, y0 + 1);
+    const wy = fy - y0;
     for (let k = 0; k < W; k++) {
+      const fx = Math.min(tx - 1, Math.max(0, (k / W) * tx - 0.5));
+      const x0 = Math.min(tx - 1, Math.floor(fx));
+      const x1 = Math.min(tx - 1, x0 + 1);
+      const wx = fx - x0;
       const [a, b] = phase(k, j);
       const fa = a * n - 0.5;
       const fb = b * n - 0.5;
@@ -403,12 +470,12 @@ function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, u
       const b0 = Math.floor(fb);
       const ta = fa - a0;
       const tb = fb - b0;
-      const at = (bb, aa) => gain[(((bb % n) + n) % n) * n + (((aa % n) + n) % n)];
-      const gv = (at(b0, a0) * (1 - ta) + at(b0, a0 + 1) * ta) * (1 - tb) + (at(b0 + 1, a0) * (1 - ta) + at(b0 + 1, a0 + 1) * ta) * tb;
+      const cell = (t) => (at(t, b0, a0) * (1 - ta) + at(t, b0, a0 + 1) * ta) * (1 - tb) + (at(t, b0 + 1, a0) * (1 - ta) + at(t, b0 + 1, a0 + 1) * ta) * tb;
+      const gv = (cell(y0 * tx + x0) * (1 - wx) + cell(y0 * tx + x1) * wx) * (1 - wy) + (cell(y1 * tx + x0) * (1 - wx) + cell(y1 * tx + x1) * wx) * wy;
       if (gv > 0) sharpY[j * W + k] /= gv;
     }
   }
-  return Math.sqrt(var2 / (n * n));
+  return tables.strength;
 }
 
 // Vignetting correction for a whole view at aperture offset (u, v):

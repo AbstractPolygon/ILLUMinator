@@ -18,6 +18,7 @@ import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, d
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
+import { PHASE_BINS, latticeTiles, latticeTables } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1123,7 +1124,7 @@ void main() {
 // The steps of core/superres.js renderSuperRes around the splat, on the GPU,
 // so a full resolution picture never leaves GPU memory.
 
-const PHASE_BINS = 16;
+// PHASE_BINS (lattice pattern bins per cell side) comes from core/superres.js.
 
 // Upsampled standard render and how much splatted detail to keep:
 // (r, g, b, focus).
@@ -1213,6 +1214,8 @@ uniform sampler2D uSharp;
 uniform sampler2D uAcc;
 uniform int uWidth;
 uniform int uPass;
+uniform ivec2 uTiles;  // lattice pattern tiles across, down
+uniform vec2 uSize;    // the render's size
 ${SR_PHASE}
 out vec2 vValue;
 void main() {
@@ -1230,8 +1233,9 @@ void main() {
   if (prep.a < 0.5 || !(texelFetch(uAcc, p, 0).g > 0.0) || !(upY > 1e-4)) return;
   vec2 ph = phaseAt(vec2(p));
   ivec2 bin = min(ivec2(floor(ph * ${PHASE_BINS}.0)), ivec2(${PHASE_BINS} - 1));
+  ivec2 tile = min(ivec2(floor(vec2(p) / uSize * vec2(uTiles))), uTiles - 1);
   vValue = vec2(sharp / upY, 1.0);
-  gl_Position = vec4((vec2(bin) + 0.5) / ${PHASE_BINS}.0 * 2.0 - 1.0, 0.0, 1.0);
+  gl_Position = vec4((vec2(tile * ${PHASE_BINS} + bin) + 0.5) / vec2(uTiles * ${PHASE_BINS}) * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
 const SR_HIST_FRAGMENT = `#version 300 es
@@ -1244,31 +1248,50 @@ void main() {
 
 // The full resolution picture: the standard render's color with the
 // splatted brightness (lattice pattern divided out) where in focus.
+// The lattice pattern divided out of the splatted brightness: per tile
+// gain tables (core/superres.js latticeTables), bilinear in phase and
+// between tile centers.
+const SR_DIVIDE = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSharp;
+uniform sampler2D uGain;  // tiles of PHASE_BINS x PHASE_BINS
+uniform ivec2 uTiles;
+uniform vec2 uSize;
+${SR_PHASE}
+out vec4 outColor;
+float gainAt(ivec2 tile, int b, int a) {
+  int n = ${PHASE_BINS};
+  return texelFetch(uGain, tile * n + ivec2(((a % n) + n) % n, ((b % n) + n) % n), 0).r;
+}
+float cell(ivec2 tile, ivec2 i, vec2 t) {
+  return mix(mix(gainAt(tile, i.y, i.x), gainAt(tile, i.y, i.x + 1), t.x), mix(gainAt(tile, i.y + 1, i.x), gainAt(tile, i.y + 1, i.x + 1), t.x), t.y);
+}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float sharp = texelFetch(uSharp, p, 0).r;
+  vec2 f = phaseAt(vec2(p)) * ${PHASE_BINS}.0 - 0.5;
+  ivec2 i = ivec2(floor(f));
+  vec2 t = f - vec2(i);
+  vec2 ft = clamp(vec2(p) / uSize * vec2(uTiles) - 0.5, vec2(0.0), vec2(uTiles - 1));
+  ivec2 t0 = min(ivec2(floor(ft)), uTiles - 1);
+  ivec2 t1 = min(t0 + 1, uTiles - 1);
+  vec2 w = ft - vec2(t0);
+  float g = mix(mix(cell(t0, i, t), cell(ivec2(t1.x, t0.y), i, t), w.x), mix(cell(ivec2(t0.x, t1.y), i, t), cell(t1, i, t), w.x), w.y);
+  outColor = vec4(g > 0.0 ? sharp / g : sharp, 0.0, 0.0, 0.0);
+}`;
+
 const SR_FINAL = `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D uPrep;
 uniform sampler2D uSharp;
-uniform sampler2D uGain;  // PHASE_BINS x PHASE_BINS
-uniform int uPattern;
 uniform float uMatch;
-${SR_PHASE}
 out vec4 outColor;
-float gainAt(int b, int a) {
-  int n = ${PHASE_BINS};
-  return texelFetch(uGain, ivec2(((a % n) + n) % n, ((b % n) + n) % n), 0).r;
-}
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec4 prep = texelFetch(uPrep, p, 0);
   float sharp = texelFetch(uSharp, p, 0).r;
-  if (uPattern == 1) {
-    vec2 f = phaseAt(vec2(p)) * ${PHASE_BINS}.0 - 0.5;
-    ivec2 i = ivec2(floor(f));
-    vec2 t = f - vec2(i);
-    float g = mix(mix(gainAt(i.y, i.x), gainAt(i.y, i.x + 1), t.x), mix(gainAt(i.y + 1, i.x), gainAt(i.y + 1, i.x + 1), t.x), t.y);
-    if (g > 0.0) sharp /= g;
-  }
   float upY = dot(prep.rgb, vec3(0.2126, 0.7152, 0.0722));
   float ratio = upY > 1e-6 ? min(4.0, sharp * uMatch / upY) : 1.0;
   float k = prep.a * ratio + (1.0 - prep.a);
@@ -1599,6 +1622,7 @@ export class GpuRenderer {
       srCombine: program(gl, SR_COMBINE),
       srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
       srFinal: program(gl, SR_FINAL),
+      srDivide: program(gl, SR_DIVIDE),
     };
     // Additive blending into 32-bit floats needs EXT_float_blend; otherwise
     // accumulate in half floats (enough for these sums).
@@ -2642,8 +2666,89 @@ export class GpuRenderer {
       this.draw();
       [sharp, next] = [next, sharp];
     };
+    const g = this.sampler.grid;
+    const { tx, ty } = latticeTiles(W, H, { g, unit: p.unit, scale: p.scale });
+    const hist = this.texture(tx * PHASE_BINS, ty * PHASE_BINS);
+    const sums = this.texture(1, 1);
+    owned.push(hist, sums);
+    // Point passes over every pixel, added up by blending: pass 0 into the
+    // lattice tiles' phase bins, pass 1 into the brightness sums.
+    const histogram = (tex, w, h, pass) => {
+      Q = P.srHist;
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uPrep, 1);
+      this.bindTex(1, prep);
+      gl.uniform1i(Q.u.uSharp, 2);
+      this.bindTex(2, sharp);
+      gl.uniform1i(Q.u.uAcc, 3);
+      this.bindTex(3, acc);
+      gl.uniform1i(Q.u.uWidth, W);
+      gl.uniform2i(Q.u.uTiles, tx, ty);
+      gl.uniform2f(Q.u.uSize, W, H);
+      gl.uniform2f(Q.u.uMin, p.xMin, p.yMin);
+      gl.uniform1f(Q.u.uUnit, p.unit);
+      gl.uniform1f(Q.u.uScale, p.scale);
+      gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+      gl.bindVertexArray(this.emptyVao);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      this.target(tex, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform1i(Q.u.uPass, pass);
+      gl.drawArrays(gl.POINTS, 0, W * H);
+      gl.disable(gl.BLEND);
+    };
+    // Lattice pattern (core/superres.js removeLatticePattern): measured per
+    // tile and divided out of the splatted brightness.
+    const removePattern = () => {
+      histogram(hist, tx * PHASE_BINS, ty * PHASE_BINS, 0);
+      const [binSum, binCount] = this.readChannels(hist, tx * PHASE_BINS, ty * PHASE_BINS, 2);
+      // Texture rows of tiles -> one table per tile.
+      const nn = PHASE_BINS * PHASE_BINS;
+      const sum = new Float64Array(tx * ty * nn);
+      const cnt = new Float64Array(tx * ty * nn);
+      const rowW = tx * PHASE_BINS;
+      for (let y = 0; y < ty * PHASE_BINS; y++) {
+        for (let x = 0; x < rowW; x++) {
+          const t = Math.floor(y / PHASE_BINS) * tx + Math.floor(x / PHASE_BINS);
+          const i = t * nn + (y % PHASE_BINS) * PHASE_BINS + (x % PHASE_BINS);
+          sum[i] = binSum[y * rowW + x];
+          cnt[i] = binCount[y * rowW + x];
+        }
+      }
+      const tables = latticeTables(sum, cnt, tx, ty);
+      if (!tables) return;
+      const flat = new Float32Array(tx * ty * nn);
+      for (let t = 0; t < tx * ty; t++) {
+        for (let i = 0; i < nn; i++) {
+          const x = (t % tx) * PHASE_BINS + (i % PHASE_BINS);
+          const y = Math.floor(t / tx) * PHASE_BINS + Math.floor(i / PHASE_BINS);
+          flat[y * rowW + x] = tables.gain[t * nn + i];
+        }
+      }
+      const gainTex = this.uploadFloat(flat, rowW, ty * PHASE_BINS, 'srGain');
+      Q = P.srDivide;
+      this.target(next, W, H);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uSharp, 1);
+      this.bindTex(1, sharp);
+      gl.uniform1i(Q.u.uGain, 2);
+      this.bindTex(2, gainTex);
+      gl.uniform2i(Q.u.uTiles, tx, ty);
+      gl.uniform2f(Q.u.uSize, W, H);
+      gl.uniform2f(Q.u.uMin, p.xMin, p.yMin);
+      gl.uniform1f(Q.u.uUnit, p.unit);
+      gl.uniform1f(Q.u.uScale, p.scale);
+      gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+      this.draw();
+      [sharp, next] = [next, sharp];
+    };
+
     combine(acc, 0);
     for (let pass = 0; pass < (p.passes || 0); pass++) {
+      // Divided out before each pass too, or the passes build it up.
+      removePattern();
       // The splat samples the current result with linear filtering: half
       // floats filter everywhere.
       Q = P.copy;
@@ -2656,50 +2761,9 @@ export class GpuRenderer {
       combine(residual, 1);
       gl.deleteTexture(residual);
     }
-
-    // Lattice pattern: ratio of splatted to standard brightness by position
-    // within the lens cell, and the overall brightness match.
-    const hist = this.texture(PHASE_BINS, PHASE_BINS);
-    const sums = this.texture(1, 1);
-    owned.push(hist, sums);
-    Q = P.srHist;
-    gl.useProgram(Q.p);
-    gl.uniform1i(Q.u.uPrep, 1);
-    this.bindTex(1, prep);
-    gl.uniform1i(Q.u.uSharp, 2);
-    this.bindTex(2, sharp);
-    gl.uniform1i(Q.u.uAcc, 3);
-    this.bindTex(3, acc);
-    gl.uniform1i(Q.u.uWidth, W);
-    const g = this.sampler.grid;
-    gl.uniform2f(Q.u.uMin, p.xMin, p.yMin);
-    gl.uniform1f(Q.u.uUnit, p.unit);
-    gl.uniform1f(Q.u.uScale, p.scale);
-    gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
-    gl.bindVertexArray(this.emptyVao);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE);
-    for (const [tex, size, pass] of [[hist, PHASE_BINS, 0], [sums, 1, 1]]) {
-      this.target(tex, size, size);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.uniform1i(Q.u.uPass, pass);
-      gl.drawArrays(gl.POINTS, 0, W * H);
-    }
-    gl.disable(gl.BLEND);
-    const [binSum, binCount] = this.readChannels(hist, PHASE_BINS, PHASE_BINS, 2);
+    removePattern();
+    histogram(sums, 1, 1, 1);
     const [[sumUp], [sumSharp]] = this.readChannels(sums, 1, 1, 2);
-    const n = PHASE_BINS * PHASE_BINS;
-    let total = 0;
-    let count = 0;
-    for (let i = 0; i < n; i++) {
-      total += binSum[i];
-      count += binCount[i];
-    }
-    const pattern = count >= n * 20;
-    const gain = new Float32Array(n);
-    for (let i = 0; i < n; i++) gain[i] = pattern && binCount[i] > 0 ? binSum[i] / binCount[i] / (total / count) : 1;
-    const gainTex = this.uploadFloat(gain, PHASE_BINS, PHASE_BINS, 'srGain');
 
     const out = this.scratch(W, H, 'superres');
     Q = P.srFinal;
@@ -2709,14 +2773,7 @@ export class GpuRenderer {
     this.bindTex(1, prep);
     gl.uniform1i(Q.u.uSharp, 2);
     this.bindTex(2, sharp);
-    gl.uniform1i(Q.u.uGain, 3);
-    this.bindTex(3, gainTex);
-    gl.uniform1i(Q.u.uPattern, pattern ? 1 : 0);
     gl.uniform1f(Q.u.uMatch, sumSharp > 0 ? sumUp / sumSharp : 1);
-    gl.uniform2f(Q.u.uMin, p.xMin, p.yMin);
-    gl.uniform1f(Q.u.uUnit, p.unit);
-    gl.uniform1f(Q.u.uScale, p.scale);
-    gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
     this.draw();
     for (const t of owned) if (t) gl.deleteTexture(t);
     return out;
