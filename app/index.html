@@ -778,13 +778,6 @@
         </details>
         <details class="subpanel">
           <summary><h3>Video</h3></summary>
-          <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
-            <select id="video-format">
-              <option value="webm" selected>WebM</option>
-              <option value="mp4">MP4</option>
-            </select>
-          </label>
-          <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
             <select id="video-size">
               <option value="1080" selected>1080p</option>
               <option value="1440">1440p</option>
@@ -799,7 +792,6 @@
               </optgroup>
             </select>
           </label>
-          <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
             <select id="video-codec">
               <option value="vp9" selected>VP9</option>
               <option value="vp8">VP8</option>
@@ -808,6 +800,14 @@
               <option value="av1">AV1</option>
             </select>
           </label>
+            <select id="video-format">
+              <option value="webm" selected>WebM</option>
+              <option value="mp4">MP4</option>
+            </select>
+          </label>
+          <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
+          <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
+          <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
           <label title="The video's bitrate: higher keeps more detail and makes bigger files">Quality <output data-for="video-quality" for="video-quality">16 Mbit/s</output>
             <input id="video-quality" type="range" min="1" max="40" step="1" value="16" data-default="16">
           </label>
