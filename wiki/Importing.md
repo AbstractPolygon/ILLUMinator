@@ -38,7 +38,7 @@ Drag files onto the window (in the desktop app, also *File → Import Lytro File
 
 ## Camera calibration
 
-Every camera is calibrated at the factory, and the data is specific to that camera: a list of defective pixels, the lens grid at each zoom and focus setting, and white images. Open **Settings** (the gear at the top right) and use **Camera calibration** to add it, either from the camera's backup (a `.tar` file) or from its unpacked folder. Backups are over a gigabyte, so the app reads the file in place and keeps only the small files: the tables and the hot pixel list. The big white images stay where they are.
+Every camera is calibrated at the factory, and the data is specific to that camera: a list of defective pixels, the lens grid at each zoom and focus setting, and white images. In the desktop app, open **Settings** (the gear at the top right) and use **Camera calibration** to add it (the browser version points to the desktop app instead), either from the camera's backup (a `.tar` file) or from its unpacked folder. Backups are over a gigabyte, so the app reads the file in place and keeps only the small files: the tables and the hot pixel list. The big white images stay where they are.
 
 The calibration is kept in your library and applies to every photo taken with the same camera, matched by the serial number stored in the photo. Photos open with it the next time they are opened. **Remove** in the same place deletes it.
 

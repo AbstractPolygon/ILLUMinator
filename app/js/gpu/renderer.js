@@ -809,6 +809,7 @@ uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
 uniform sampler2D uVeil;   // flare veil per tile (core/flare.js), linear
 uniform float uVeilAmount;
 uniform vec4 uLens;        // core/lens.js: k, zoom, vignetting, start (0 0 0 0: off)
+uniform float uLensK2;     // r^4 term of the distortion
 // Local adjustments (core/local.js).
 uniform int uMaskCount;
 uniform int uMaskKind[${MAX_MASKS}];  // 0 radial, 1 linear, 2 depth
@@ -852,11 +853,12 @@ vec3 colorAt(ivec2 q) {
   vec2 pos = vec2(q) + 0.5;
   vec3 c;
   // Lens correction, as in core/lens.js.
-  if (uLens.x != 0.0) {
+  if (uLens.x != 0.0 || uLensK2 != 0.0) {
     vec2 mid = size * 0.5;
     float R = length(mid);
     vec2 d = (pos - mid) / R;
-    pos = mid + d * (1.0 + uLens.x * dot(d, d)) * uLens.y * R;
+    float r2 = dot(d, d);
+    pos = mid + d * (1.0 + uLens.x * r2 + uLensK2 * r2 * r2) * uLens.y * R;
     c = srcAt(pos);
   } else {
     c = texelFetch(uSrc, q, 0).rgb;
@@ -3409,6 +3411,7 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uDepth, 3);
     this.bindTex(3, this.depthTex || src);
     gl.uniform4f(P.u.uLens, lens ? lens.k : 0, lens ? lens.zoom : 1, lens ? lens.vig : 0, lens ? lens.start : 0);
+    gl.uniform1f(P.u.uLensK2, lens && lens.k2 ? lens.k2 : 0);
     gl.uniform1i(P.u.uVeil, 2);
     this.bindTex(2, veil ? this.veilTex : src);
     const f = (fringe && fringe.colors) || [];

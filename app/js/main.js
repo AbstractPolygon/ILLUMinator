@@ -5792,7 +5792,7 @@ function colorSettings(val = (id) => +$(id).value) {
     ccm: $('ccm-mode').value === 'custom' ? Array.from({ length: 9 }, (_, i) => +$(`ccm-${i}`).value || 0) : null,
     color: { vibrance: val('vibrance') / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, val(`hue-${k}`) / 100])) },
     flare: { on: $('flare-on').checked, amount: val('flare-amount') / 100 },
-    lens: { distortion: val('lens-distortion'), vignetting: val('lens-vignetting'), midpoint: val('lens-midpoint') },
+    lens: { auto: $('lens-auto').checked, distortion: val('lens-distortion'), vignetting: val('lens-vignetting'), midpoint: val('lens-midpoint') },
     defringe: {
       on: $('fringe-on').checked,
       auto: $('fringe-auto').checked,
@@ -6205,6 +6205,7 @@ $('flare-on').onchange = () => {
   $('flare-amount').disabled = !$('flare-on').checked;
   applySettings();
 };
+$('lens-auto').onchange = applySettings;
 for (const id of ['lens-distortion', 'lens-vignetting', 'lens-midpoint']) {
   $(id).oninput = () => {
     showSliderValue($(id));

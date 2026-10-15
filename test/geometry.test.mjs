@@ -79,3 +79,26 @@ test('flipping vertically mirrors top to bottom and undoes itself', async () => 
   }
   assert.equal(flipVerticalOrientation(1), 4);
 });
+
+import { autoDistortion, lensParams, lensSource } from '../app/js/core/lens.js';
+
+test('the camera lens distortion is corrected from the zoom step, more at longer zoom', () => {
+  const wide = autoDistortion(-500);
+  const tele = autoDistortion(479);
+  assert.ok(wide.k1 + wide.k2 < 0 && tele.k1 + tele.k2 < wide.k1 + wide.k2);
+  assert.deepEqual(autoDistortion(2000), autoDistortion(479));
+  assert.equal(autoDistortion(undefined), null);
+  const mid = autoDistortion(190);
+  assert.ok(mid.k1 > autoDistortion(11).k1 && mid.k1 < autoDistortion(420).k1);
+});
+
+test('automatic lens correction leaves the middle alone and pulls the corners in', () => {
+  const cam = { capture: { zoomStep: 479 } };
+  const p = lensParams({}, cam);
+  const [mx, my] = lensSource(p, 500, 300, 1000, 600);
+  assert.ok(Math.hypot(mx - 500, my - 300) < 1e-6);
+  const [cx, cy] = lensSource(p, 1000, 600, 1000, 600);
+  assert.ok(cx < 1000 && cy < 600 && cx > 800);
+  assert.equal(lensParams({ auto: false }, cam), null);
+  assert.equal(lensParams({}, { capture: {} }), null);
+});

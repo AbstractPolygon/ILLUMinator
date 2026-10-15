@@ -148,7 +148,7 @@ function updateColor() {
   state.wbGains = auto.map((g, i) => g * manual[i]);
   state.look = makeLook(s);
   state.detail = makeDetail(s);
-  state.lens = lensParams(s.lens);
+  state.lens = lensParams(s.lens, state.lf && state.lf.cam);
   // Local adjustments: the masks that change something (or the one shown).
   const masks = parseMasks(s.local && s.local.masks);
   const show = s.local && s.local.show >= 0 && masks[s.local.show] ? s.local.show : -1;
@@ -201,7 +201,7 @@ function colorState(color) {
   const center = centerView();
   const { outW, outH } = state.sampler;
   const baseExposure = lytro ? LYTRO_EXPOSURE : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
-  return { settings: s, look, lens: lensParams(s.lens), matrix, baseExposure, veil, veilAmount, lytro };
+  return { settings: s, look, lens: lensParams(s.lens, state.lf.cam), matrix, baseExposure, veil, veilAmount, lytro };
 }
 
 // Local adjustments for a w x h picture (core/local.js), or null. `ctx`:

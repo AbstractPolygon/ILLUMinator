@@ -147,6 +147,8 @@ export function cameraInfo(metadata, fallbackLayout) {
       exposure: first(shutter.frameExposureDuration, shutter.pixelExposureDuration),
       fNumber: lens.fNumber,
       focalLength: lens.focalLength,
+      zoomStep: lens.zoomStep,
+      focusStep: lens.focusStep,
       dcfFile: get(md, 'picture', 'dcfFile'),
       // Color temperature the camera's white balance was set for (kelvin).
       cct: first(get(md, 'algorithms', 'awb', 'computed', 'cct'), get(md, 'settings', 'whiteBalance', 'cct')),
