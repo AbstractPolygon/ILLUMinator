@@ -30,6 +30,8 @@ Every setting that can be animated has <img src="images/key-prev.png" width="8" 
 
 **◆** turns the setting's animation on or off. *Hollow:* not animated; clicking it adds a keyframe at the playhead, and turns on *Animate: Keyframes* if needed. *Filled:* animated; clicking it removes all of that setting's keyframes. *Blue:* a keyframe of the setting sits at the playhead.
 
+A collapsed section or subsection that holds animated settings shows a filled ◆ at the right of its title, so keyframes are not hidden when it is closed.
+
 <img src="images/key-prev.png" width="8" height="14" alt="previous keyframe"> <img src="images/key-next.png" width="8" height="14" alt="next keyframe"> move the playhead to the setting's previous and next keyframe. Each shows only when there is a keyframe that way.
 
 They are on every slider of [[Process]] (the color matrix numbers aside), on every setting of the selected local adjustment (its strength, position, size, angle, fade, feather and every effect), on every Camera setting (the *Focus Point* row covers the focus and the focus point together, the *Viewpoint* row the viewpoint), on every slider of [[Optics]], and in the Animation panel on *Zoom*, *Pan X*, *Pan Y*, *Amount*, *Near* and *Far*. A slider without them keeps its full width.
