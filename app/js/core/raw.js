@@ -159,16 +159,36 @@ export function cameraInfo(metadata, fallbackLayout) {
 // away, diagonals included) replaced by that median. The median is not
 // thrown by a second bad pixel nearby, and "warm" pixels (twice as bright
 // as their surroundings, not only three times) are caught too. Returns
-// { raw, count }.
-export function fixHotPixels(raw, width, height) {
+// { raw, count }. `listed` (optional) holds pixel indices the camera's
+// calibration names as defective: those are always replaced, and the
+// search above still finds the ones the list misses.
+export function fixHotPixels(raw, width, height, listed = null) {
   const out = raw.slice();
   const nb = new Float64Array(8);
   const w2 = 2 * width;
   const offs = [-w2 - 2, -w2, -w2 + 2, -2, 2, w2 - 2, w2, w2 + 2];
   let count = 0;
+  const known = new Uint8Array(listed ? raw.length : 0);
+  if (listed) {
+    for (const i of listed) known[i] = 1;
+    for (const i of listed) {
+      const y = Math.floor(i / width);
+      const x = i - y * width;
+      if (x < 2 || y < 2 || x >= width - 2 || y >= height - 2) continue;
+      // Neighbors that are listed themselves are left out of the median.
+      const nb = [];
+      for (const o of offs) if (!known[i + o]) nb.push(raw[i + o]);
+      if (nb.length < 3) continue;
+      nb.sort((p, q) => p - q);
+      const m = nb.length % 2 ? nb[nb.length >> 1] : (nb[nb.length / 2 - 1] + nb[nb.length / 2]) * 0.5;
+      out[i] = Math.round(m);
+      count++;
+    }
+  }
   for (let y = 2; y < height - 2; y++) {
     let i = y * width + 2;
     for (let x = 2; x < width - 2; x++, i++) {
+      if (known[i]) continue;
       const v = raw[i];
       // Quick reject against the four nearest: most pixels are fine.
       const m4 = (raw[i - 2] + raw[i + 2] + raw[i - w2] + raw[i + w2]) * 0.25;
