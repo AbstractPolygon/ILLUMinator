@@ -1,5 +1,5 @@
-# Builds the desktop app installers on GitHub's machines: a Windows
-# installer (.exe), macOS disk images (.dmg, Apple Silicon and Intel) and
+# Builds the desktop app installers on GitHub's machines: Windows
+# installers (.exe, x64 and ARM64), macOS disk images (.dmg, Apple Silicon and Intel) and
 # Linux packages (.AppImage and .deb, x64), plus the web version as a .zip
 # for any static web server.
 # Run it from the Actions tab (Build desktop apps → Run workflow): the
@@ -112,7 +112,7 @@ jobs:
           cat > notes.md <<NOTES
           ILLUMinator ${version}.
 
-          - **Windows:** \`ILLUMinator-${version}-win-x64.exe\`
+          - **Windows:** \`ILLUMinator-${version}-win-x64.exe\` (Intel and AMD) or \`ILLUMinator-${version}-win-arm64.exe\` (ARM, such as Snapdragon)
           - **macOS:** \`ILLUMinator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`ILLUMinator-${version}-mac-x64.dmg\` (Intel)
           - **Linux:** \`ILLUMinator-${version}-linux-amd64.deb\` (Debian, Ubuntu) or \`ILLUMinator-${version}-linux-x86_64.AppImage\` (other distributions)
           - **Web:** \`ILLUMinator-${version}-web.zip\`, to unzip onto any static web server

@@ -4,7 +4,7 @@
 
 **Desktop app.** Download an installer from [Releases](https://github.com/AbstractPolygon/ILLUMinator/releases/latest):
 
-- **Windows:** the `.exe` installs into Program Files.
+- **Windows:** the `-x64.exe` for most PCs (Intel and AMD), the `-arm64.exe` for ARM PCs (such as Snapdragon). It installs into Program Files.
 - **macOS:** the `-arm64.dmg` for Apple Silicon, the `-x64.dmg` for Intel. The app is not code signed: right-click it and choose *Open* the first time.
 - **Linux:** the `.deb` for Debian and Ubuntu (`sudo apt install ./ILLUMinator-*.deb`), or the `.AppImage` for other distributions (`chmod +x` it, then run it).
 
