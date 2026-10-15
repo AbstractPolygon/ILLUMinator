@@ -657,32 +657,152 @@ async function setGrid({ id, grid, mode }) {
 
 // Grey-scale crop of the raw sensor image plus the lens centers inside it,
 // for the calibration view.
-async function rawCrop({ id, x, y, size }) {
+// The raw sensor for the Lenslets view: the window (x0, y0, w, h) in sensor
+// pixels drawn into ow x oh pixels (blocks averaged when zoomed out, nearest
+// pixel when zoomed in), with the lens centers in it. Brightness is scaled to
+// the whole sensor's highlights, so it does not jump while moving around.
+// With `sampling`, also how a full sensor render at `scale` uses the window.
+async function rawCrop({ id, x0, y0, w, h, ow, oh, scale = 3, alpha = 0, allInFocus = false, sampling = false }) {
   requireRaw();
   const { raw, cam, grid } = state.lf;
-  const x0 = Math.max(0, Math.min(cam.width - size, Math.round(x - size / 2)));
-  const y0 = Math.max(0, Math.min(cam.height - size, Math.round(y - size / 2)));
-  const pixels = new Uint8ClampedArray(size * size * 4);
-  let max = 1;
-  for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) max = Math.max(max, raw[(y0 + j) * cam.width + x0 + i]);
+  const { width, height } = cam;
+  if (!state.rawWhite || state.rawWhite.raw !== raw) {
+    const vals = [];
+    for (let i = 0; i < raw.length; i += 97) vals.push(raw[i]);
+    vals.sort((p, q) => p - q);
+    state.rawWhite = { raw, value: vals[Math.floor(vals.length * 0.997)] };
+  }
   const black = state.dev.black[1];
-  for (let j = 0; j < size; j++) {
-    for (let i = 0; i < size; i++) {
-      const v = Math.max(0, raw[(y0 + j) * cam.width + x0 + i] - black) / Math.max(1, max - black);
-      const o = (j * size + i) * 4;
-      pixels[o] = pixels[o + 1] = pixels[o + 2] = Math.round(255 * Math.sqrt(v));
+  const range = Math.max(1, state.rawWhite.value - black);
+  const pixels = new Uint8ClampedArray(ow * oh * 4);
+  const step = w / ow; // sensor pixels per output pixel
+  const n = Math.max(1, Math.min(4, Math.round(step))); // samples per axis
+  for (let j = 0; j < oh; j++) {
+    for (let i = 0; i < ow; i++) {
+      let sum = 0;
+      let cnt = 0;
+      for (let b = 0; b < n; b++) {
+        const sy = Math.floor(y0 + (j + (b + 0.5) / n) * step);
+        if (sy < 0 || sy >= height) continue;
+        for (let a = 0; a < n; a++) {
+          const sx = Math.floor(x0 + (i + (a + 0.5) / n) * step);
+          if (sx < 0 || sx >= width) continue;
+          sum += Math.max(0, raw[sy * width + sx] - black);
+          cnt++;
+        }
+      }
+      const o = (j * ow + i) * 4;
+      const v = cnt ? Math.round(255 * Math.sqrt(Math.min(1, sum / cnt / range))) : 24;
+      pixels[o] = pixels[o + 1] = pixels[o + 2] = v;
       pixels[o + 3] = 255;
     }
   }
-  const lenses = lensCenters(grid, cam.width, cam.height);
+  // Lens centers, only when they are far enough apart to see.
   const centers = [];
-  for (let k = 0; k < lenses.cx.length; k++) {
-    const cx = lenses.cx[k] - x0;
-    const cy = lenses.cy[k] - y0;
-    if (cx >= -grid.pitch && cy >= -grid.pitch && cx < size + grid.pitch && cy < size + grid.pitch) centers.push(cx, cy);
+  if (grid.pitch / step >= 5) {
+    const lenses = lensCenters(grid, width, height);
+    for (let k = 0; k < lenses.cx.length; k++) {
+      const cx = lenses.cx[k] - x0;
+      const cy = lenses.cy[k] - y0;
+      if (cx >= -grid.pitch && cy >= -grid.pitch && cx < w + grid.pitch && cy < h + grid.pitch) centers.push(cx, cy);
+    }
   }
-  post({ id, type: 'result', x0, y0, size, pitch: grid.pitch, pixels: pixels.buffer, centers }, [pixels.buffer]);
+  const extra = sampling ? samplingAt(x0, y0, w, h, scale, alpha, allInFocus) : { rUse: superResParams(state.sampler, { scale }).rUse };
+  const transfer = [pixels.buffer];
+  if (extra.coverage) transfer.push(extra.coverage.buffer);
+  post({ id, type: 'result', pitch: grid.pitch, pixels: pixels.buffer, centers, ...extra }, transfer);
   return undefined;
+}
+
+// How a full sensor render at `scale` samples the sensor window (x0, y0,
+// w, h), for the Lenslets view (follows renderSuperRes in core/superres.js):
+//  - rUse: the radius around each lens center whose pixels are used;
+//  - coverage: the splat weight every output pixel over the window receives
+//    at focus `alpha` (per lens depth when `allInFocus`), cw x ch pixels of
+//    the render starting at (cx0, cy0); gaps show where samples are sparse;
+//  - box: the window in lens units, to find it in a rendered picture
+//    (baseW lens units across).
+function samplingAt(x0, y0, w, h, scale, alpha, allInFocus) {
+  const { sampler } = state;
+  const g = sampler.grid;
+  const { width, height } = state.lf.cam;
+  const { rUse, sigma, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale });
+  const cos = Math.cos(g.rotation);
+  const sin = Math.sin(g.rotation);
+  const toLens = (x, y) => {
+    const dx = x - g.ox;
+    const dy = y - g.oy;
+    return [((cos * dx + sin * dy) - xMin) / unit, ((-sin * dx + cos * dy) - yMin) / unit];
+  };
+  const corners = [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]].map(([x, y]) => toLens(x, y));
+  const bx0 = Math.min(...corners.map((c) => c[0]));
+  const by0 = Math.min(...corners.map((c) => c[1]));
+  const bx1 = Math.max(...corners.map((c) => c[0]));
+  const by1 = Math.max(...corners.map((c) => c[1]));
+  const cx0 = Math.floor(bx0 * scale);
+  const cy0 = Math.floor(by0 * scale);
+  const cw = Math.max(1, Math.ceil(bx1 * scale) - cx0);
+  const ch = Math.max(1, Math.ceil(by1 * scale) - cy0);
+  const coverage = new Float32Array(cw * ch);
+  const depth = allInFocus && state.depth ? state.depth.alpha : null;
+  const bw = sampler.outW;
+  const bh = sampler.outH;
+  const depthAt = (lx, ly) => {
+    const fx = Math.min(bw - 1.001, Math.max(0, lx * detail));
+    const fy = Math.min(bh - 1.001, Math.max(0, ly * detail));
+    const ix = Math.floor(fx);
+    const iy = Math.floor(fy);
+    const ax = fx - ix;
+    const ay = fy - iy;
+    const q = iy * bw + ix;
+    return (depth[q] * (1 - ax) + depth[q + 1] * ax) * (1 - ay) + (depth[q + bw] * (1 - ax) + depth[q + bw + 1] * ax) * ay;
+  };
+  const inv2s2 = 1 / (2 * sigma * sigma);
+  const r2 = rUse * rUse;
+  // Lenses whose samples can land in the window: as far out as the largest
+  // shift at this focus, plus a lens.
+  const maxAlpha = depth ? 3 : Math.abs(alpha);
+  const margin = (maxAlpha * rUse + 2) * unit + g.pitch;
+  const lenses = lensCenters(g, width, height);
+  for (let k = 0; k < lenses.cx.length; k++) {
+    const lx0 = lenses.cx[k];
+    const ly0 = lenses.cy[k];
+    if (lx0 < x0 - margin || ly0 < y0 - margin || lx0 > x0 + w + margin || ly0 > y0 + h + margin) continue;
+    const r = lenses.r0 + Math.floor(k / lenses.cols);
+    const c = lenses.c0 + (k % lenses.cols);
+    const lensX = c * g.pitch + (r & 1) * g.pitch * 0.5;
+    const lensY = r * g.rowStep;
+    const lu = (lensX - xMin) / unit;
+    const lv = (lensY - yMin) / unit;
+    const a = depth ? depthAt(lu, lv) : alpha;
+    for (let y = Math.ceil(ly0 - rUse); y <= Math.floor(ly0 + rUse); y++) {
+      if (y < 2 || y >= height - 2) continue;
+      for (let x = Math.ceil(lx0 - rUse); x <= Math.floor(lx0 + rUse); x++) {
+        if (x < 2 || x >= width - 2) continue;
+        const dx = x - lx0;
+        const dy = y - ly0;
+        if (dx * dx + dy * dy > r2) continue;
+        const u = cos * dx + sin * dy;
+        const v = -sin * dx + cos * dy;
+        const conf = 1 - (u * u + v * v) / r2;
+        const ox = (lu - a * u) * scale - cx0;
+        const oy = (lv - a * v) * scale - cy0;
+        const px = Math.round(ox);
+        const py = Math.round(oy);
+        for (let j = -reach; j <= reach; j++) {
+          const yy = py + j;
+          if (yy < 0 || yy >= ch) continue;
+          const wy = Math.exp(-((yy - oy) ** 2) * inv2s2) * conf;
+          for (let i = -reach; i <= reach; i++) {
+            const xx = px + i;
+            if (xx < 0 || xx >= cw) continue;
+            coverage[yy * cw + xx] += wy * Math.exp(-((xx - ox) ** 2) * inv2s2);
+          }
+        }
+      }
+    }
+  }
+  return { rUse, coverage, cw, ch, scale, box: [bx0, by0, bx1, by1], baseW: bw / detail };
 }
 
 // Maps a point of the rendered image back to the sensor (for the calibration

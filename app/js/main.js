@@ -53,6 +53,9 @@ const state = {
   current: null, // { photo, name, file, sidecar } of the open photo
   view: { busy: false, pending: false },
 };
+// Lenslets mode view: `z` screen pixels per sensor pixel, (x, y) the sensor
+// point at the middle of the viewer.
+const lensView = { x: null, y: null, z: 4 };
 
 // ---------------------------------------------------------------- progress
 
@@ -589,6 +592,9 @@ function resetView() {
   resetAnimation();
   state.info = null;
   state.still = null;
+  state.lensStill = null;
+  state.lensPicture = null;
+  lensView.x = lensView.y = null;
   state.camera = { u: 0, v: 0 };
   state.focusPoint = { x: 0.5, y: 0.5 };
   showFocusPoint();
@@ -1163,6 +1169,7 @@ async function renderStill() {
     // Ignore a result that arrives after full resolution was switched off.
     if (msg && (msg.pixels || msg.bitmap) && state.fullRes) {
       state.still = toImageData(msg);
+      state.lensStill = { img: state.still, scale };
       draw(state.still);
       $('frame-label').textContent = `${msg.width}×${msg.height}`;
     }
@@ -1275,38 +1282,201 @@ function setDepthShown(on, { restore = true } = {}) {
 
 // ---------------------------------------------------------------- lenslets
 
-async function renderLenslets() {
-  const info = state.info;
-  const x = +$('lens-x').value * info.cam.width;
-  const y = +$('lens-y').value * info.cam.height;
-  const size = 160;
-  const msg = await engine.request('rawCrop', { x, y, size });
-  const zoom = 4;
-  const img = new OffscreenCanvas(size, size);
-  img.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(msg.pixels), size, size), 0, 0);
-  canvas.width = size * zoom;
-  canvas.height = size * zoom;
-  layoutCanvas();
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, size * zoom, size * zoom);
-  ctx.imageSmoothingEnabled = true;
-  ctx.strokeStyle = 'rgba(242, 179, 61, 0.9)';
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i < msg.centers.length; i += 2) {
-    const cx = (msg.centers[i] + 0.5) * zoom;
-    const cy = (msg.centers[i + 1] + 0.5) * zoom;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 2.5, 0, 2 * Math.PI);
-    ctx.stroke();
+// Lenslets mode: the raw sensor, zoomed and moved like a map (scroll to
+// zoom, drag to move); lensView is declared with the other view state.
+const LENS_MAX_ZOOM = 32;
+// The full sensor sampling is worked out for windows up to this many sensor
+// pixels; zoomed further out there are too many samples to show.
+const LENS_SAMPLING_AREA = 700 * 700;
+let lensBusy = false;
+let lensAgain = false;
+
+function lensMinZoom() {
+  const cam = state.info.cam;
+  return Math.min(viewer.clientWidth / cam.width, viewer.clientHeight / cam.height);
+}
+
+function lensClamp() {
+  const cam = state.info.cam;
+  if (lensView.x == null) {
+    lensView.x = cam.width / 2;
+    lensView.y = cam.height / 2;
   }
-  canvas.classList.remove('hidden');
-  scheduleHistogram();
-  $('frame-label').textContent = `sensor ${msg.x0}–${msg.x0 + size}, ${msg.y0}–${msg.y0 + size}`;
+  lensView.z = Math.min(LENS_MAX_ZOOM, Math.max(lensMinZoom(), lensView.z));
+  // Keep the sensor in view; centered along a side that fits entirely.
+  const hw = viewer.clientWidth / (2 * lensView.z);
+  const hh = viewer.clientHeight / (2 * lensView.z);
+  lensView.x = hw * 2 >= cam.width ? cam.width / 2 : Math.min(cam.width - hw, Math.max(hw, lensView.x));
+  lensView.y = hh * 2 >= cam.height ? cam.height / 2 : Math.min(cam.height - hh, Math.max(hh, lensView.y));
+}
+
+// Zooms by `factor` keeping the sensor point under (mx, my) in place.
+function lensZoomBy(factor, mx = viewer.clientWidth / 2, my = viewer.clientHeight / 2) {
+  if (!state.info || !state.info.cam) return;
+  lensClamp();
+  const sx = lensView.x + (mx - viewer.clientWidth / 2) / lensView.z;
+  const sy = lensView.y + (my - viewer.clientHeight / 2) / lensView.z;
+  lensView.z *= factor;
+  lensClamp();
+  lensView.x = sx - (mx - viewer.clientWidth / 2) / lensView.z;
+  lensView.y = sy - (my - viewer.clientHeight / 2) / lensView.z;
+  renderLenslets();
+}
+
+function lensDrag(event) {
+  canvas.setPointerCapture(event.pointerId);
+  canvas.classList.add('panning');
+  const start = { x: event.clientX, y: event.clientY, sx: lensView.x, sy: lensView.y };
+  canvas.onpointermove = (e) => {
+    lensView.x = start.sx - (e.clientX - start.x) / lensView.z;
+    lensView.y = start.sy - (e.clientY - start.y) / lensView.z;
+    renderLenslets();
+  };
+  canvas.onpointerup = () => {
+    canvas.onpointermove = null;
+    canvas.classList.remove('panning');
+  };
+}
+
+async function renderLenslets() {
+  if (!state.info || !state.info.cam || state.mode !== 'lenslets') return;
+  if (lensBusy) {
+    lensAgain = true;
+    return;
+  }
+  lensBusy = true;
+  try {
+    lensClamp();
+    const ow = Math.max(1, Math.round(viewer.clientWidth));
+    const oh = Math.max(1, Math.round(viewer.clientHeight));
+    const { z } = lensView;
+    const w = ow / z;
+    const h = oh / z;
+    const x0 = lensView.x - w / 2;
+    const y0 = lensView.y - h / 2;
+    const scale = +$('still-scale').value;
+    const p = cameraParams();
+    const sampling = w * h <= LENS_SAMPLING_AREA;
+    const msg = await engine.request('rawCrop', { x0, y0, w, h, ow, oh, scale, alpha: p.alpha, allInFocus: !(p.aperture > 0), sampling });
+    if (state.mode !== 'lenslets' || !msg) return;
+    canvas.width = ow;
+    canvas.height = oh;
+    view.k = 1;
+    view.cx = view.cy = 0.5;
+    layoutCanvas();
+    $('zoom-label').textContent = `${Math.round(z * 100)}%`;
+    $('zoom-out').disabled = z <= lensMinZoom() + 1e-9;
+    $('zoom-in').disabled = z >= LENS_MAX_ZOOM - 1e-9;
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(msg.pixels), ow, oh), 0, 0);
+    ctx.lineWidth = 1.5;
+    const circles = $('lens-circles').checked && msg.rUse * z >= 6;
+    for (let i = 0; i < msg.centers.length; i += 2) {
+      const cx = msg.centers[i] * z;
+      const cy = msg.centers[i + 1] * z;
+      if (circles) {
+        ctx.strokeStyle = 'rgba(77, 182, 255, 0.75)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, msg.rUse * z, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(242, 179, 61, 0.9)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.min(2.5, msg.pitch * z * 0.15), 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+    canvas.classList.remove('hidden');
+    canvas.classList.add('pannable');
+    scheduleHistogram();
+    $('frame-label').textContent = `sensor ${Math.max(0, Math.round(x0))}–${Math.round(x0 + w)}, ${Math.max(0, Math.round(y0))}–${Math.round(y0 + h)}`;
+    showLensSampling(msg, scale);
+  } catch (err) {
+    showError(err);
+  } finally {
+    lensBusy = false;
+    if (lensAgain) {
+      lensAgain = false;
+      renderLenslets();
+    }
+  }
+}
+
+// Sidebar: the coverage map and the matching part of the rendered picture.
+function showLensSampling(msg, scale) {
+  const cov = $('lens-coverage');
+  const patch = $('lens-patch');
+  const cctx = cov.getContext('2d');
+  const pctx = patch.getContext('2d');
+  const shown = !!msg.coverage;
+  for (const id of ['lens-coverage', 'lens-coverage-title', 'lens-patch', 'lens-patch-title', 'lens-patch-note']) $(id).hidden = !shown;
+  if (!shown) {
+    $('lens-coverage-note').textContent = 'Zoom in to see how a Full sensor render samples this part of the sensor.';
+    return;
+  }
+  // Coverage: the splat weight each output pixel gets, against the mean.
+  const { cw, ch } = msg;
+  const data = new Float32Array(msg.coverage);
+  let sum = 0;
+  for (const v of data) sum += v;
+  const mean = sum / data.length || 1;
+  let thin = 0;
+  const img = new ImageData(cw, ch);
+  const STOPS = [[18, 12, 28], [150, 40, 60], [230, 120, 40], [240, 210, 90], [250, 250, 225]];
+  for (let i = 0; i < data.length; i++) {
+    const t = Math.min(1, data[i] / mean / 2);
+    if (data[i] < 0.5 * mean) thin++;
+    const f = t * (STOPS.length - 1);
+    const k = Math.min(STOPS.length - 2, Math.floor(f));
+    const a = f - k;
+    for (let c = 0; c < 3; c++) img.data[4 * i + c] = STOPS[k][c] * (1 - a) + STOPS[k + 1][c] * a;
+    img.data[4 * i + 3] = 255;
+  }
+  const fit = (W, H) => {
+    const k = Math.min(280 / W, 280 / H);
+    return [Math.round(W * k), Math.round(H * k)];
+  };
+  const [dw, dh] = fit(cw, ch);
+  cov.width = dw;
+  cov.height = dh;
+  const tmp = Object.assign(document.createElement('canvas'), { width: cw, height: ch });
+  tmp.getContext('2d').putImageData(img, 0, 0);
+  cctx.imageSmoothingEnabled = false;
+  cctx.drawImage(tmp, 0, 0, dw, dh);
+  $('lens-coverage-note').textContent = `${cw}×${ch} pixels of a ${scale}× render. Dark: few samples (filled in from the standard picture); ${Math.round((100 * thin) / data.length)}% get less than half the average.`;
+
+  // The same part of the last full sensor render, or else of the picture.
+  const still = state.lensStill;
+  const src = still ? still.img : state.lensPicture;
+  if (!src) {
+    for (const id of ['lens-patch', 'lens-patch-title', 'lens-patch-note']) $(id).hidden = true;
+    return;
+  }
+  const k = src.width / msg.baseW;
+  const [bx0, by0, bx1, by1] = msg.box;
+  const sw = (bx1 - bx0) * k;
+  const sh = (by1 - by0) * k;
+  const [pw, ph] = fit(sw, sh);
+  patch.width = pw;
+  patch.height = ph;
+  let drawable = src;
+  if (src instanceof ImageData) {
+    drawable = Object.assign(document.createElement('canvas'), { width: src.width, height: src.height });
+    drawable.getContext('2d').putImageData(src, 0, 0);
+  }
+  pctx.imageSmoothingEnabled = false;
+  pctx.fillStyle = '#000';
+  pctx.fillRect(0, 0, pw, ph);
+  pctx.drawImage(drawable, bx0 * k, by0 * k, sw, sh, 0, 0, pw, ph);
+  $('lens-patch-title').textContent = still ? `Last Full sensor render (${still.scale}×)` : 'Camera view';
+  $('lens-patch-note').textContent = still
+    ? `${Math.round(sw)}×${Math.round(sh)} pixels of the render.`
+    : 'Render with Full sensor in the camera view to compare its pixels here.';
 }
 
 // ---------------------------------------------------------------- modes
 
 function setMode(mode) {
+  // The Lenslets view compares the sensor with the picture shown before.
+  if (mode === 'lenslets' && state.mode === 'camera' && state.lastImage && !state.lastImage.pair) state.lensPicture = state.lastImage;
   state.mode = mode;
   updateSpreadOverlay();
   for (const b of document.querySelectorAll('#modes button')) b.classList.toggle('active', b.dataset.mode === mode);
@@ -1506,6 +1676,10 @@ viewer.addEventListener('wheel', (event) => {
   if (!state.info) return;
   event.preventDefault();
   const rect = viewer.getBoundingClientRect();
+  if (state.mode === 'lenslets') {
+    lensZoomBy(Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015)), event.clientX - rect.left, event.clientY - rect.top);
+    return;
+  }
   zoomBy(Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015)), event.clientX - rect.left, event.clientY - rect.top);
 }, { passive: false });
 
@@ -1534,11 +1708,12 @@ function startPan(event) {
   };
 }
 
-new ResizeObserver(() => layoutCanvas()).observe(viewer);
-$('zoom-in').onclick = () => zoomBy(1.5);
-$('zoom-out').onclick = () => zoomBy(1 / 1.5);
-$('zoom-label').onclick = zoomFit;
-$('zoom-1').onclick = zoomActual;
+new ResizeObserver(() => (state.mode === 'lenslets' ? renderLenslets() : layoutCanvas())).observe(viewer);
+const lenslets = () => state.mode === 'lenslets' && state.info && state.info.cam;
+$('zoom-in').onclick = () => (lenslets() ? lensZoomBy(1.5) : zoomBy(1.5));
+$('zoom-out').onclick = () => (lenslets() ? lensZoomBy(1 / 1.5) : zoomBy(1 / 1.5));
+$('zoom-label').onclick = () => (lenslets() ? lensZoomBy(lensMinZoom() / lensView.z) : zoomFit());
+$('zoom-1').onclick = () => (lenslets() ? lensZoomBy(1 / lensView.z) : zoomActual());
 
 // ---------------------------------------------------------------- pointer
 
@@ -1588,7 +1763,8 @@ canvas.addEventListener('click', (event) => {
 canvas.addEventListener('pointerdown', (event) => {
   if (event.button !== 1 || !state.info) return;
   event.preventDefault();
-  startPan(event);
+  if (state.mode === 'lenslets') lensDrag(event);
+  else startPan(event);
 });
 canvas.addEventListener('mousedown', (event) => {
   if (event.button === 1) event.preventDefault();
@@ -1596,6 +1772,10 @@ canvas.addEventListener('mousedown', (event) => {
 
 canvas.addEventListener('pointerdown', (event) => {
   if (!state.info || event.button !== 0 || state.picking || cropState.editing) return;
+  if (state.mode === 'lenslets') {
+    lensDrag(event);
+    return;
+  }
   if (event.shiftKey || (view.k > 1 && state.mode !== 'camera')) {
     startPan(event);
     return;
@@ -5103,7 +5283,8 @@ $('still-scale').onchange = () => setFullRes(false);
 $('still-passes').onchange = () => setFullRes(false);
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
-for (const id of ['lens-x', 'lens-y']) $(id).oninput = () => renderLenslets();
+$('lens-circles').onchange = () => renderLenslets();
+$('still-scale').addEventListener('change', () => renderLenslets());
 
 async function updateGrid(args) {
   const info = await engine.request('setGrid', args, { onProgress: showProgress });

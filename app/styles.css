@@ -667,3 +667,7 @@ label.lut-amount { margin-top: 14px; }
 [data-panel=camera] label.check:has(#pivot-on, #tilt-on) { margin-bottom: 10px; }
 
 /* Rendering: Video size above the export buttons. */
+
+/* Lenslets: the full sensor sampling of the part of the sensor shown. */
+.lens-side { display: block; width: 100%; height: auto; image-rendering: pixelated; background: #000; border-radius: 4px; }
+.lens-side-title { margin: 6px 0 4px; font-size: 12px; color: var(--muted); }
