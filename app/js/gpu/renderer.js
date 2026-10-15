@@ -18,7 +18,7 @@ import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, d
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
-import { LYTRO_CURVE, LYTRO_SATURATION, CURVE_START, CURVE_STEP } from '../core/base.js';
+import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
 import { PHASE_BINS, latticeTiles, latticeTables } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
@@ -953,10 +953,11 @@ float srgb(float v) {
 uniform int uLytro;
 uniform float uLytroCurve[${LYTRO_CURVE.length}];
 uniform float uLytroSat;
+uniform vec2 uLytroHue[${LYTRO_HUE.length}];
 float lytroCurve(float v) {
   if (v <= 0.0) return 0.0;
   float t = (log2(v) - float(${CURVE_START})) / ${CURVE_STEP.toFixed(3)};
-  if (t <= 0.0) return uLytroCurve[0] + (uLytroCurve[1] - uLytroCurve[0]) * v / exp2(float(${CURVE_START}));
+  if (t <= 0.0) return uLytroCurve[0] * v / exp2(float(${CURVE_START}));
   if (t >= float(${LYTRO_CURVE.length - 1})) return 1.0;
   int i = int(floor(t));
   return mix(uLytroCurve[i], uLytroCurve[i + 1], t - float(i));
@@ -965,8 +966,19 @@ float lytroCurve(float v) {
 vec3 encodeOut(vec3 c) {
   if (uLytro == 0) return vec3(srgb(c.r), srgb(c.g), srgb(c.b));
   vec3 s = vec3(lytroCurve(c.r), lytroCurve(c.g), lytroCurve(c.b));
-  float y = dot(s, vec3(0.2126, 0.7152, 0.0722));
-  return clamp(y + (s - y) * uLytroSat, 0.0, 1.0);
+  // Color per hue (lytroColor in core/base.js).
+  float u = 0.70710678 * (s.r - s.g);
+  float v = 0.40824829 * (s.r + s.g - 2.0 * s.b);
+  if (u == 0.0 && v == 0.0) return clamp(s, 0.0, 1.0);
+  float t = atan(v, u) / 6.28318531 * 12.0;
+  if (t < 0.0) t += 12.0;
+  int i = int(floor(t)) % 12;
+  vec2 k = uLytroSat * mix(uLytroHue[i], uLytroHue[(i + 1) % 12], fract(t));
+  float du = u * k.x - v * k.y - u;
+  float dv = u * k.y + v * k.x - v;
+  vec3 q = s + vec3(0.70710678 * du + 0.40824829 * dv, -0.70710678 * du + 0.40824829 * dv, -0.81649658 * dv);
+  q += dot(s - q, vec3(0.2126, 0.7152, 0.0722));
+  return clamp(q, 0.0, 1.0);
 }
 
 void main() {
@@ -2887,7 +2899,8 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uLytro, lytro ? 1 : 0);
     if (lytro) {
       gl.uniform1fv(P.u.uLytroCurve, LYTRO_CURVE);
-      gl.uniform1f(P.u.uLytroSat, LYTRO_SATURATION * (lytro.saturation ?? 1));
+      gl.uniform1f(P.u.uLytroSat, lytro.saturation ?? 1);
+      gl.uniform2fv(P.u.uLytroHue, LYTRO_HUE.flat());
     }
     gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
     if (look) {

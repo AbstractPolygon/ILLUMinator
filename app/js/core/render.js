@@ -6,7 +6,7 @@
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
 
-import { lytroTable, CURVE_MAX, LYTRO_SATURATION } from './base.js';
+import { lytroTable, lytroColor, CURVE_MAX } from './base.js';
 import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
@@ -522,7 +522,7 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
   // In the Lytro look the sliders come after the curve.
   const linearLook = lytro ? null : look;
   const lateLook = lytro ? look : null;
-  const sat = lytro ? LYTRO_SATURATION * (lytro.saturation ?? 1) : 1;
+  const sat = lytro ? lytro.saturation ?? 1 : 1;
   const scale = linearLook || local ? 1 : steps;
   const m = matrix.map((v) => v * exposure * scale);
   const p = [0, 0, 0];
@@ -560,13 +560,13 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
     G = G < 0 ? 0 : G > top ? top : G;
     B = B < 0 ? 0 : B > top ? top : B;
     if (lytro) {
-      const r0 = table[R | 0];
-      const g0 = table[G | 0];
-      const b0 = table[B | 0];
-      const y = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
-      let r1 = y + sat * (r0 - y);
-      let g1 = y + sat * (g0 - y);
-      let b1 = y + sat * (b0 - y);
+      p[0] = table[R | 0] / 255;
+      p[1] = table[G | 0] / 255;
+      p[2] = table[B | 0] / 255;
+      lytroColor(p, sat);
+      let r1 = 255 * p[0];
+      let g1 = 255 * p[1];
+      let b1 = 255 * p[2];
       if (lateLook) {
         // applyLook works on linear light: undo the display gamma around it.
         p[0] = Math.pow(Math.min(255, Math.max(0, r1)) / 255, 2.2);
