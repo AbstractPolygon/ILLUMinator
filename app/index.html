@@ -893,53 +893,39 @@
   <dialog id="quick-export-dialog">
     <form method="dialog">
       <h2>Quick export</h2>
-      <div class="qe-cols">
-        <section>
-          <h3>3D</h3>
-          <label id="qe-stereo-on-row" class="check"><input id="qe-stereo-on" type="checkbox"> Show 3D</label>
-          <label>3D type <select id="qe-stereo-mode"></select></label>
-          <label>Baseline <output data-for="qe-stereo-baseline"></output>
-            <input id="qe-stereo-baseline" type="range">
-          </label>
-          <button type="button" id="qe-stereo-btn">Save 3D image</button>
-        </section>
-        <section>
-          <h3>Quality</h3>
-          <label id="qe-depth-hq-row" class="check"><input id="qe-depth-hq" type="checkbox"> High quality depth map</label>
-          <label>Resolution <select id="qe-detail"></select></label>
-          <label class="check"><input id="qe-fullres-on" type="checkbox"> Full sensor</label>
-          <div id="qe-fullres-panel">
-            <label>Scale <select id="qe-still-scale"></select></label>
-            <label>Detail recovery <select id="qe-still-passes"></select></label>
-            <button type="button" id="qe-render-btn">Render</button>
-          </div>
-        </section>
-        <section>
-          <h3>Upscaling</h3>
-          <label>Method <select id="qe-upscale-method"></select></label>
-          <label>Sharpen <output data-for="qe-upscale-sharpen"></output>
-            <input id="qe-upscale-sharpen" type="range">
-          </label>
-        </section>
-        <section>
-          <h3>Photo</h3>
-          <label>Size <select id="qe-photo-size"></select></label>
-          <label>File format <select id="qe-photo-format"></select></label>
-          <label id="qe-photo-quality-row">JPEG quality <output data-for="qe-photo-quality"></output>
-            <input id="qe-photo-quality" type="range">
-          </label>
-          <button type="button" id="qe-photo-btn" class="primary">Save PNG</button>
-        </section>
-        <section>
-          <h3>Video</h3>
-          <label>Size <select id="qe-video-size"></select></label>
-          <label>Compression <select id="qe-video-codec"></select></label>
-          <label>File format <select id="qe-video-format"></select></label>
-          <label>Quality <output data-for="qe-video-quality"></output>
-            <input id="qe-video-quality" type="range">
-          </label>
-          <button type="button" id="qe-video-btn" class="primary">Export video</button>
-        </section>
+      <div class="qe-list">
+        <h3>3D</h3>
+        <label id="qe-stereo-on-row" class="qe-row"><span>Show 3D</span><input id="qe-stereo-on" type="checkbox"></label>
+        <label class="qe-row"><span>3D type</span><select id="qe-stereo-mode"></select></label>
+        <label class="qe-row"><span>Baseline</span><input id="qe-stereo-baseline" type="range"><output data-for="qe-stereo-baseline"></output></label>
+        <div class="qe-row"><span></span><button type="button" id="qe-stereo-btn">Save 3D image</button></div>
+
+        <h3>Quality</h3>
+        <label id="qe-depth-hq-row" class="qe-row"><span>High quality depth map</span><input id="qe-depth-hq" type="checkbox"></label>
+        <label class="qe-row"><span>Resolution</span><select id="qe-detail"></select></label>
+        <label class="qe-row"><span>Full sensor</span><input id="qe-fullres-on" type="checkbox"></label>
+        <div id="qe-fullres-panel">
+          <label class="qe-row"><span>Scale</span><select id="qe-still-scale"></select></label>
+          <label class="qe-row"><span>Detail recovery</span><select id="qe-still-passes"></select></label>
+          <div class="qe-row"><span></span><button type="button" id="qe-render-btn">Render</button></div>
+        </div>
+
+        <h3>Upscaling</h3>
+        <label class="qe-row"><span>Method</span><select id="qe-upscale-method"></select></label>
+        <label class="qe-row"><span>Sharpen</span><input id="qe-upscale-sharpen" type="range"><output data-for="qe-upscale-sharpen"></output></label>
+
+        <h3>Photo</h3>
+        <label class="qe-row"><span>Size</span><select id="qe-photo-size"></select></label>
+        <label class="qe-row"><span>File format</span><select id="qe-photo-format"></select></label>
+        <label id="qe-photo-quality-row" class="qe-row"><span>JPEG quality</span><input id="qe-photo-quality" type="range"><output data-for="qe-photo-quality"></output></label>
+        <div class="qe-row"><span></span><button type="button" id="qe-photo-btn" class="primary">Save PNG</button></div>
+
+        <h3>Video</h3>
+        <label class="qe-row"><span>Size</span><select id="qe-video-size"></select></label>
+        <label class="qe-row"><span>Compression</span><select id="qe-video-codec"></select></label>
+        <label class="qe-row"><span>File format</span><select id="qe-video-format"></select></label>
+        <label class="qe-row"><span>Quality</span><input id="qe-video-quality" type="range"><output data-for="qe-video-quality"></output></label>
+        <div class="qe-row"><span></span><button type="button" id="qe-video-btn" class="primary">Export video</button></div>
       </div>
       <menu>
         <span class="spacer"></span>
