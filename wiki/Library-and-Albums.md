@@ -16,6 +16,7 @@ Photos/IMG_0001/IMG_0001.LFR        the photo
                /thumb.jpg           its thumbnail
 Photos/Beach/raw.lfp                imported from Lytro Desktop
             /stack.view.lfp         with Lytro Desktop's edits
+            /stack.userdepthmap.png a depth map edited in Lytro Desktop, with its .txt
 ```
 
 The folders are the truth: copy a photo folder into `Photos/` and it appears in the library the next time it opens; delete one and it disappears. The same photo is never added twice (photos are recognized by their content, not their name).
