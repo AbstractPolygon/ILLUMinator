@@ -756,15 +756,6 @@
         </details>
         <details class="subpanel">
           <summary><h3>Photo</h3></summary>
-          <label title="PNG keeps every detail (lossless, bigger files); JPEG makes much smaller files">File format
-            <select id="photo-format">
-              <option value="png" selected>PNG</option>
-              <option value="jpeg">JPEG</option>
-            </select>
-          </label>
-          <label id="photo-quality-row" title="JPEG quality: higher keeps more detail and makes bigger files" hidden>JPEG quality <output data-for="photo-quality" for="photo-quality">92</output>
-            <input id="photo-quality" type="range" min="50" max="100" step="1" value="92" data-default="92">
-          </label>
           <label title="Saved photos are enlarged by this much with the chosen Upscaling; Native saves the picture as rendered">Size
             <select id="photo-size">
               <option value="1" selected>Native</option>
@@ -773,6 +764,15 @@
               <option value="3">3×</option>
               <option value="4">4×</option>
             </select>
+          </label>
+          <label title="PNG keeps every detail (lossless, bigger files); JPEG makes much smaller files">File format
+            <select id="photo-format">
+              <option value="png" selected>PNG</option>
+              <option value="jpeg">JPEG</option>
+            </select>
+          </label>
+          <label id="photo-quality-row" title="JPEG quality: higher keeps more detail and makes bigger files" hidden>JPEG quality <output data-for="photo-quality" for="photo-quality">92</output>
+            <input id="photo-quality" type="range" min="50" max="100" step="1" value="92" data-default="92">
           </label>
           <button id="png-btn" class="wide" disabled>Save PNG</button>
         </details>
