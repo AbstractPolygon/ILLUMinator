@@ -181,6 +181,9 @@ section[id] { scroll-margin-top: 60px; }
 .tree-link:hover { text-decoration-color: currentColor; }
 @media (max-width: 460px) { .tree { padding: 16px 14px; font-size: 12px; } .tr { grid-template-columns: 3ch 15ch minmax(0, 1fr); } .tr.nest { grid-template-columns: 3ch 3ch 12ch minmax(0, 1fr); } }
 .tree i { color: var(--accent); font-style: normal; }
+/* The ‹ ◆ › beside each setting, drawn as in the app. */
+.knav { white-space: nowrap; }
+.kchev { display: inline-block; width: 0.42em; height: 0.72em; margin-inline: 0.22em; vertical-align: -0.02em; }
 
 /* The keyframe editor, as the app draws it: always in the app's own dark
    colors, whatever the page's theme. */
@@ -394,7 +397,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
         <p class="eyebrow">Animation</p>
         <h2>Keyframe everything.</h2>
         <p>Lytro Desktop could only animate the camera: focus, viewpoint and aperture. In ILLUMinator every slider can change over time: exposure, white balance, the tone curve, each local adjustment's position and effect, tilt, bokeh, lens corrections and framing.</p>
-        <p>Each setting has a ◀ ◆ ▶ beside it to add keyframes and step between them, and the keyframe editor shows them grouped like the panels, with smooth curves you can shape.</p>
+        <p>Each setting has a <span class="knav" aria-label="previous keyframe, keyframe, next keyframe"><svg class="kchev" viewBox="0 0 7 12" aria-hidden="true"><path d="M5.5 2 1.5 6.5 5.5 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>◆<svg class="kchev" viewBox="0 0 7 12" aria-hidden="true"><path d="M1.5 2 5.5 6.5 1.5 11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> beside it to add keyframes and step between them, and the keyframe editor shows them grouped like the panels, with smooth curves you can shape.</p>
       </div>
       <div class="kf" role="img" aria-label="ILLUMinator's keyframe editor, switching between its Keyframes view and its Curves view, with keyframes on Process, Local Adjustments and Camera settings">
         <div class="kf-bar">
