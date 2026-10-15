@@ -1,7 +1,7 @@
 {
   "name": "illuminator",
   "productName": "ILLUMinator",
-  "version": "0.5.23",
+  "version": "0.5.24",
   "description": "Open, refocus and animate Lytro ILLUM and first generation light field photographs",
   "license": "PolyForm-Shield-1.0.0",
   "author": "AbstractPolygon, LLC",
