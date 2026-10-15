@@ -17,6 +17,8 @@ A color lookup table applied as the last step of the look, after every other adj
 - *Lytro Desktop* (the starting choice): the camera's exposure with Lytro Desktop's contrast and color, so raw photos open looking as they do in Lytro Desktop, with deep shadows and rich color. Measured against Lytro Desktop's pictures of the same photos.
 - *Flat:* an exposure picked for each photo (its brightest parts just below white) and no curve. A neutral start that keeps the most shadow detail, for grading from scratch.
 
+With *Lytro Desktop*, *Exposure* acts before Lytro's curve, as in Lytro Desktop. The other tone and color sliders (Contrast, Highlights, Shadows, Whites, Blacks, the tone curve, Vibrance, Saturation and the colors) act on the finished picture, after the curve.
+
 Exported pictures that Lytro Desktop finished already (`.LFP` files without a light field) keep their look.
 
 *Exposure* (EV), *Contrast*, *Highlights*, *Shadows*, *Whites* and *Blacks*.

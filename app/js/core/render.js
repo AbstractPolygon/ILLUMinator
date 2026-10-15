@@ -506,9 +506,12 @@ const LYTRO_TABLE = lytroTable(LYTRO_STEPS);
 // adjustments from makeLook (core/color.js), applied after exposure.
 // `local`: local adjustments (core/local.js) { masks, w, h, depth, dw, dh,
 // show } for a w x h picture, or null. `grade`: { lut, amount }, a LUT
-// (core/lut.js) applied to the sRGB result, or null. `lytro`: encode with
-// the Lytro Desktop look (core/base.js) instead of plain sRGB.
-export function toneMap(rgb, matrix, exposure, out, look = null, local = null, grade = null, lytro = false) {
+// (core/lut.js) applied to the sRGB result, or null. `lytro`: { saturation }
+// to encode with the Lytro Desktop look (core/base.js) instead of plain
+// sRGB; the look and saturation then act on the finished picture, after
+// Lytro's curve, as Lytro Desktop's sliders do, and `matrix` carries no
+// saturation of its own.
+export function toneMap(rgb, matrix, exposure, out, look = null, local = null, grade = null, lytro = null) {
   const n = rgb.length / 3;
   const px = out || new Uint8ClampedArray(n * 4);
   // Linear values become table indexes: 0..1 for sRGB, 0..CURVE_MAX for
@@ -516,7 +519,11 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
   const steps = lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
   const top = lytro ? LYTRO_STEPS : 4096;
   const table = lytro ? LYTRO_TABLE : SRGB;
-  const scale = look || local ? 1 : steps;
+  // In the Lytro look the sliders come after the curve.
+  const linearLook = lytro ? null : look;
+  const lateLook = lytro ? look : null;
+  const sat = lytro ? LYTRO_SATURATION * (lytro.saturation ?? 1) : 1;
+  const scale = linearLook || local ? 1 : steps;
   const m = matrix.map((v) => v * exposure * scale);
   const p = [0, 0, 0];
   const aspect = local ? local.w / local.h : 1;
@@ -530,11 +537,11 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
     let R = m[0] * r + m[1] * g + m[2] * b;
     let G = m[3] * r + m[4] * g + m[5] * b;
     let B = m[6] * r + m[7] * g + m[8] * b;
-    if (look || local) {
+    if (linearLook || local) {
       p[0] = R;
       p[1] = G;
       p[2] = B;
-      if (look) applyLook(p, look);
+      if (linearLook) applyLook(p, linearLook);
       if (local) {
         const k = i / 3;
         const x = k % local.w;
@@ -557,9 +564,22 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
       const g0 = table[G | 0];
       const b0 = table[B | 0];
       const y = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
-      px[o] = y + LYTRO_SATURATION * (r0 - y);
-      px[o + 1] = y + LYTRO_SATURATION * (g0 - y);
-      px[o + 2] = y + LYTRO_SATURATION * (b0 - y);
+      let r1 = y + sat * (r0 - y);
+      let g1 = y + sat * (g0 - y);
+      let b1 = y + sat * (b0 - y);
+      if (lateLook) {
+        // applyLook works on linear light: undo the display gamma around it.
+        p[0] = Math.pow(Math.min(255, Math.max(0, r1)) / 255, 2.2);
+        p[1] = Math.pow(Math.min(255, Math.max(0, g1)) / 255, 2.2);
+        p[2] = Math.pow(Math.min(255, Math.max(0, b1)) / 255, 2.2);
+        applyLook(p, lateLook);
+        r1 = 255 * Math.pow(Math.max(0, p[0]), 1 / 2.2);
+        g1 = 255 * Math.pow(Math.max(0, p[1]), 1 / 2.2);
+        b1 = 255 * Math.pow(Math.max(0, p[2]), 1 / 2.2);
+      }
+      px[o] = r1;
+      px[o + 1] = g1;
+      px[o + 2] = b1;
     } else {
       px[o] = table[R | 0];
       px[o + 1] = table[G | 0];

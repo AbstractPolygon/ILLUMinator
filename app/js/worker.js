@@ -153,7 +153,9 @@ function updateColor() {
   const show = s.local && s.local.show >= 0 && masks[s.local.show] ? s.local.show : -1;
   state.masks = masks.filter((m, i) => i === show || activeMasks([m]).length);
   state.maskShow = show >= 0 ? state.masks.indexOf(masks[show]) : -1;
-  const ccm = colorMatrix(lf.cam, s);
+  // The Lytro Desktop look applies saturation after its curve (toneMap).
+  state.lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
+  const ccm = colorMatrix(lf.cam, state.lytro ? { ...s, saturation: 1 } : s);
   // Fold the white balance gains into the matrix columns.
   state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3]);
   // Reduce flare: the veil is measured once on the center view.
@@ -165,7 +167,6 @@ function updateColor() {
   if (state.gpu) state.gpu.setVeil(state.veil);
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
-  state.lytro = s.lytroLook !== false;
   state.baseExposure = state.lytro ? LYTRO_EXPOSURE : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
@@ -187,16 +188,16 @@ function colorState(color) {
   const look = makeLook(s);
   if (state.pp) {
     const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
-    return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0, lytro: false };
+    return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0, lytro: null };
   }
   const gains = auto.map((g, i) => g * manual[i]);
-  const matrix = colorMatrix(state.lf.cam, s).map((v, i) => v * gains[i % 3]);
+  const lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
+  const matrix = colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3]);
   // The veil is measured once (with Reduce flare on); its amount animates.
   const veil = s.flare && s.flare.on ? state.veil : null;
   const veilAmount = veil ? s.flare.amount : 0;
   const center = centerView();
   const { outW, outH } = state.sampler;
-  const lytro = s.lytroLook !== false;
   const baseExposure = lytro ? LYTRO_EXPOSURE : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
   return { settings: s, look, lens: lensParams(s.lens), matrix, baseExposure, veil, veilAmount, lytro };
 }
@@ -1179,7 +1180,7 @@ function updateProcessedColor() {
   state.matrix = sat.map((v, i) => v * auto[i % 3] * manual[i % 3]);
   state.baseExposure = 1;
   // Processed pictures were finished by Lytro Desktop already.
-  state.lytro = false;
+  state.lytro = null;
   state.look = makeLook(s);
   state.detail = makeDetail(s);
   applyAutoDefringe(center, pp.width, pp.height);

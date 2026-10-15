@@ -1001,9 +1001,11 @@ void main() {
     }
   }
   c *= uExposure;
-  if (uLookOn == 1) c = applyLook(c);
+  // In the Lytro Desktop look the sliders act after its curve.
+  if (uLookOn == 1 && uLytro == 0) c = applyLook(c);
   if (uMaskCount > 0) c = applyLocal(c, (vec2(p) + 0.5) / vec2(size), float(size.x) / float(size.y));
   vec3 s = encodeOut(c);
+  if (uLookOn == 1 && uLytro == 1) s = pow(max(applyLook(pow(s, vec3(2.2))), vec3(0.0)), vec3(1.0 / 2.2));
   if (uLutAmount > 0.0) {
     float n = float(textureSize(uLut, 0).x);
     vec3 q = clamp((s - uLutMin) / max(uLutMax - uLutMin, vec3(1e-6)), 0.0, 1.0);
@@ -2885,7 +2887,7 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uLytro, lytro ? 1 : 0);
     if (lytro) {
       gl.uniform1fv(P.u.uLytroCurve, LYTRO_CURVE);
-      gl.uniform1f(P.u.uLytroSat, LYTRO_SATURATION);
+      gl.uniform1f(P.u.uLytroSat, LYTRO_SATURATION * (lytro.saturation ?? 1));
     }
     gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
     if (look) {
