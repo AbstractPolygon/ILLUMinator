@@ -13,8 +13,9 @@ A stereo pair from two viewpoints across the lens.
 
 ## Quality
 
-- *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
 - *High quality depth map:* sharper depth edges that match the photo, about twice as slow to measure. Off, the faster depth map is used.
+- *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
+- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it, and the still is shown at the Photo *Size*, enlarged with these Upscaling settings; *Save PNG* saves it as shown. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Upscaling
 
@@ -24,8 +25,6 @@ Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*
 
 Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.
 
-- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it, and the still is shown at the Photo *Size*, enlarged with these Upscaling settings; *Save PNG* saves it as shown. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
-
 ## Speed
 
 Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. On computers with two graphics chips (many laptops) ILLUMinator asks for the faster one. While you drag a slider or the picture, strong depth of field blur is drawn as a quicker draft; the finished picture follows when you let go. [[Histogram and Info]] shows the renderer in use and, where the browser can measure it, the GPU time per view.
@@ -33,7 +32,6 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 ## Photo
 
 Photo and Video are sections of their own in the sidebar, just above *Render Settings* (which holds 3D, Quality and Upscaling). Below Render Settings, always shown: *Render*, *Auto render*, *Save PNG* and *Export video*.
-
 
 - *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings.
 - *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.

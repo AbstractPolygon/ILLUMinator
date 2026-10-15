@@ -1163,7 +1163,14 @@ function stillView() {
   if (!still || k === 1) return still;
   const key = [k, $('upscale-method').value, $('upscale-sharpen').value];
   if (stillCache && stillCache.still === still && stillCache.key.join() === key.join()) return stillCache.img;
-  const big = upscaleImage(still, Math.round(still.width * k), Math.round(still.height * k), upscaleSettings());
+  // The GPU hands back an ImageBitmap, which the upscaler cannot turn the
+  // right way up: give it a plain canvas.
+  let src = still;
+  if (!(still instanceof ImageData) && !(still instanceof HTMLCanvasElement)) {
+    src = Object.assign(document.createElement('canvas'), { width: still.width, height: still.height });
+    src.getContext('2d').drawImage(still, 0, 0);
+  }
+  const big = upscaleImage(src, Math.round(still.width * k), Math.round(still.height * k), upscaleSettings());
   // The upscaler draws on a canvas it reuses: keep a copy.
   const img = document.createElement('canvas');
   img.width = big.width;
