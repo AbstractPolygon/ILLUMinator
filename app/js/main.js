@@ -5470,7 +5470,14 @@ for (const [id, src] of Object.entries(QUICK_BUTTONS)) {
     showQuickExport();
   };
 }
+// Photo or Video: only the settings that kind of export uses.
+function showQuickExportKind() {
+  const kind = $('qe-kind').value;
+  for (const el of document.querySelectorAll('#quick-export-dialog [data-qe]')) el.hidden = el.dataset.qe !== kind;
+}
+$('qe-kind').onchange = showQuickExportKind;
 $('quick-export-btn').onclick = () => {
+  showQuickExportKind();
   showQuickExport();
   $('quick-export-dialog').showModal();
 };
