@@ -1,5 +1,7 @@
 # Render
 
+The *Render Settings* section of the sidebar, with the *Photo* and *Video* sections above it and the Render, Save and Export buttons below it.
+
 ## 3D
 
 A stereo pair from two viewpoints across the lens.
@@ -22,7 +24,7 @@ Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*
 
 Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.
 
-- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, at the bottom of the panel below *Video*, starts it, and the still is shown at the Photo *Size*, enlarged with these Upscaling settings; *Save PNG* saves it as shown. With *Auto render* (under *Render*) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
+- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it, and the still is shown at the Photo *Size*, enlarged with these Upscaling settings; *Save PNG* saves it as shown. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Speed
 
@@ -30,9 +32,12 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 
 ## Photo
 
+Photo and Video are sections of their own in the sidebar, just above *Render Settings* (which holds 3D, Quality and Upscaling). Below Render Settings, always shown: *Render*, *Auto render*, *Save PNG* and *Export video*.
+
+
 - *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings.
 - *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.
-- *Save PNG* (or *Save JPEG*), at the bottom of the panel under *Render*, saves the picture as shown, at that size.
+- *Save PNG* (or *Save JPEG*), below the Render button, saves the picture as shown, at that size.
 
 ## Video
 

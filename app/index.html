@@ -697,7 +697,64 @@
       </details>
 
       <details class="panel">
-        <summary><h2>Render</h2></summary>
+        <summary><h2>Photo</h2></summary>
+        <label title="Saved photos are enlarged by this much with the chosen Upscaling; Native saves the picture as rendered">Size
+          <select id="photo-size">
+            <option value="1" selected>Native</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+            <option value="3">3×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+        <label title="PNG keeps every detail (lossless, bigger files); JPEG makes much smaller files">File format
+          <select id="photo-format">
+            <option value="png" selected>PNG</option>
+            <option value="jpeg">JPEG</option>
+          </select>
+        </label>
+        <label id="photo-quality-row" title="JPEG quality: higher keeps more detail and makes bigger files" hidden>JPEG quality <output data-for="photo-quality" for="photo-quality">92</output>
+          <input id="photo-quality" type="range" min="50" max="100" step="1" value="92" data-default="92">
+        </label>
+      </details>
+      <details class="panel">
+        <summary><h2>Video</h2></summary>
+        <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
+          <select id="video-size">
+            <option value="1080" selected>1080p</option>
+            <option value="1440">1440p</option>
+            <option value="2160">4K (2160p)</option>
+            <optgroup label="Social media">
+              <option value="1080x1920">9:16 · Reels, TikTok, Shorts, Stories (1080 × 1920)</option>
+              <option value="2160x3840">9:16 · 4K vertical (2160 × 3840)</option>
+              <option value="1080x1350">4:5 · Instagram, Facebook feed (1080 × 1350)</option>
+              <option value="1080x1080">1:1 · Square posts (1080 × 1080)</option>
+              <option value="1920x1080">16:9 · YouTube, X, LinkedIn (1920 × 1080)</option>
+              <option value="3840x2160">16:9 · YouTube 4K (3840 × 2160)</option>
+            </optgroup>
+          </select>
+        </label>
+        <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
+          <select id="video-codec">
+            <option value="vp9" selected>VP9</option>
+            <option value="vp8">VP8</option>
+            <option value="h264">H.264</option>
+            <option value="h265">H.265 (HEVC)</option>
+            <option value="av1">AV1</option>
+          </select>
+        </label>
+        <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
+          <select id="video-format">
+            <option value="webm" selected>WebM</option>
+            <option value="mp4">MP4</option>
+          </select>
+        </label>
+        <label title="The video's bitrate: higher keeps more detail and makes bigger files">Quality <output data-for="video-quality" for="video-quality">16 Mbit/s</output>
+          <input id="video-quality" type="range" min="1" max="40" step="1" value="16" data-default="16">
+        </label>
+      </details>
+      <details class="panel">
+        <summary><h2>Render Settings</h2></summary>
         <details class="subpanel">
           <summary><h3>3D</h3></summary>
           <label id="stereo-on-row" class="check" title="Shows the picture in 3D, in the chosen 3D type, while you edit"><input id="stereo-on" type="checkbox"> Show 3D</label>
@@ -757,68 +814,13 @@
             </div>
           </div>
         </details>
-        <details class="subpanel">
-          <summary><h3>Photo</h3></summary>
-          <label title="Saved photos are enlarged by this much with the chosen Upscaling; Native saves the picture as rendered">Size
-            <select id="photo-size">
-              <option value="1" selected>Native</option>
-              <option value="1.5">1.5×</option>
-              <option value="2">2×</option>
-              <option value="3">3×</option>
-              <option value="4">4×</option>
-            </select>
-          </label>
-          <label title="PNG keeps every detail (lossless, bigger files); JPEG makes much smaller files">File format
-            <select id="photo-format">
-              <option value="png" selected>PNG</option>
-              <option value="jpeg">JPEG</option>
-            </select>
-          </label>
-          <label id="photo-quality-row" title="JPEG quality: higher keeps more detail and makes bigger files" hidden>JPEG quality <output data-for="photo-quality" for="photo-quality">92</output>
-            <input id="photo-quality" type="range" min="50" max="100" step="1" value="92" data-default="92">
-          </label>
-        </details>
-        <details class="subpanel">
-          <summary><h3>Video</h3></summary>
-          <label title="1080p, 1440p and 4K keep the shape of the crop (the number is the short side); social media sizes take the largest centered part of the picture with their shape">Size
-            <select id="video-size">
-              <option value="1080" selected>1080p</option>
-              <option value="1440">1440p</option>
-              <option value="2160">4K (2160p)</option>
-              <optgroup label="Social media">
-                <option value="1080x1920">9:16 · Reels, TikTok, Shorts, Stories (1080 × 1920)</option>
-                <option value="2160x3840">9:16 · 4K vertical (2160 × 3840)</option>
-                <option value="1080x1350">4:5 · Instagram, Facebook feed (1080 × 1350)</option>
-                <option value="1080x1080">1:1 · Square posts (1080 × 1080)</option>
-                <option value="1920x1080">16:9 · YouTube, X, LinkedIn (1920 × 1080)</option>
-                <option value="3840x2160">16:9 · YouTube 4K (3840 × 2160)</option>
-              </optgroup>
-            </select>
-          </label>
-          <label title="How the video is compressed; only the kinds this browser can record are offered">Compression
-            <select id="video-codec">
-              <option value="vp9" selected>VP9</option>
-              <option value="vp8">VP8</option>
-              <option value="h264">H.264</option>
-              <option value="h265">H.265 (HEVC)</option>
-              <option value="av1">AV1</option>
-            </select>
-          </label>
-          <label title="The video file's format: WebM plays in browsers and most players; MP4 plays nearly everywhere">File format
-            <select id="video-format">
-              <option value="webm" selected>WebM</option>
-              <option value="mp4">MP4</option>
-            </select>
-          </label>
-          <label title="The video's bitrate: higher keeps more detail and makes bigger files">Quality <output data-for="video-quality" for="video-quality">16 Mbit/s</output>
-            <input id="video-quality" type="range" min="1" max="40" step="1" value="16" data-default="16">
-          </label>
-          <button id="webm-btn" class="wide">Export video</button>
-        </details>
-        <button id="render-btn" class="wide render-panel-btn" title="Renders the full resolution still (F turns Full resolution on)" disabled>Render</button>
+      </details>
+      <div class="render-actions">
+        <button id="render-btn" class="wide" title="Renders the full resolution still (F turns Full resolution on)" disabled>Render</button>
         <label id="auto-render-row" class="check" title="With Full resolution on, renders the full resolution still again by itself after each change"><input id="auto-render" type="checkbox" disabled> Auto render</label>
         <button id="png-btn" class="wide" disabled>Save PNG</button>
-      </details>
+        <button id="webm-btn" class="wide">Export video</button>
+      </div>
 
       <details class="panel" data-panel="lenslets" hidden>
         <summary><h2>Microlens grid</h2></summary>

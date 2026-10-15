@@ -1154,7 +1154,7 @@ function backToCamera() {
 
 // ---------------------------------------------------------------- full resolution, depth
 
-// The rendered still at Render > Photo > Size, enlarged with the Upscaling
+// The rendered still at Photo > Size, enlarged with the Upscaling
 // settings (kept until the still or those settings change).
 let stillCache = null;
 function stillView() {
@@ -4498,8 +4498,8 @@ function baseName() {
   return state.current ? state.current.name.replace(/\.[^.]+$/, '') : 'lytro';
 }
 
-// Saved photos and 3D images are enlarged by Render > Photo > Size, and
-// video frames to Render > Video > Size, both with Render > Upscaling.
+// Saved photos and 3D images are enlarged by Photo > Size, and video
+// frames to Video > Size, both with Render Settings > Upscaling.
 function upscaleSettings() {
   return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
 }

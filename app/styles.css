@@ -404,6 +404,9 @@ a.button:hover { border-color: #4a515c; }
    space a title has between dividers. */
 .controls, .library { padding-top: 8px; }
 .controls > .panel + .panel { border-top: 1px solid var(--line); }
+/* Render, Auto render and Save PNG: always shown, below the Render section. */
+.render-actions { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 8px; border-top: 1px solid var(--line); }
+.render-actions label.check { margin: 0; }
 /* A dropdown under its label, with room before the next control. */
 label select { display: block; margin-top: 4px; }
 label:has(select) { margin-bottom: 10px; }
