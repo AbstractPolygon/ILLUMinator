@@ -23,9 +23,9 @@ Click a mask in the list to edit it, the pencil (or a double-click on its name) 
 - *Pixelate* breaks it into square tiles.
 - *Sketch* turns it into a colored-pencil drawing.
 
-## Living filters
+## Filters
 
-The *Living filter* menu adds ready-made looks built from masks around the current focus. Once added, they are ordinary masks to adjust, named after the filter. The depth-based ones follow the focus.
+The *Filters* menu adds ready-made looks built from masks around the current focus. Once added, they are ordinary masks to adjust, named after the filter. The depth-based ones follow the focus.
 
 | Filter | Look |
 | --- | --- |
@@ -42,4 +42,4 @@ The *Living filter* menu adds ready-made looks built from masks around the curre
 | Mosaic | What is out of focus breaks into tiles |
 | Crayon | What is out of focus turns into a colored-pencil drawing |
 
-Every setting of a mask, living filters included, can be animated: the ◀ ◆ ▶ at the right of each of the selected mask's settings adds or removes its keyframes and moves between them. See [[Animation]].
+Every setting of a mask, filters included, can be animated: the ◀ ◆ ▶ at the right of each of the selected mask's settings adds or removes its keyframes and moves between them. See [[Animation]].

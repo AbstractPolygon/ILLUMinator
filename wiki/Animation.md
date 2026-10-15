@@ -30,7 +30,7 @@ With *Enabled* on, the keyframe editor opens under the play bar. With *Animate: 
 **Tracks.** Every setting that can be animated has a track, grouped like the sidebar: a group for each panel, and in it a group for each section. Each opens and closes:
 
 - *Process:* LUT, White Balance, Tone, Tone Curve and Color, each with its sliders. These start closed.
-- *Local Adjustments:* one group for each adjustment, named after the living filter that made it (or the mask): its strength, shape and every effect. These start closed.
+- *Local Adjustments:* one group for each adjustment, named after the filter that made it (or the mask): its strength, shape and every effect. These start closed.
 - *Camera:*
   - *Depth:* aperture, depth of field and focus.
   - *Focus Spread:* focus point X and Y, spread and smoothing.
