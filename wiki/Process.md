@@ -14,6 +14,8 @@ A color lookup table applied as the last step of the look, after every other adj
 
 *Exposure* (EV), *Contrast*, *Highlights*, *Shadows*, *Whites* and *Blacks*.
 
+Blown-out highlights keep more detail than the sensor's middle pixels hold: the edge of each microlens image is darker (vignetting), so it often still holds a bright area the middle lost, and raw photos take those areas from there. Lower *Exposure* or *Highlights* to bring that detail into view.
+
 ## Tone Curve
 
 A curve over brightness, from black (left) to white (right): click to add a point, drag it, double-click to remove it. The curve never reverses, so tones keep their order. Below it, *Highlights*, *Lights*, *Darks* and *Shadows* lift or lower each quarter of the range. *Reset curve* straightens it.

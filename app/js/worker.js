@@ -6,6 +6,7 @@ import { normalizeGrid, measureGrid, calibrateGrid, lensCenters } from './core/l
 import {
   buildSampler, renderView, makeDevelopParams, apertureSamples, refocus,
   colorMatrix, autoExposure, toneMap, sensorToOutput, viewSizes,
+  clipTrust,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH } from './core/depth.js';
@@ -71,6 +72,27 @@ function channelMeans(rgb) {
 
 function apertureRadius() {
   return state.lf ? state.lf.grid.pitch * 0.32 : 0;
+}
+
+// Highlight views: eight on the darker outer ring of each lens image
+// (0.44 of the lens pitch, about 1.5 to 3.5 times darker), which clip
+// later than the views above. Refocusing takes highlights from them where
+// the picture is near clipping. Directions the vignetting table cannot
+// correct (too dark) are left out.
+function highlightSamples() {
+  if (!state.lf) return [];
+  const r = state.lf.grid.pitch * 0.44;
+  const out = [];
+  for (let k = 0; k < 8; k++) {
+    const u = r * Math.cos((k * Math.PI) / 4);
+    const v = r * Math.sin((k * Math.PI) / 4);
+    if (state.vignetting) {
+      const g = vignettingGainAt(state.vignetting, u, v);
+      if (g.some((x) => !(x > 0) || x > 4)) continue;
+    }
+    out.push({ u, v });
+  }
+  return out;
 }
 
 // Views away from the center are darker and slightly tinted because of
@@ -443,7 +465,7 @@ async function ensureRefocusViews(id) {
       // On the GPU the views stay in GPU memory: refocusing, depth and
       // focus measuring all work there.
       if (state.gpu) {
-        state.gpu.buildViews(samples, state.settings.detail);
+        state.gpu.buildViews(samples, state.settings.detail, highlightSamples());
         for (const l of listeners) post({ id: l, type: 'progress', stage: 'Preparing refocus', progress: 1 });
         await tick();
         return state.sampler === sampler ? state.gpu.views : null;
@@ -453,13 +475,23 @@ async function ensureRefocusViews(id) {
         if (state.sampler !== sampler) return null;
         const { u, v } = samples[i];
         // Stored as 16 bit to keep ~37 full views affordable in memory.
-        const rgb = equalize(render(u, v));
+        const raw = render(u, v);
+        const trust = clipTrust(raw, state.dev.clip);
+        const rgb = equalize(raw);
         const q = new Uint16Array(rgb.length);
         for (let k = 0; k < rgb.length; k++) q[k] = Math.min(65535, rgb[k] * VIEW_SCALE + 0.5);
-        views.push({ u, v, rgb: q, gain: 1 / VIEW_SCALE, detail: state.settings.detail });
+        views.push({ u, v, rgb: q, gain: 1 / VIEW_SCALE, detail: state.settings.detail, trust });
         for (const l of listeners) post({ id: l, type: 'progress', stage: 'Preparing refocus', progress: (i + 1) / samples.length });
         await tick();
       }
+      const ring = [];
+      for (const { u, v } of highlightSamples()) {
+        if (state.sampler !== sampler) return null;
+        const raw = render(u, v);
+        const trust = clipTrust(raw, state.dev.clip);
+        ring.push({ u, v, rgb: equalize(raw), gain: 1, detail: state.settings.detail, trust });
+      }
+      views.ring = ring;
       return views;
     })();
     state.refocusBuild = { build, listeners, sampler };
@@ -477,7 +509,7 @@ async function ensureRefocusViews(id) {
 // Refocused picture (linear RGB) at `alpha` with aperture options `opts`.
 function refocusRGB(alpha, opts) {
   if (state.gpu && state.gpu.views) return state.gpu.refocus(alpha, opts);
-  return refocus(state.refocusViews, state.sampler.outW, state.sampler.outH, alpha, opts);
+  return refocus(state.refocusViews, state.sampler.outW, state.sampler.outH, alpha, { ...opts, ring: state.refocusViews.ring, clip: state.dev.clip });
 }
 
 // Synthetic aperture options from a request: viewpoint (u, v) and aperture

@@ -33,3 +33,17 @@ test('onion rings keep a point light bright and finite', () => {
     assert.ok(out[(20 * w + 20) * 3] < 1);
   }
 });
+
+test('refocus prefers views that did not clip', async () => {
+  const { refocus, clipTrust } = await import('../app/js/core/render.js');
+  const w = 4, h = 4;
+  const mk = (val) => new Float32Array(w * h * 3).fill(val);
+  const clipped = mk(1);
+  const edge = mk(1.6); // a vignetted view, scaled back up: past the clip
+  const views = [
+    { u: 0, v: 0, rgb: clipped, gain: 1, detail: 1, trust: clipTrust(clipped, 1) },
+    { u: 0, v: 0, rgb: edge, gain: 1, detail: 1, trust: clipTrust(mk(0.8), 1) },
+  ];
+  const out = refocus(views, w, h, 0);
+  assert.ok(out[0] > 1.5, `got ${out[0]}`);
+});

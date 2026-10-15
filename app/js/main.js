@@ -5367,47 +5367,55 @@ $('webm-btn').onclick = exportVideo;
 // a change is made on the sidebar control (so it is saved and undoable like
 // any setting), then everything is read back (the video format limits the
 // compressions offered).
-const QUICK_EXPORT = ['photo-size', 'photo-format', 'photo-quality', 'video-size', 'video-codec', 'video-format', 'video-quality'];
+const QUICK_EXPORT = ['stereo-on', 'stereo-mode', 'stereo-baseline', 'depth-hq', 'detail', 'fullres-on', 'still-scale', 'still-passes',
+  'upscale-method', 'upscale-sharpen', 'photo-size', 'photo-format', 'photo-quality', 'video-size', 'video-codec', 'video-format', 'video-quality'];
+const QUICK_ROWS = ['stereo-on-row', 'depth-hq-row', 'fullres-panel', 'photo-quality-row'];
+const QUICK_BUTTONS = { 'qe-stereo-btn': 'stereo-btn', 'qe-render-btn': 'render-btn', 'qe-photo-btn': 'png-btn', 'qe-video-btn': 'webm-btn' };
 function showQuickExport() {
   for (const id of QUICK_EXPORT) {
     const src = $(id);
     const el = $(`qe-${id}`);
-    if (src.tagName === 'SELECT') el.innerHTML = src.innerHTML;
-    else for (const a of ['min', 'max', 'step']) el[a] = src[a];
-    el.value = src.value;
+    if (src.type === 'checkbox') el.checked = src.checked;
+    else {
+      if (src.tagName === 'SELECT') el.innerHTML = src.innerHTML;
+      else for (const a of ['min', 'max', 'step']) el[a] = src[a];
+      el.value = src.value;
+    }
     el.disabled = src.disabled;
     const out = document.querySelector(`output[data-for="qe-${id}"]`);
     const shown = document.querySelector(`output[data-for="${id}"]`);
     if (out && shown) out.textContent = shown.textContent;
   }
-  $('qe-photo-quality-row').hidden = $('photo-quality-row').hidden;
-  $('qe-photo-btn').textContent = $('png-btn').textContent;
-  $('qe-photo-btn').disabled = $('png-btn').disabled;
-  $('qe-video-btn').disabled = $('webm-btn').disabled;
+  for (const id of QUICK_ROWS) $(`qe-${id}`).hidden = $(id).hidden;
+  for (const [id, src] of Object.entries(QUICK_BUTTONS)) {
+    $(id).textContent = $(src).textContent;
+    $(id).disabled = $(src).disabled;
+  }
   $('qe-video-btn').title = $('webm-btn').disabled ? 'Turn on Animation (in the Camera view) to export a video' : '';
 }
 for (const id of QUICK_EXPORT) {
   const el = $(`qe-${id}`);
   const copy = (type) => {
-    $(id).value = el.value;
+    if (el.type === 'checkbox') $(id).checked = el.checked;
+    else $(id).value = el.value;
     $(id).dispatchEvent(new Event(type, { bubbles: true }));
-    if (type === 'input') showSliderValue($(id));
+    if (type === 'input' && el.type === 'range') showSliderValue($(id));
     showQuickExport();
   };
   el.addEventListener('input', () => copy('input'));
   el.addEventListener('change', () => copy('change'));
 }
+for (const [id, src] of Object.entries(QUICK_BUTTONS)) {
+  $(id).onclick = () => {
+    // Render keeps the popup open, to save the still once it is ready.
+    if (id !== 'qe-render-btn') $('quick-export-dialog').close();
+    $(src).click();
+    showQuickExport();
+  };
+}
 $('quick-export-btn').onclick = () => {
   showQuickExport();
   $('quick-export-dialog').showModal();
-};
-$('qe-photo-btn').onclick = () => {
-  $('quick-export-dialog').close();
-  savePng();
-};
-$('qe-video-btn').onclick = () => {
-  $('quick-export-dialog').close();
-  exportVideo();
 };
 $('fullres-on').onchange = () => setFullResMode($('fullres-on').checked);
 $('render-btn').onclick = renderFullRes;
@@ -5866,7 +5874,7 @@ function showSliderValue(input) {
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
   else if (input.id === 'video-quality') out.textContent = `${v} Mbit/s`;
-  else if (input.id === 'photo-quality' || input.id === 'bokeh-blades') out.textContent = `${v}`;
+  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen'].includes(input.id)) out.textContent = `${v}`;
   else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;

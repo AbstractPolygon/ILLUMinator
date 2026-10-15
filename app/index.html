@@ -688,7 +688,7 @@
             <option value="custom">Custom…</option>
           </select>
         </label>
-        <label id="fps-custom" class="fps-custom" hidden>Custom
+        <label id="fps-custom" class="fps-custom" hidden>
           <input id="fps" type="number" min="1" max="240" step="0.001" value="24" data-default="24" aria-label="Custom frame rate in frames a second"> fps
         </label>
         <label>Animate
@@ -888,6 +888,33 @@
       <h2>Quick export</h2>
       <div class="qe-cols">
         <section>
+          <h3>3D</h3>
+          <label id="qe-stereo-on-row" class="check"><input id="qe-stereo-on" type="checkbox"> Show 3D</label>
+          <label>3D type <select id="qe-stereo-mode"></select></label>
+          <label>Baseline <output data-for="qe-stereo-baseline"></output>
+            <input id="qe-stereo-baseline" type="range">
+          </label>
+          <button type="button" id="qe-stereo-btn">Save 3D image</button>
+        </section>
+        <section>
+          <h3>Quality</h3>
+          <label id="qe-depth-hq-row" class="check"><input id="qe-depth-hq" type="checkbox"> High quality depth map</label>
+          <label>Resolution <select id="qe-detail"></select></label>
+          <label class="check"><input id="qe-fullres-on" type="checkbox"> Full sensor</label>
+          <div id="qe-fullres-panel">
+            <label>Scale <select id="qe-still-scale"></select></label>
+            <label>Detail recovery <select id="qe-still-passes"></select></label>
+            <button type="button" id="qe-render-btn">Render</button>
+          </div>
+        </section>
+        <section>
+          <h3>Upscaling</h3>
+          <label>Method <select id="qe-upscale-method"></select></label>
+          <label>Sharpen <output data-for="qe-upscale-sharpen"></output>
+            <input id="qe-upscale-sharpen" type="range">
+          </label>
+        </section>
+        <section>
           <h3>Photo</h3>
           <label>Size <select id="qe-photo-size"></select></label>
           <label>File format <select id="qe-photo-format"></select></label>
@@ -907,7 +934,6 @@
           <button type="button" id="qe-video-btn" class="primary">Export video</button>
         </section>
       </div>
-      <p class="hint">The same settings as Render Settings → Photo and Video; changes here change them there too.</p>
       <menu>
         <span class="spacer"></span>
         <button value="close">Close</button>

@@ -246,12 +246,11 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 dialog form { display: flex; flex-direction: column; gap: 10px; max-height: calc(86vh - 32px); }
 dialog h2 { margin: 0; }
 dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
-#quick-export-dialog { width: min(560px, 92vw); }
-.qe-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+#quick-export-dialog { width: min(820px, 94vw); }
+.qe-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px 22px; overflow-y: auto; min-height: 0; }
 .qe-cols section { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .qe-cols h3 { margin: 0 0 4px; font-size: 13px; }
 .qe-cols button { margin-top: 8px; }
-#quick-export-dialog .hint { margin: 0; }
 .spacer { flex: 1; }
 .camera-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; overflow-y: auto; }
 .camera-grid label { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px; cursor: pointer; }

@@ -30,6 +30,7 @@ uniform ivec2 uRawSize;
 uniform vec3 uBlack;
 uniform vec3 uScale;
 uniform float uClip;
+uniform vec3 uSaturated; // raw level where each channel saturates
 uniform vec3 uGain;
 uniform ivec2 uOrigR;
 uniform ivec2 uOrigG1;
@@ -128,6 +129,7 @@ void main() {
   ivec2 p0 = ivec2(floor(p + 0.5));
   float acc = 0.0;
   float wsum = 0.0;
+  float clipped = 0.0;
   for (int dy = -2; dy <= 2; dy++) {
     for (int dx = -2; dx <= 2; dx++) {
       ivec2 q = p0 + ivec2(dx, dy);
@@ -135,12 +137,18 @@ void main() {
       vec2 e = vec2(q) - p;
       float w = exp(-dot(e, e) * uInv2s2);
       int ch = uCfa[(q.y & 1) * 2 + (q.x & 1)];
-      acc += w * develop(rawAt(q), ch) * toY[ch];
+      float raw = rawAt(q);
+      acc += w * develop(raw, ch) * toY[ch];
       wsum += w;
+      if (raw >= uSaturated[ch]) clipped += w;
     }
   }
   float lum = wsum > 0.0 ? min(uClip * max(uGain.r, max(uGain.g, uGain.b)), acc / wsum) : S.a;
-  outColor = vec4(lum * frac, 1.0);
+  // Trust: how much of this sample was not clipped. Where the middle of a
+  // lens image is blown out, its darker (vignetted) edge often is not, and
+  // refocusing then takes the highlight from there (see REFOCUS_PASS).
+  float trust = wsum > 0.0 ? 1.0 - clipped / wsum : 1.0;
+  outColor = vec4(lum * frac, max(0.03, trust * trust));
 }`;
 
 const VIEW_PASS = `#version 300 es
@@ -153,6 +161,7 @@ uniform vec4 uGrid;     // pitch, rowStep
 uniform vec2 uMin;      // grid-local position of output pixel (0, 0)
 uniform float uSpacing; // sensor pixels per output pixel
 uniform float uKernel;  // kernel radius, sensor pixels
+uniform int uTrust;     // 1: alpha carries the samples' trust (refocus views)
 out vec4 outColor;
 void main() {
   vec2 l = uMin + (gl_FragCoord.xy - 0.5) * uSpacing;
@@ -160,7 +169,7 @@ void main() {
   float rowStep = uGrid.y;
   float r2 = uKernel * uKernel;
   int ra = int(floor(l.y / rowStep));
-  vec3 sum = vec3(0.0);
+  vec4 sum = vec4(0.0);
   float wsum = 0.0;
   for (int r = ra - 1; r <= ra + 2; r++) {
     float dy = l.y - float(r) * rowStep;
@@ -175,14 +184,16 @@ void main() {
       if (t.x < 0 || t.y < 0 || t.x >= uLensSize.x || t.y >= uLensSize.y) continue;
       float q = 1.0 - d2 / r2;
       float w = q * q;
-      sum += texelFetch(uLens, t, 0).rgb * w;
+      sum += texelFetch(uLens, t, 0) * w;
       wsum += w;
     }
   }
-  outColor = vec4(wsum > 0.0 ? sum / wsum : vec3(0.0), 1.0);
+  outColor = wsum > 0.0 ? sum / wsum : vec4(0.0, 0.0, 0.0, 1.0);
+  if (uTrust == 0) outColor.a = 1.0;
 }`;
 
 const MAX_VIEWS = 64;
+const MAX_RING = 8;
 
 const REFOCUS_PASS = `#version 300 es
 precision highp float;
@@ -192,7 +203,15 @@ uniform sampler2DArray uViews;
 uniform int uCount;
 uniform vec4 uView[${MAX_VIEWS}]; // shift x, shift y (output pixels), weight
 uniform vec2 uSize;
+// Highlight views (see buildViews): from the darker outer ring of each lens
+// image, used only where the picture is near clipping.
+uniform sampler2DArray uRing;
+uniform int uRingCount;
+uniform vec2 uRingView[${MAX_RING}];
+uniform float uClip;
 out vec4 outColor;
+// Each view's alpha is its trust (BRIGHTNESS_PASS): clipped samples count
+// for little when other views saw the same point unclipped.
 void main() {
   vec2 x = gl_FragCoord.xy - 0.5;
   vec3 sum = vec3(0.0);
@@ -203,10 +222,29 @@ void main() {
     if (v.z < 1e-3) continue;
     vec2 s = x + v.xy;
     if (s.x < 0.0 || s.y < 0.0 || s.x > uSize.x - 1.0 || s.y > uSize.y - 1.0) continue;
-    sum += texture(uViews, vec3((s + 0.5) / uSize, float(k))).rgb * v.z;
-    wsum += v.z;
+    vec4 c = texture(uViews, vec3((s + 0.5) / uSize, float(k)));
+    float w = v.z * c.a;
+    sum += c.rgb * w;
+    wsum += w;
   }
-  outColor = vec4(wsum > 0.0 ? sum / wsum : vec3(0.0), 1.0);
+  vec3 col = wsum > 0.0 ? sum / wsum : vec3(0.0);
+  float m = max(col.r, max(col.g, col.b));
+  if (uRingCount > 0 && m > 0.85 * uClip) {
+    // Even a clipped ring sample is a lower bound above the clip level, so
+    // the brighter of the two estimates is kept.
+    vec3 rs = vec3(0.0);
+    float rw = 0.0;
+    for (int k = 0; k < ${MAX_RING}; k++) {
+      if (k >= uRingCount) break;
+      vec2 s = x + uRingView[k];
+      if (s.x < 0.0 || s.y < 0.0 || s.x > uSize.x - 1.0 || s.y > uSize.y - 1.0) continue;
+      vec4 c = texture(uRing, vec3((s + 0.5) / uSize, float(k)));
+      rs += c.rgb * c.a;
+      rw += c.a;
+    }
+    if (rw > 0.0) col = mix(col, max(col, rs / rw), smoothstep(0.85 * uClip, 0.97 * uClip, m));
+  }
+  outColor = vec4(col, 1.0);
 }`;
 
 // Multi-view denoising (core/mvdenoise.js): every refocus view sampled
@@ -1646,6 +1684,7 @@ export class GpuRenderer {
     gl.uniform3fv(U.uBlack, dev.black);
     gl.uniform3fv(U.uScale, dev.scale);
     gl.uniform1f(U.uClip, dev.clip);
+    if (U.uSaturated) gl.uniform3fv(U.uSaturated, dev.saturated);
     gl.uniform3fv(U.uGain, this.gainAt(u, v));
     const [rO, gO, bO] = latticeOrigins(dev.cfa);
     gl.uniform2i(U.uOrigR, rO[0][0], rO[0][1]);
@@ -1703,6 +1742,7 @@ export class GpuRenderer {
     gl.uniform2f(P.view.u.uMin, sampler.xMin, sampler.yMin);
     gl.uniform1f(P.view.u.uSpacing, sampler.spacing);
     gl.uniform1f(P.view.u.uKernel, sampler.kernel * sampler.grid.pitch);
+    gl.uniform1i(P.view.u.uTrust, layer === undefined ? 0 : 1);
     this.draw();
   }
 
@@ -1727,24 +1767,37 @@ export class GpuRenderer {
 
   deleteViews() {
     if (this.views) this.gl.deleteTexture(this.views.tex);
+    if (this.ring) this.gl.deleteTexture(this.ring.tex);
     this.views = null;
+    this.ring = null;
   }
 
   // Renders the views used for refocusing into a texture array. Returns a
   // function reading layer k back as linear RGB (for CPU-side depth work).
-  buildViews(samples, detail) {
+  // `ring`: highlight views from the outer ring of each lens image (darker
+  // through vignetting, so they clip later), kept apart from the views used
+  // for depth and denoising; refocusing takes highlights from them.
+  buildViews(samples, detail, ring = []) {
     const gl = this.gl;
     this.deleteViews();
     const { outW, outH } = this.sampler;
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
-    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA16F, outW, outH, Math.min(samples.length, MAX_VIEWS));
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const array = (n) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA16F, outW, outH, n);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    };
+    const tex = array(Math.min(samples.length, MAX_VIEWS));
     this.views = { tex, samples: samples.slice(0, MAX_VIEWS), detail };
     this.views.samples.forEach(({ u, v }, k) => this.renderViewTo(u, v, tex, k));
+    if (ring.length) {
+      this.ring = { tex: array(Math.min(ring.length, MAX_RING)), samples: ring.slice(0, MAX_RING) };
+      this.ring.samples.forEach(({ u, v }, k) => this.renderViewTo(u, v, this.ring.tex, k));
+    }
     return (k) => {
       this.target(tex, outW, outH, k);
       return this.readTarget();
@@ -1799,6 +1852,22 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uCount, samples.length);
     gl.uniform4fv(P.u.uView, data);
     gl.uniform2f(P.u.uSize, outW, outH);
+    const ring = this.ring;
+    gl.uniform1i(P.u.uRingCount, ring ? ring.samples.length : 0);
+    gl.uniform1i(P.u.uRing, 3);
+    if (ring) {
+      this.bindTex(3, ring.tex, gl.TEXTURE_2D_ARRAY);
+      const shifts = new Float32Array(MAX_RING * 2);
+      ring.samples.forEach(({ u, v }, k) => {
+        shifts[2 * k] = alpha * (u - u0) * detail;
+        shifts[2 * k + 1] = alpha * (v - v0) * detail;
+      });
+      gl.uniform2fv(P.u.uRingView, shifts);
+      gl.uniform1f(P.u.uClip, this.dev.clip);
+    } else {
+      // A sampler array must still be bound to an array texture.
+      this.bindTex(3, tex, gl.TEXTURE_2D_ARRAY);
+    }
     this.draw();
     return this.outTex;
   }

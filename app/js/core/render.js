@@ -303,13 +303,28 @@ export function apertureSamples(radius, steps) {
   return out;
 }
 
+// Trust per pixel of a view (0..255): low where any channel reached the clip
+// level. Where the middle of a lens image is blown out, its darker
+// (vignetted) edge often is not; refocus() then takes the highlight from the
+// views that saw it unclipped.
+export function clipTrust(rgb, clip) {
+  const out = new Uint8Array(rgb.length / 3);
+  const lim = (clip ?? Infinity) * 0.999;
+  for (let i = 0; i < out.length; i++) out[i] = rgb[3 * i] >= lim || rgb[3 * i + 1] >= lim || rgb[3 * i + 2] >= lim ? 8 : 255;
+  return out;
+}
+
 // Shift-and-add refocus over a set of pre-rendered views.
 // `alpha` is the shift in output pixels (at detail 1) per sensor pixel of
 // aperture offset; each view carries { u, v, rgb, gain, detail }.
 // A synthetic aperture centerd on (u0, v0) with Gaussian radius `sigma`
 // (sensor pixels) combines refocusing with a change of viewpoint; a smaller
 // sigma gives more depth of field.
-export function refocus(views, outW, outH, alpha, { u0 = 0, v0 = 0, sigma = Infinity } = {}) {
+// `ring` (optional): highlight views from the outer ring of the lens images,
+// darker through vignetting, so they clip later; where the result nears
+// `clip` the brighter of the two estimates is kept (a clipped ring sample
+// is still a lower bound above the clip level).
+export function refocus(views, outW, outH, alpha, { u0 = 0, v0 = 0, sigma = Infinity, ring = null, clip = Infinity } = {}) {
   const out = new Float32Array(outW * outH * 3);
   const weight = new Float32Array(outW * outH);
   for (const view of views) {
@@ -328,6 +343,7 @@ export function refocus(views, outW, outH, alpha, { u0 = 0, v0 = 0, sigma = Infi
     const w01 = (1 - ax) * ay;
     const w11 = ax * ay;
     const data = view.rgb;
+    const trust = view.trust || null;
     const gain = view.gain * wv;
     const x0 = Math.max(0, -ix);
     const x1 = Math.min(outW, outW - ix - 1);
@@ -342,10 +358,11 @@ export function refocus(views, outW, outH, alpha, { u0 = 0, v0 = 0, sigma = Infi
         const u = s + outW * 3;
         const w = u + 3;
         const d = (dstRow + x) * 3;
-        out[d] += (data[s] * w00 + data[t] * w10 + data[u] * w01 + data[w] * w11) * gain;
-        out[d + 1] += (data[s + 1] * w00 + data[t + 1] * w10 + data[u + 1] * w01 + data[w + 1] * w11) * gain;
-        out[d + 2] += (data[s + 2] * w00 + data[t + 2] * w10 + data[u + 2] * w01 + data[w + 2] * w11) * gain;
-        weight[dstRow + x] += wv;
+        const k = trust ? trust[srcRow + x] / 255 : 1;
+        out[d] += (data[s] * w00 + data[t] * w10 + data[u] * w01 + data[w] * w11) * gain * k;
+        out[d + 1] += (data[s + 1] * w00 + data[t + 1] * w10 + data[u + 1] * w01 + data[w + 1] * w11) * gain * k;
+        out[d + 2] += (data[s + 2] * w00 + data[t + 2] * w10 + data[u + 2] * w01 + data[w + 2] * w11) * gain * k;
+        weight[dstRow + x] += wv * k;
       }
     }
   }
@@ -354,6 +371,21 @@ export function refocus(views, outW, outH, alpha, { u0 = 0, v0 = 0, sigma = Infi
     out[3 * p] /= w;
     out[3 * p + 1] /= w;
     out[3 * p + 2] /= w;
+  }
+  if (ring && ring.length && Number.isFinite(clip)) {
+    const hi = refocus(ring, outW, outH, alpha, { u0, v0 });
+    const lo = 0.85 * clip;
+    const top = 0.97 * clip;
+    for (let p = 0; p < weight.length; p++) {
+      const m = Math.max(out[3 * p], out[3 * p + 1], out[3 * p + 2]);
+      if (m <= lo) continue;
+      const x = Math.min(1, (m - lo) / (top - lo));
+      const t = x * x * (3 - 2 * x);
+      for (let c = 0; c < 3; c++) {
+        const a = out[3 * p + c];
+        out[3 * p + c] = a + (Math.max(a, hi[3 * p + c]) - a) * t;
+      }
+    }
   }
   return out;
 }
