@@ -1600,6 +1600,8 @@ function setMode(mode) {
   if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = true;
   $('mv-on').disabled = !raw;
   $('nr-hot').disabled = !raw;
+  // Pictures Lytro Desktop finished already have its look.
+  $('base-look').disabled = !raw;
   $('detail').disabled = !raw;
   for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
@@ -5698,6 +5700,7 @@ function colorSettings(val = (id) => +$(id).value) {
   return {
     lutAmount: val('lut-amount') / 100,
     ev: val('ev'),
+    lytroLook: $('base-look').value !== 'flat',
     saturation: 1 + val('saturation') / 100,
     autoWb: $('awb').checked,
     wb: { kelvin: val('wb-temperature'), tint: val('wb-tint') },
@@ -6134,7 +6137,7 @@ $('flare-amount').oninput = () => {
   showSliderValue($('flare-amount'));
   applySettingsSoon();
 };
-for (const id of ['awb', 'mv-on', 'nr-hot', 'detail', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+for (const id of ['awb', 'base-look', 'mv-on', 'nr-hot', 'detail', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 

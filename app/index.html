@@ -288,6 +288,12 @@
         </details>
         <details class="subpanel">
           <summary><h3>Tone</h3></summary>
+          <label title="Lytro Desktop: the camera's exposure with Lytro Desktop's contrast and color, as photos look there. Flat: an exposure picked for each photo, without a curve, for editing from a neutral start">Look
+            <select id="base-look">
+              <option value="lytro" selected>Lytro Desktop</option>
+              <option value="flat">Flat</option>
+            </select>
+          </label>
           <label title="Brightens or darkens the whole picture, in stops">Exposure <output for="ev" data-for="ev">0.00 EV</output>
             <input id="ev" type="range" min="-3" max="3" step="0.05" value="0" data-default="0">
           </label>

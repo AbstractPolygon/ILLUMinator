@@ -7,14 +7,14 @@
 // LambdaMax.
 //
 // Lytro's picture covers the sensor almost exactly: measured against our
-// views of the same shot, it is the sensor scaled to the picture size,
-// shrunk 0.5% across and 1% down about its center and moved 8 pixels right
-// and 1 up (in a 2022 x 1404 picture).
+// views of four shots, it is the sensor scaled to the picture size, shrunk
+// 0.5% down about its center and moved 1 pixel left and up (in a 2022 x
+// 1404 picture).
 
 import { sensorToOutput } from './render.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
 
-const FIT = { kx: 0.995, ky: 0.99, dx: 8 / 2022, dy: -1 / 1404 };
+const FIT = { kx: 1, ky: 0.995, dx: -1 / 2022, dy: -1 / 1404 };
 
 // The lambda range from stack.userdepthmap.txt (null if unreadable).
 export function parseDepthRange(text) {

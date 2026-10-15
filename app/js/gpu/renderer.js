@@ -18,6 +18,7 @@ import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, d
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
+import { LYTRO_CURVE, LYTRO_SATURATION, CURVE_START, CURVE_STEP } from '../core/base.js';
 import { PHASE_BINS, latticeTiles, latticeTables } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
@@ -948,6 +949,26 @@ float srgb(float v) {
   return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
 }
 
+// The Lytro Desktop look (core/base.js): a curve on log2 of each channel.
+uniform int uLytro;
+uniform float uLytroCurve[${LYTRO_CURVE.length}];
+uniform float uLytroSat;
+float lytroCurve(float v) {
+  if (v <= 0.0) return 0.0;
+  float t = (log2(v) - float(${CURVE_START})) / ${CURVE_STEP.toFixed(3)};
+  if (t <= 0.0) return uLytroCurve[0] + (uLytroCurve[1] - uLytroCurve[0]) * v / exp2(float(${CURVE_START}));
+  if (t >= float(${LYTRO_CURVE.length - 1})) return 1.0;
+  int i = int(floor(t));
+  return mix(uLytroCurve[i], uLytroCurve[i + 1], t - float(i));
+}
+
+vec3 encodeOut(vec3 c) {
+  if (uLytro == 0) return vec3(srgb(c.r), srgb(c.g), srgb(c.b));
+  vec3 s = vec3(lytroCurve(c.r), lytroCurve(c.g), lytroCurve(c.b));
+  float y = dot(s, vec3(0.2126, 0.7152, 0.0722));
+  return clamp(y + (s - y) * uLytroSat, 0.0, 1.0);
+}
+
 void main() {
   ivec2 size = textureSize(uSrc, 0);
   ivec2 p = ivec2(int(gl_FragCoord.x), size.y - 1 - int(gl_FragCoord.y));
@@ -982,7 +1003,7 @@ void main() {
   c *= uExposure;
   if (uLookOn == 1) c = applyLook(c);
   if (uMaskCount > 0) c = applyLocal(c, (vec2(p) + 0.5) / vec2(size), float(size.x) / float(size.y));
-  vec3 s = vec3(srgb(c.r), srgb(c.g), srgb(c.b));
+  vec3 s = encodeOut(c);
   if (uLutAmount > 0.0) {
     float n = float(textureSize(uLut, 0).x);
     vec3 q = clamp((s - uLutMin) / max(uLutMax - uLutMin, vec3(1e-6)), 0.0, 1.0);
@@ -2817,7 +2838,7 @@ export class GpuRenderer {
     return out;
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0 }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false }) {
     const gl = this.gl;
     const P = this.programs.present;
     // Resizing reallocates the canvas: only when the size changes.
@@ -2861,6 +2882,11 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uLutAmount, lutOn ? Math.min(1, lutAmount) : 0);
     gl.uniform3fv(P.u.uLutMin, this.lut ? this.lut.min : [0, 0, 0]);
     gl.uniform3fv(P.u.uLutMax, this.lut ? this.lut.max : [1, 1, 1]);
+    gl.uniform1i(P.u.uLytro, lytro ? 1 : 0);
+    if (lytro) {
+      gl.uniform1fv(P.u.uLytroCurve, LYTRO_CURVE);
+      gl.uniform1f(P.u.uLytroSat, LYTRO_SATURATION);
+    }
     gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
     if (look) {
       gl.uniform4f(P.u.uTone, look.contrast, look.highlights, look.shadows, look.whites);

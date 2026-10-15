@@ -10,6 +10,7 @@ import {
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { userDepthAlpha } from './core/userdepth.js';
+import { LYTRO_EXPOSURE } from './core/base.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -162,7 +163,10 @@ function updateColor() {
   state.veilOf = state.veil ? center : null;
   state.veilAmount = state.veil ? s.flare.amount : 0;
   if (state.gpu) state.gpu.setVeil(state.veil);
-  state.baseExposure = autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
+  // The Lytro Desktop look keeps the camera's exposure; the flat look picks
+  // one for the photo.
+  state.lytro = s.lytroLook !== false;
+  state.baseExposure = state.lytro ? LYTRO_EXPOSURE : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
 
@@ -183,7 +187,7 @@ function colorState(color) {
   const look = makeLook(s);
   if (state.pp) {
     const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
-    return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0 };
+    return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0, lytro: false };
   }
   const gains = auto.map((g, i) => g * manual[i]);
   const matrix = colorMatrix(state.lf.cam, s).map((v, i) => v * gains[i % 3]);
@@ -192,8 +196,9 @@ function colorState(color) {
   const veilAmount = veil ? s.flare.amount : 0;
   const center = centerView();
   const { outW, outH } = state.sampler;
-  const baseExposure = autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
-  return { settings: s, look, lens: lensParams(s.lens), matrix, baseExposure, veil, veilAmount };
+  const lytro = s.lytroLook !== false;
+  const baseExposure = lytro ? LYTRO_EXPOSURE : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
+  return { settings: s, look, lens: lensParams(s.lens), matrix, baseExposure, veil, veilAmount, lytro };
 }
 
 // Local adjustments for a w x h picture (core/local.js), or null. `ctx`:
@@ -216,7 +221,7 @@ function toPixels(rgb, w, h, ctx, cs = state) {
   // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
   if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
   const grade = state.lut ? { lut: state.lut, amount: cs.settings.lutAmount ?? 1 } : null;
-  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade);
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade, cs.lytro);
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = cs.matrix;
   const srgb = new Float32Array(rgb.length);
@@ -228,7 +233,7 @@ function toPixels(rgb, w, h, ctx, cs = state) {
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade);
+  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro);
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -281,6 +286,7 @@ function finishGpu(tex, w, h, packed, message, cs = state) {
     lens: cs.lens,
     lutAmount: state.lut ? cs.settings.lutAmount ?? 1 : 0,
     local: packed,
+    lytro: cs.lytro,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
@@ -1172,6 +1178,8 @@ function updateProcessedColor() {
   const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
   state.matrix = sat.map((v, i) => v * auto[i % 3] * manual[i % 3]);
   state.baseExposure = 1;
+  // Processed pictures were finished by Lytro Desktop already.
+  state.lytro = false;
   state.look = makeLook(s);
   state.detail = makeDetail(s);
   applyAutoDefringe(center, pp.width, pp.height);

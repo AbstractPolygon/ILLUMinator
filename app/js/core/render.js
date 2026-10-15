@@ -6,6 +6,7 @@
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
 
+import { lytroTable, CURVE_MAX, LYTRO_SATURATION } from './base.js';
 import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
@@ -498,15 +499,24 @@ export function autoExposure(rgb, matrix) {
   return 1;
 }
 
+const LYTRO_STEPS = 8192;
+const LYTRO_TABLE = lytroTable(LYTRO_STEPS);
+
 // Linear camera RGB -> sRGB RGBA bytes. `look`: the per-pixel color
 // adjustments from makeLook (core/color.js), applied after exposure.
 // `local`: local adjustments (core/local.js) { masks, w, h, depth, dw, dh,
 // show } for a w x h picture, or null. `grade`: { lut, amount }, a LUT
-// (core/lut.js) applied to the sRGB result, or null.
-export function toneMap(rgb, matrix, exposure, out, look = null, local = null, grade = null) {
+// (core/lut.js) applied to the sRGB result, or null. `lytro`: encode with
+// the Lytro Desktop look (core/base.js) instead of plain sRGB.
+export function toneMap(rgb, matrix, exposure, out, look = null, local = null, grade = null, lytro = false) {
   const n = rgb.length / 3;
   const px = out || new Uint8ClampedArray(n * 4);
-  const scale = look || local ? 1 : 4096;
+  // Linear values become table indexes: 0..1 for sRGB, 0..CURVE_MAX for
+  // the Lytro curve.
+  const steps = lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
+  const top = lytro ? LYTRO_STEPS : 4096;
+  const table = lytro ? LYTRO_TABLE : SRGB;
+  const scale = look || local ? 1 : steps;
   const m = matrix.map((v) => v * exposure * scale);
   const p = [0, 0, 0];
   const aspect = local ? local.w / local.h : 1;
@@ -535,16 +545,26 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
         if (local.depth) d = local.depth[Math.min(local.dh - 1, Math.floor(ny * local.dh)) * local.dw + Math.min(local.dw - 1, Math.floor(nx * local.dw))];
         applyLocal(p, local.masks, nx, ny, aspect, d, local.show);
       }
-      R = p[0] * 4096;
-      G = p[1] * 4096;
-      B = p[2] * 4096;
+      R = p[0] * steps;
+      G = p[1] * steps;
+      B = p[2] * steps;
     }
-    R = R < 0 ? 0 : R > 4096 ? 4096 : R;
-    G = G < 0 ? 0 : G > 4096 ? 4096 : G;
-    B = B < 0 ? 0 : B > 4096 ? 4096 : B;
-    px[o] = SRGB[R | 0];
-    px[o + 1] = SRGB[G | 0];
-    px[o + 2] = SRGB[B | 0];
+    R = R < 0 ? 0 : R > top ? top : R;
+    G = G < 0 ? 0 : G > top ? top : G;
+    B = B < 0 ? 0 : B > top ? top : B;
+    if (lytro) {
+      const r0 = table[R | 0];
+      const g0 = table[G | 0];
+      const b0 = table[B | 0];
+      const y = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
+      px[o] = y + LYTRO_SATURATION * (r0 - y);
+      px[o + 1] = y + LYTRO_SATURATION * (g0 - y);
+      px[o + 2] = y + LYTRO_SATURATION * (b0 - y);
+    } else {
+      px[o] = table[R | 0];
+      px[o + 1] = table[G | 0];
+      px[o + 2] = table[B | 0];
+    }
     px[o + 3] = 255;
     if (graded) {
       const r0 = px[o] / 255;
