@@ -1535,6 +1535,88 @@ void main() {
   outColor = vec4(texelFetch(uLum, p, 0).r - texelFetch(uLocal, p, 0).r, 0.0, 0.0, 0.0);
 }`;
 
+// Edge-aware fill (core/depth.js edgeAwareFill) on the GPU: a recursive
+// filter along rows and columns, y[i] = (1 - f[i]) * x[i] + f[i] * y[i - 1]
+// with f = a^distance. Each step is an affine map (f, c), and maps compose
+// associatively, so the whole row is a log-step (Hillis-Steele) scan.
+const EAF_DIST = `#version 300 es
+precision highp float;
+uniform sampler2D uColor;
+uniform float uRatio;
+out vec4 outColor;
+float max3(vec3 v) { return max(v.r, max(v.g, v.b)); }
+float diff(ivec2 p, ivec2 q) { return max3(abs(texelFetch(uColor, p, 0).rgb - texelFetch(uColor, q, 0).rgb)); }
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float dx = p.x >= 1 ? 1.0 + uRatio * diff(p, p - ivec2(1, 0)) : 0.0;
+  float dy = p.y >= 1 ? 1.0 + uRatio * diff(p, p - ivec2(0, 1)) : 0.0;
+  outColor = vec4(dx, dy, 0.0, 0.0);
+}`;
+
+const EAF_INIT = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;   // r: numerator, g: denominator
+uniform sampler2D uDist;  // r: horizontal, g: vertical distance to the previous pixel
+uniform int uAxis;        // 0: along rows, 1: along columns
+uniform int uBackward;
+uniform float uA;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uSrc, 0);
+  ivec2 step_ = uAxis == 0 ? ivec2(1, 0) : ivec2(0, 1);
+  int t = uAxis == 0 ? p.x : p.y;
+  int len = uAxis == 0 ? sz.x : sz.y;
+  float f = 0.0;
+  if (uBackward == 0) {
+    if (t >= 1) f = pow(uA, uAxis == 0 ? texelFetch(uDist, p, 0).r : texelFetch(uDist, p, 0).g);
+  } else if (t < len - 1) {
+    ivec2 q = p + step_;
+    f = pow(uA, uAxis == 0 ? texelFetch(uDist, q, 0).r : texelFetch(uDist, q, 0).g);
+  }
+  vec2 x = texelFetch(uSrc, p, 0).rg;
+  outColor = vec4(f, (1.0 - f) * x, 0.0);
+}`;
+
+const EAF_SCAN = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;   // r: f, g: numerator part, b: denominator part
+uniform int uAxis;
+uniform int uBackward;
+uniform int uOffset;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uSrc, 0);
+  int t = uAxis == 0 ? p.x : p.y;
+  int len = uAxis == 0 ? sz.x : sz.y;
+  vec4 me = texelFetch(uSrc, p, 0);
+  int j = uBackward == 0 ? t - uOffset : t + uOffset;
+  if (j < 0 || j >= len) { outColor = me; return; }
+  vec4 other = texelFetch(uSrc, uAxis == 0 ? ivec2(j, p.y) : ivec2(p.x, j), 0);
+  outColor = vec4(me.r * other.r, me.r * other.g + me.g, me.r * other.b + me.b, 0.0);
+}`;
+
+const EAF_TAKE = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+out vec4 outColor;
+void main() {
+  vec4 v = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0);
+  outColor = vec4(v.g, v.b, 0.0, 0.0);
+}`;
+
+const EAF_FINAL = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;      // r: numerator, g: denominator
+uniform sampler2D uValues;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 v = texelFetch(uSrc, p, 0).rg;
+  outColor = vec4(v.g > 1e-12 ? v.r / v.g : texelFetch(uValues, p, 0).r, 0.0, 0.0, 0.0);
+}`;
+
 // Edge-aware weighted median of a depth map (core/depth.js weightedMedian):
 // each pixel takes the depth below which half of the weight of its (2r+1)^2
 // neighbours lies, a neighbour's weight falling with how different its color
@@ -1837,6 +1919,11 @@ export class GpuRenderer {
       boxMean: program(gl, BOX_MEAN),
       depthDetail: program(gl, DEPTH_DETAIL),
       depthMedian: program(gl, DEPTH_MEDIAN),
+      eafDist: program(gl, EAF_DIST),
+      eafInit: program(gl, EAF_INIT),
+      eafScan: program(gl, EAF_SCAN),
+      eafTake: program(gl, EAF_TAKE),
+      eafFinal: program(gl, EAF_FINAL),
       depthVariance: program(gl, DEPTH_VARIANCE),
       depthGuidedAB: program(gl, DEPTH_GUIDED_AB),
       depthGuidedOut: program(gl, DEPTH_GUIDED_OUT),
@@ -2534,6 +2621,78 @@ export class GpuRenderer {
     const [alpha, cost, meanCost] = this.readChannels(best, w, h, 3);
     this.releaseDepthWork();
     return { alpha, cost, meanCost };
+  }
+
+  // core/depth.js edgeAwareFill on the GPU; `color`: rgb 0..1 per pixel.
+  edgeAwareFill(values, conf, color, w, h, sigmaS, sigmaR, iterations = 3) {
+    const gl = this.gl;
+    const P = this.programs;
+    const num = new Float32Array(w * h * 2);
+    for (let i = 0; i < w * h; i++) {
+      num[2 * i] = values[i] * conf[i];
+      num[2 * i + 1] = conf[i];
+    }
+    const arr = [this.uploadFloat(num, w, h, 'depthEafArr', 2), this.scratch32(w, h, 'depthEafArr2')];
+    const work = [this.scratch32(w, h, 'depthEafW0'), this.scratch32(w, h, 'depthEafW1')];
+    const dist = this.scratch32(w, h, 'depthEafDist');
+    const colorTex = this.uploadFloat(color, w, h, 'depthEafColor', 3);
+    const valuesTex = this.uploadFloat(values, w, h, 'depthEafValues');
+    const pass = (prog, target) => {
+      this.target(target, w, h);
+      gl.useProgram(prog.p);
+    };
+    pass(P.eafDist, dist);
+    gl.uniform1i(P.eafDist.u.uColor, 1);
+    this.bindTex(1, colorTex);
+    gl.uniform1f(P.eafDist.u.uRatio, sigmaS / sigmaR);
+    this.draw();
+    // One directional filter of `arr[0]` along `axis`, result in arr[0].
+    const run = (a, axis, backward) => {
+      pass(P.eafInit, work[0]);
+      gl.uniform1i(P.eafInit.u.uSrc, 1);
+      this.bindTex(1, arr[0]);
+      gl.uniform1i(P.eafInit.u.uDist, 2);
+      this.bindTex(2, dist);
+      gl.uniform1i(P.eafInit.u.uAxis, axis);
+      gl.uniform1i(P.eafInit.u.uBackward, backward);
+      gl.uniform1f(P.eafInit.u.uA, a);
+      this.draw();
+      let from = 0;
+      const len = axis === 0 ? w : h;
+      for (let off = 1; off < len; off *= 2) {
+        pass(P.eafScan, work[1 - from]);
+        gl.uniform1i(P.eafScan.u.uSrc, 1);
+        this.bindTex(1, work[from]);
+        gl.uniform1i(P.eafScan.u.uAxis, axis);
+        gl.uniform1i(P.eafScan.u.uBackward, backward);
+        gl.uniform1i(P.eafScan.u.uOffset, off);
+        this.draw();
+        from = 1 - from;
+      }
+      pass(P.eafTake, arr[1]);
+      gl.uniform1i(P.eafTake.u.uSrc, 1);
+      this.bindTex(1, work[from]);
+      this.draw();
+      arr.reverse();
+    };
+    for (let it = 0; it < iterations; it++) {
+      const sigmaH = (sigmaS * Math.sqrt(3) * 2 ** (iterations - it - 1)) / Math.sqrt(4 ** iterations - 1);
+      const a = Math.exp(-Math.SQRT2 / sigmaH);
+      // Both the numerator and the denominator share one pass (r, g).
+      run(a, 0, 0);
+      run(a, 0, 1);
+      run(a, 1, 0);
+      run(a, 1, 1);
+    }
+    pass(P.eafFinal, work[0]);
+    gl.uniform1i(P.eafFinal.u.uSrc, 1);
+    this.bindTex(1, arr[0]);
+    gl.uniform1i(P.eafFinal.u.uValues, 2);
+    this.bindTex(2, valuesTex);
+    this.draw();
+    const [result] = this.readChannels(work[0], w, h, 1);
+    this.releaseDepthWork();
+    return result;
   }
 
   // core/depth.js weightedMedian on the GPU; `color`: rgb 0..1 per pixel.

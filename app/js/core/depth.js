@@ -231,7 +231,7 @@ function fillSmooth(values, conf, w, h, r) {
 // picture but not across its edges (`guide`, 0..1). `sigmaS` (pixels) sets
 // how far values travel, `sigmaR` how strong an edge in `guide` must be to
 // stop them. Fills unreliable regions from reliable ones on the same surface.
-function edgeAwareFill(values, conf, guide, w, h, sigmaS, sigmaR, iterations = 3, color = null) {
+export function edgeAwareFill(values, conf, guide, w, h, sigmaS, sigmaR, iterations = 3, color = null) {
   const n = w * h;
   const num = new Float32Array(n);
   const den = new Float32Array(n);
@@ -304,11 +304,11 @@ function median5(src, w, h) {
 // Replaces blobs that disagree strongly with their wider neighborhood (a
 // confidence-weighted smooth reference): depth edges between real objects
 // differ far less than these failures, which jump to the ends of the range.
-function removeOutliers(alpha, confidence, w, h, threshold = 0.45, guide = null, color = null) {
+function removeOutliers(alpha, confidence, w, h, threshold = 0.45, guide = null, color = null, fill = edgeAwareFill) {
   // The reference stays within the photo's edges when it has them, so a
   // replaced value is never a blend of two surfaces.
   const reference = guide
-    ? edgeAwareFill(alpha, confidence.map((c) => c + 1e-3), guide, w, h, 12, DEPTH_FILL.edge, 3, color)
+    ? fill(alpha, confidence.map((c) => c + 1e-3), guide, w, h, 12, DEPTH_FILL.edge, 3, color)
     : fillSmooth(alpha, confidence.map((c) => c + 1e-3), w, h, 10);
   const out = new Float32Array(alpha);
   for (let i = 0; i < out.length; i++) {
@@ -456,8 +456,10 @@ function bestDepth(scores, alphas, n) {
 // The finishing steps of the depth measurement, from the best trial depth
 // per pixel (`alpha`), its cost and the mean cost over the trial depths
 // (measured here or on the GPU): confidence, filling in, outlier removal.
-// `median`: the edge-aware weighted median to use (the GPU's, if given).
-export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null } = {}) {
+// `median` and `fill`: the edge-aware weighted median and fill to use (the
+// GPU's, if given; they need `color`).
+export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null, fill = null } = {}) {
+  const fillOf = fill && color ? (v, c, g, w, h, sigmaS, sigmaR, it, col) => fill(v, c, col, w, h, sigmaS, sigmaR, it) : edgeAwareFill;
   const n = width * height;
   const confidence = Float32Array.from(cost);
   // A pronounced minimum is trustworthy; in blank regions every depth looks
@@ -471,12 +473,12 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   // Keep confident estimates; fill the rest from confident parts of the
   // same surface (as far as it reaches, but not across the photo's edges).
   const reach = Math.max(width, height) * DEPTH_FILL.reach;
-  const smooth = edgeAwareFill(alpha, confidence, guide, width, height, reach, DEPTH_FILL.edge, 3, color);
+  const smooth = fillOf(alpha, confidence, guide, width, height, reach, DEPTH_FILL.edge, 3, color);
   for (let i = 0; i < n; i++) {
     const c = Math.min(1, confidence[i] * DEPTH_FILL.trust);
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
-  const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color);
+  const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color, fillOf);
   let result = refine ? (median && color ? median(cleaned, color, width, height, 4, 0.06, 96) : weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color)) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
   // High quality: region cleanup (core/segments.js).
   if (refine && color && DEPTH_REGIONS.on) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
