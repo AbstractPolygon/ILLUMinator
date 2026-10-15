@@ -708,6 +708,10 @@ function draw(img) {
     canvas.height = h;
     layoutCanvas();
   }
+  if (!state.photoBase || state.photoBase[0] !== w || state.photoBase[1] !== h) {
+    state.photoBase = [w, h];
+    showPhotoSizes();
+  }
   state.geom = g ? { ...g, inverse: invert(k === 1 ? g.matrix : g.matrix.map((v) => v * k)), srcW: img.width, srcH: img.height } : null;
   if (g) drawGeometry(ctx, img, g, k);
   else if (img instanceof ImageData) ctx.putImageData(img, 0, 0);
@@ -1261,6 +1265,7 @@ function setFullResMode(on) {
   $('fullres-panel').hidden = !on;
   $('render-btn').disabled = !on;
   $('auto-render').disabled = !on;
+  showPhotoSizes();
   if (!on) setFullRes(false);
   else if ($('auto-render').checked) scheduleAutoRender(0);
 }
@@ -1305,6 +1310,7 @@ function setFullRes(on, { restore = true } = {}) {
   if (on && !(state.fullResMode && state.info && state.info.hasRaw && state.mode === 'camera')) return;
   if (on === state.fullRes) return;
   state.fullRes = on;
+  showPhotoSizes();
   if (on) {
     setPlaying(false);
     state.showingFrames = false;
@@ -1603,6 +1609,24 @@ function showResolutionSizes() {
   };
   label($('detail'), RESOLUTION_NAMES, state.info && state.info.sizes);
   label($('still-scale'), SCALE_NAMES, state.info && state.info.stillSizes);
+  showPhotoSizes();
+}
+
+// Photo > Size options show the saved photo's size: the picture as shown
+// (through crop and rotation; with Full sensor on but not yet rendered, the
+// size its still will have) times each option.
+const PHOTO_SIZE_NAMES = { 1: 'Native', 1.5: '1.5×', 2: '2×', 3: '3×', 4: '4×' };
+function showPhotoSizes() {
+  let base = state.info && state.photoBase ? [...state.photoBase] : null;
+  if (base && state.fullResMode && !state.fullRes && state.info.stillSizes && state.info.sizes) {
+    const still = state.info.stillSizes[$('still-scale').value];
+    const view = state.info.sizes[$('detail').value];
+    if (still && view) base = base.map((v) => v * (still[0] / view[0]));
+  }
+  for (const o of $('photo-size').options) {
+    const k = +o.value;
+    o.textContent = `${PHOTO_SIZE_NAMES[o.value] || `${k}×`}${base ? ` — ${Math.round(base[0] * k)}×${Math.round(base[1] * k)} px` : ''}`;
+  }
 }
 
 function renderInfo() {
@@ -5454,6 +5478,7 @@ $('fullres-on').onchange = () => setFullResMode($('fullres-on').checked);
 $('render-btn').onclick = renderFullRes;
 $('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
 $('still-scale').onchange = () => setFullRes(false);
+$('still-scale').addEventListener('change', showPhotoSizes);
 $('still-passes').onchange = () => setFullRes(false);
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
