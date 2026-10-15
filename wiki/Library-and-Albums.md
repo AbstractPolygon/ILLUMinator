@@ -25,6 +25,7 @@ The folders are the truth: copy a photo folder into `Photos/` and it appears in 
 Albums are listed at the top of the left sidebar.
 
 - **New album:** *+ New album*, type a name, Enter.
+- **Import a Lytro Desktop library:** *+ Import Lytro library…*, under *+ New album*. See [[Importing]].
 - **Add photos:** drag photos from the list or the grid onto an album, or use **•••** on a photo and tick albums.
 - **Remove from an album:** **•••** on the photo, untick the album.
 - **Rename or delete an album:** **•••** next to the album. Deleting an album keeps its photos in the library.
