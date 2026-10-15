@@ -902,6 +902,8 @@ for (const type of ['pointerup', 'pointercancel']) {
 // Live camera view. Requests are coalesced: while one renders, only the
 // latest settings are kept for the next.
 async function renderCamera() {
+  // Changes keep coming: wait for them to stop before auto rendering.
+  if (autoRenderTimer) scheduleAutoRender();
   if (!canRender()) return;
   const v = state.view;
   if (v.busy) {
@@ -1181,8 +1183,40 @@ function setFullResMode(on) {
   $('fullres-on').checked = on;
   $('fullres-panel').hidden = !on;
   $('render-btn').disabled = !on;
+  $('auto-render').disabled = !on;
   if (!on) setFullRes(false);
+  else if ($('auto-render').checked) scheduleAutoRender(0);
 }
+
+// Auto render: with Full resolution on, the still is rendered again by
+// itself once changes stop (not while a slider or the picture is dragged,
+// during playback, or while frames or the depth map are shown).
+const AUTO_RENDER_DELAY = 800;
+let autoRenderTimer = 0;
+function scheduleAutoRender(delay = AUTO_RENDER_DELAY) {
+  clearTimeout(autoRenderTimer);
+  autoRenderTimer = 0;
+  if (!$('auto-render').checked || !state.fullResMode || state.fullRes) return;
+  autoRenderTimer = setTimeout(() => {
+    autoRenderTimer = 0;
+    if (drag.on) return scheduleAutoRender();
+    if (state.playing || state.showingFrames || state.depthShown || $('auto-render').disabled) return;
+    setFullRes(true);
+  }, delay);
+}
+try {
+  $('auto-render').checked = localStorage.getItem('illuminator.autoRender') === '1';
+} catch {
+  // Storage unavailable: starts off.
+}
+$('auto-render').onchange = () => {
+  try {
+    localStorage.setItem('illuminator.autoRender', $('auto-render').checked ? '1' : '0');
+  } catch {
+    // Not remembered; it still applies now.
+  }
+  scheduleAutoRender(0);
+};
 
 function renderFullRes() {
   if (!state.fullResMode) return;
@@ -1206,6 +1240,7 @@ function setFullRes(on, { restore = true } = {}) {
   state.still = null;
   $('frame-label').textContent = '';
   if (restore) refresh();
+  scheduleAutoRender();
 }
 
 async function renderDepth() {
