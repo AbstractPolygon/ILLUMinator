@@ -8,10 +8,11 @@
 //                  /thumb.jpg
 //   Photos/Beach/raw.lfp            (imported from Lytro Desktop)
 //               /stack.view.lfp
+//               /stack.userdepthmap.png, .txt   (an edited depth map)
 //
 // library.json:
 // { "format": "illuminator-library", "version": 1,
-//   "photos": [{ "id", "name", "file", "sidecar", "thumb", "size", "photoId", "added" }],
+//   "photos": [{ "id", "name", "file", "sidecar", "thumb", "depthMap", "depthRange", "size", "photoId", "added" }],
 //   "albums": [{ "id", "name", "photos": [photo id, ...] }] }
 //
 // A photo's id is its folder name. The folder is the truth: photos found in
@@ -85,6 +86,7 @@ export class Library {
       const thumb = files.find((f) => /^thumb\.(jpe?g|png)$/i.test(f.name));
       this.photos.push({
         id: dir, name: found.name === 'raw' ? dir : found.name, file: found.file.name, sidecar: found.sidecar ? found.sidecar.name : null,
+        depthMap: found.depthMap ? found.depthMap.name : null, depthRange: found.depthRange ? found.depthRange.name : null,
         thumb: thumb ? thumb.name : null, size: found.file.size, photoId: null, added: new Date().toISOString(),
       });
       changed = true;
@@ -164,6 +166,10 @@ export class Library {
           await this.store.copyIn(e.sidecar, `${PHOTOS}/${existing.id}/${e.sidecar.name}`);
           existing.sidecar = e.sidecar.name;
         }
+        if (e.depthMap && e.depthRange && !existing.depthMap) {
+          Object.assign(existing, await this.copyDepth(e, `${PHOTOS}/${existing.id}`));
+          await this.save();
+        }
         out.push(existing);
         continue;
       }
@@ -199,7 +205,15 @@ export class Library {
     } catch {
       thumb = null;
     }
-    return { file, sidecar, thumb };
+    return { file, sidecar, thumb, ...(await this.copyDepth(e, dir)) };
+  }
+
+  // A Lytro Desktop depth map: the image and its lambda range.
+  async copyDepth(e, dir) {
+    if (!e.depthMap || !e.depthRange) return { depthMap: null, depthRange: null };
+    await this.store.copyIn(e.depthMap, `${dir}/${e.depthMap.name}`);
+    await this.store.copyIn(e.depthRange, `${dir}/${e.depthRange.name}`);
+    return { depthMap: e.depthMap.name, depthRange: e.depthRange.name };
   }
 
   async remove(ids) {
@@ -216,6 +230,14 @@ export class Library {
 
   sidecar(photo) {
     return photo.sidecar ? this.store.file(`${PHOTOS}/${photo.id}/${photo.sidecar}`) : Promise.resolve(null);
+  }
+
+  // { image, range } files of the photo's Lytro Desktop depth map, or null.
+  async userDepth(photo) {
+    if (!photo.depthMap || !photo.depthRange) return null;
+    const dir = `${PHOTOS}/${photo.id}`;
+    const [image, range] = await Promise.all([this.store.file(`${dir}/${photo.depthMap}`), this.store.file(`${dir}/${photo.depthRange}`)]);
+    return image && range ? { image, range } : null;
   }
 
   thumbnail(photo) {
@@ -308,9 +330,14 @@ export class Library {
       if (sidecar) files.push({ path: `${dir}/${p.sidecar}`, data: await asBlob(sidecar) });
       const thumb = await this.thumbnail(p).catch(() => null);
       if (thumb) files.push({ path: `${dir}/${p.thumb}`, data: await asBlob(thumb) });
+      const depth = await this.userDepth(p).catch(() => null);
+      if (depth) {
+        files.push({ path: `${dir}/${p.depthMap}`, data: await asBlob(depth.image) });
+        files.push({ path: `${dir}/${p.depthRange}`, data: await asBlob(depth.range) });
+      }
       const edits = await this.store.readText(`${dir}/${EDITS_FILE}`).catch(() => null);
       if (edits) files.push({ path: `${dir}/${EDITS_FILE}`, data: edits });
-      photos.push({ folder: p.id, name: p.name, file: p.file, sidecar: sidecar ? p.sidecar : null, thumb: thumb ? p.thumb : null, edits: !!edits });
+      photos.push({ folder: p.id, name: p.name, file: p.file, sidecar: sidecar ? p.sidecar : null, thumb: thumb ? p.thumb : null, depthMap: depth ? p.depthMap : null, depthRange: depth ? p.depthRange : null, edits: !!edits });
     }
     const index = { format: ARCHIVE_FORMAT, version: ARCHIVE_VERSION, name: album.name, exported: new Date().toISOString(), photos };
     return writeZip([{ path: 'album.json', data: JSON.stringify(index, null, 2) }, ...files], { onProgress });
@@ -328,7 +355,7 @@ export class Library {
     if (index.format !== ARCHIVE_FORMAT) throw new Error('Not an ILLUMinator album');
     const at = (folder, name) => (name ? entries.get(`${PHOTOS}/${folder}/${name}`) || null : null);
     const items = (index.photos || [])
-      .map((p) => ({ meta: p, entry: { name: p.name, label: p.folder, file: at(p.folder, p.file), sidecar: at(p.folder, p.sidecar), thumb: at(p.folder, p.thumb) } }))
+      .map((p) => ({ meta: p, entry: { name: p.name, label: p.folder, file: at(p.folder, p.file), sidecar: at(p.folder, p.sidecar), thumb: at(p.folder, p.thumb), depthMap: at(p.folder, p.depthMap), depthRange: at(p.folder, p.depthRange) } }))
       .filter((i) => i.entry.file);
     const photos = await this.add(items.map((i) => i.entry), { onProgress });
     for (let i = 0; i < photos.length; i++) {

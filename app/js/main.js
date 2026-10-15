@@ -3,6 +3,7 @@ import { readEdits, writeEdits, editsStore, EDITS_FORMAT, EDITS_VERSION } from '
 import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
+import { decodePngGray, parseDepthRange } from './core/userdepth.js';
 import { upscaleImage } from './gpu/upscale.js';
 import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
@@ -634,8 +635,37 @@ async function openItem(photo) {
   if (state.grid) showGrid(false);
   renderLibrary();
   const bytes = await file.arrayBuffer();
-  await openWith({ bytes }, [bytes]);
+  const userDepth = await readUserDepth(photo);
+  await openWith({ bytes, userDepth }, userDepth ? [bytes, userDepth.data.buffer] : [bytes]);
   if (state.info && state.current && state.current.photo === photo) lib.setPhotoId(photo, state.info.photoId).catch(() => {});
+}
+
+// A depth map edited in Lytro Desktop, kept with the photo when its library
+// was imported: used instead of measuring depth (core/userdepth.js).
+async function readUserDepth(photo) {
+  try {
+    const files = await lib.userDepth(photo);
+    if (!files) return null;
+    const range = parseDepthRange(new TextDecoder().decode(await files.range.arrayBuffer()));
+    if (!range) return null;
+    const bytes = new Uint8Array(await files.image.arrayBuffer());
+    let map = await decodePngGray(bytes).catch(() => null);
+    if (!map) {
+      // Not a PNG we read ourselves: the browser decodes it (8 bit).
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      const c = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = c.getContext('2d');
+      g.drawImage(bmp, 0, 0);
+      const px = g.getImageData(0, 0, bmp.width, bmp.height).data;
+      const data = new Float32Array(bmp.width * bmp.height);
+      for (let i = 0; i < data.length; i++) data[i] = px[i * 4] / 255;
+      map = { width: bmp.width, height: bmp.height, data };
+    }
+    return { ...map, ...range };
+  } catch (err) {
+    console.warn('Lytro depth map unreadable', err);
+    return null;
+  }
 }
 
 function resetView() {
@@ -1563,7 +1593,9 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq', 'lytro-depth']) $(id).disabled = !depthTools;
+  // Photos imported with a depth map edited in Lytro Desktop can use it.
+  $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
   if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = true;
   $('mv-on').disabled = !raw;
@@ -1945,6 +1977,7 @@ $('depth-smooth').oninput = () => {
 $('depth-smooth').onchange = () => {};
 // Normal or high quality depth: the depth map is measured again.
 $('depth-hq').onchange = () => applySettingsSoon();
+$('lytro-depth').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {
   $('pivot').disabled = !$('pivot-on').checked;
@@ -5694,6 +5727,7 @@ async function applySettings() {
     hotPixels: $('nr-hot').checked,
     depthSmoothing: $('depth-smooth').value / 100,
     depthQuality: $('depth-hq').checked ? 'high' : 'normal',
+    lytroDepth: $('lytro-depth').checked,
     details: {
       amount: +$('sharp-amount').value,
       radius: +$('sharp-radius').value,

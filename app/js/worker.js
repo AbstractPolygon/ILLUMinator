@@ -9,6 +9,7 @@ import {
   clipTrust,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
+import { userDepthAlpha } from './core/userdepth.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -325,6 +326,7 @@ function summary() {
     stacks: lf.stacks.map((s) => ({ kind: s.kind, source: s.source, count: s.images.length })),
     photoId: lf.photoId,
     recipe: lf.recipe || null,
+    userDepth: !!(state.userDepth && lf.raw),
   };
   if (state.pp) {
     const pp = state.pp;
@@ -377,8 +379,10 @@ function requireRaw() {
   if (!state.lf || !state.lf.raw) throw new Error('No light field loaded');
 }
 
-async function open({ id, bytes, synthetic }) {
+async function open({ id, bytes, synthetic, userDepth = null }) {
   state.lf = null;
+  // A Lytro Desktop depth map kept with the photo replaces the measured one.
+  state.userDepth = userDepth;
   state.gen++;
   state.refocusViews = null;
   for (const k of Object.keys(state.jobs)) state.jobs[k] = null;
@@ -671,8 +675,9 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
+  const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
-  if (qualityChanged && state.depthRaw && !detailChanged) {
+  if ((qualityChanged || sourceChanged) && state.depthRaw && !detailChanged) {
     // Measure the depth again, the new way.
     state.depth = null;
     state.depthRaw = null;
@@ -892,6 +897,17 @@ async function outputToSensor({ x, y }) {
 async function ensureDepth(id) {
   if (state.depth) return true;
   if (!(await ensureRefocusViews(id))) return false;
+  if (!state.depth && state.userDepth && state.settings.lytroDepth !== false) {
+    const { outW, outH } = state.sampler;
+    const alpha = userDepthAlpha(state.userDepth, state.sampler, state.lf.cam);
+    let lo = Infinity, hi = -Infinity;
+    for (const a of alpha) {
+      lo = Math.min(lo, a);
+      hi = Math.max(hi, a);
+    }
+    state.depthRaw = { alpha, confidence: new Float32Array(outW * outH).fill(1), range: [lo, hi], fromLytro: true };
+    applyDepthSmoothing();
+  }
   if (!state.depth) {
     const { outW, outH } = state.sampler;
     // Normal quality: the plain cost volume, about twice as fast; high adds

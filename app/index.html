@@ -505,6 +505,7 @@
           <label title="Smooths the depth map, following the picture’s edges">Smoothing <output for="depth-smooth" data-for="depth-smooth">30</output>
             <input id="depth-smooth" type="range" min="0" max="100" step="5" value="30" data-default="30">
           </label>
+          <label id="lytro-depth-row" class="check" title="Uses the depth map edited in Lytro Desktop, imported with the photo, instead of measuring depth" hidden><input id="lytro-depth" type="checkbox" checked> Lytro Desktop depth map</label>
           <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
           <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
         </details>

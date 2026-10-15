@@ -163,3 +163,17 @@ test('re-importing a library replaces photos with the same names', async () => {
   await lib.add([{ name: 'Beach', label: 'Beach', file: third }]);
   assert.equal(lib.photos.length, 2);
 });
+
+test('keeps a Lytro Desktop depth map with its photo', async () => {
+  const store = memoryStorage();
+  const lib = await new Library(store, { readSummary: async () => ({ photoId: 'p1', thumbnail: null }) }).load();
+  const entries = groupPhotos(['raw.lfp', 'stack.userdepthmap.png', 'stack.userdepthmap.txt'].map((n) => ({ path: `Beach/${n}`, file: file(n) })));
+  const [photo] = await lib.add(entries);
+  const depth = await lib.userDepth(photo);
+  assert.equal(depth.image.name, 'stack.userdepthmap.png');
+  assert.equal(depth.range.name, 'stack.userdepthmap.txt');
+  // Found again when the library is rebuilt from its folders.
+  await store.remove('library.json');
+  const reloaded = await new Library(store).load();
+  assert.equal(reloaded.photos[0].depthRange, 'stack.userdepthmap.txt');
+});
