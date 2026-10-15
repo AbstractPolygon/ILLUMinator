@@ -31,6 +31,7 @@ export function makeDetail(settings = {}) {
     color: (s.color || 0) / 100, // 0..1
     dust: (s.dust || 0) / 100, // 0..1
     speckle: (s.speckle || 0) / 100, // 0..1
+    speckleSize: Math.max(1, Math.min(5, Math.round(s.speckleSize || 2))), // pixels
   };
   return p.amount > 0 || p.luminance > 0 || p.color > 0 || p.dust > 0 || p.speckle > 0 ? p : null;
 }
@@ -47,8 +48,8 @@ export function rangeSigma(p) {
 export function sharpenWindow(p) {
   return Math.min(6, Math.ceil(2 * p.radius));
 }
-// Speckles: how far (in square-root brightness, per channel) a pixel must
-// stand out beyond all its neighbors to be clamped.
+// Despeckle: how far (in square-root brightness, per channel) a speck must
+// stand out from its surroundings (see removeSpeckles).
 export function speckleThreshold(p) {
   return 0.01 + 0.3 * (1 - p.speckle) ** 2;
 }
@@ -224,10 +225,23 @@ export function applyDetail(rgb, w, h, p) {
   return out;
 }
 
-// Clamps each channel of a pixel to its eight neighbors' range (widened by
-// the threshold) when it stands out beyond all of them.
+// Despeckle: a pixel belongs to a speck when, in a channel, it stands out
+// by more than the threshold from every pixel on the square ring `size`
+// pixels around it. A speck up to `size` pixels across never reaches that
+// ring; anything larger, and any line or edge, does, and is kept. A speck
+// takes the mean of the ring (the background around it).
+export function speckRing(size) {
+  const ring = [];
+  for (let d = -size; d <= size; d++) {
+    ring.push([d, -size], [d, size]);
+    if (Math.abs(d) < size) ring.push([-size, d], [size, d]);
+  }
+  return ring;
+}
+
 export function removeSpeckles(rgb, w, h, p) {
   const t = speckleThreshold(p);
+  const ring = speckRing(p.speckleSize);
   const out = new Float32Array(rgb.length);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -235,19 +249,18 @@ export function removeSpeckles(rgb, w, h, p) {
       for (let c = 0; c < 3; c++) {
         let lo = Infinity;
         let hi = -Infinity;
-        for (let dy = -1; dy <= 1; dy++) {
+        let sum = 0;
+        for (const [dx, dy] of ring) {
+          const xx = Math.min(w - 1, Math.max(0, x + dx));
           const yy = Math.min(h - 1, Math.max(0, y + dy));
-          for (let dx = -1; dx <= 1; dx++) {
-            if (!dx && !dy) continue;
-            const xx = Math.min(w - 1, Math.max(0, x + dx));
-            const v = Math.sqrt(Math.max(0, rgb[3 * (yy * w + xx) + c]));
-            if (v < lo) lo = v;
-            if (v > hi) hi = v;
-          }
+          const v = Math.sqrt(Math.max(0, rgb[3 * (yy * w + xx) + c]));
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+          sum += v;
         }
         const v = Math.sqrt(Math.max(0, rgb[3 * i + c]));
-        const k = v > hi + t ? hi : v < lo - t ? lo : v;
-        out[3 * i + c] = k === v ? rgb[3 * i + c] : k * k;
+        const m = sum / ring.length;
+        out[3 * i + c] = v > hi + t || v < lo - t ? m * m : rgb[3 * i + c];
       }
     }
   }

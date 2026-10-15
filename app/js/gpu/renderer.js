@@ -341,6 +341,7 @@ uniform vec2 uPoint;        // the tilted focus plane turns around this point
 uniform float uSpread;      // depth range on each side of the focus kept sharp
 uniform float uSmooth;      // width of the soft edge after the sharp range
 uniform float uStrength;    // blur radius in pixels per unit of focus difference
+uniform float uBlur;        // blur radius (pixels) added everywhere, the sharp range included
 uniform float uClip;
 uniform float uHighlights;
 out vec4 outColor;
@@ -355,7 +356,7 @@ void main() {
   // softEdge in core/dof.js).
   float e = max(abs(d) - uSpread, 0.0);
   if (uSmooth > 0.0) e = e < uSmooth ? e * e / (2.0 * uSmooth) : e - 0.5 * uSmooth;
-  d = sign(d) * e;
+  d = (d < 0.0 ? -1.0 : 1.0) * (uStrength * e + uBlur);
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float knee = 0.8 * uClip;
   float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
@@ -363,7 +364,7 @@ void main() {
   // brighter than the image can store, and their bokeh should glow.
   c *= 1.0 + (exp2(7.0 * uHighlights) - 1.0) * t * t;
   // Signed radius: positive behind the focus plane, negative in front.
-  outColor = vec4(c, uStrength * d);
+  outColor = vec4(c, d);
 }`;
 
 const MAX_TAPS = 512;
@@ -530,6 +531,7 @@ precision highp float;
 precision highp int;
 uniform sampler2D uSrc;
 uniform float uThreshold;
+uniform int uSize;
 out vec4 outColor;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 void main() {
@@ -537,20 +539,25 @@ void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec3 c = max(texelFetch(uSrc, p, 0).rgb, vec3(0.0));
   if (uThreshold > 0.0) {
+    // As removeSpeckles in core/detail.js: the ring uSize pixels around.
     vec3 lo = vec3(1e9);
     vec3 hi = vec3(-1e9);
-    for (int dy = -1; dy <= 1; dy++) {
-      for (int dx = -1; dx <= 1; dx++) {
-        if (dx == 0 && dy == 0) continue;
+    vec3 sum = vec3(0.0);
+    float n = 0.0;
+    for (int dy = -5; dy <= 5; dy++) {
+      for (int dx = -5; dx <= 5; dx++) {
+        if (max(abs(dx), abs(dy)) != uSize) continue;
         vec3 v = sqrt(max(texelFetch(uSrc, clamp(p + ivec2(dx, dy), ivec2(0), size - 1), 0).rgb, vec3(0.0)));
         lo = min(lo, v);
         hi = max(hi, v);
+        sum += v;
+        n += 1.0;
       }
     }
     vec3 v = sqrt(c);
-    vec3 k = mix(v, hi, step(hi + uThreshold, v));
-    k = mix(k, lo, step(v, lo - uThreshold));
-    c = k * k;
+    vec3 m = sum / n;
+    vec3 speck = max(step(hi + uThreshold, v), step(v, lo - uThreshold));
+    c = mix(c, m * m, speck);
   }
   outColor = vec4(c, dot(c, LUMA));
 }`;
@@ -2297,7 +2304,7 @@ export class GpuRenderer {
   // of this image per unit of focus difference. Returns the result texture.
   // `draft`: quicker, for previews while dragging: more of the blur at half
   // size and fewer taps.
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, draft = false }) {
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, blur = 0, draft = false }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -2315,6 +2322,7 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uSpread, spread);
     gl.uniform1f(P.u.uSmooth, smooth);
     gl.uniform1f(P.u.uStrength, strength);
+    gl.uniform1f(P.u.uBlur, blur);
     gl.uniform1f(P.u.uClip, clip);
     gl.uniform1f(P.u.uHighlights, highlights);
     this.draw();
@@ -2324,7 +2332,7 @@ export class GpuRenderer {
 
     const [lo, hi] = this.depthRange;
     const reach = Math.abs(tilt[0]) + Math.abs(tilt[1]);
-    const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread));
+    const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread) + blur);
     const taps = Math.max(32, Math.min(draft ? 160 : MAX_TAPS, Math.round(maxR * maxR * 1.2)));
     const kernel = bokehKernel({ shape, blades, oval, rotation, onion });
     const shapeId = kernel.kind;
@@ -2430,6 +2438,7 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uSrc, 1);
     this.bindTex(1, src);
     gl.uniform1f(P.u.uThreshold, p.speckle > 0 ? speckleThreshold(p) : 0);
+    gl.uniform1i(P.u.uSize, p.speckleSize);
     this.draw();
     if (!(p.dust > 0)) return clean;
     P = this.programs.detailMorph;

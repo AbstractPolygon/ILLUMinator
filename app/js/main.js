@@ -814,7 +814,7 @@ function apertureFor(n) {
   // is in focus keeps full sharpness. "Optical" instead refocuses by
   // averaging the views, which is softer but follows the real optics.
   const field = focusField();
-  if ($('bokeh').value !== 'optical' || +$('dof-depth').value !== 0 || field.spread > 0 || field.smooth > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
+  if ($('bokeh').value !== 'optical' || +$('dof-depth').value !== 0 || field.spread > 0 || field.smooth > 0 || field.blur > 0 || field.tilt.some((t) => t)) return { aperture: 0, dof: ratio < 0.15 ? 0 : (radius * ratio) / 14 };
   // About one view's worth of the aperture: render that single view (fast).
   if (ratio < 0.15) return { aperture: 0, dof: 0 };
   if (ratio <= 1) return { aperture: ratio, dof: 0 };
@@ -840,6 +840,10 @@ function focusField(v = {}) {
     spread: 1.6 * (v.spread ?? +$('spread').value) / 100,
     // Width of the soft edge of the sharp range, in the same units.
     smooth: 0.8 * (v.spreadSmooth ?? +$('spread-smooth').value) / 100,
+    // Blur of the sharp range itself, as a blur radius in the units of the
+    // depth of field strength (pixels = blur x the image's pixels per unit;
+    // full Blur is the camera's own f/2 blur three focus units away).
+    blur: (3 * (state.info ? state.info.radius : 4.5) / 14) * (v.spreadBlur ?? +$('spread-blur').value) / 100,
     tilt: [tilt * Math.cos(angle), tilt * Math.sin(angle)],
     point: [v.pointX ?? state.focusPoint.x, v.pointY ?? state.focusPoint.y],
   };
@@ -1553,9 +1557,10 @@ function setMode(mode) {
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
   for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq']) $(id).disabled = !depthTools;
-  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
+  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
   if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = true;
   $('mv-on').disabled = !raw;
+  $('nr-hot').disabled = !raw;
   $('detail').disabled = !raw;
   for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
@@ -1943,7 +1948,7 @@ function showBokehShape() {
   $('bokeh-onion-row').hidden = shape !== 'blades' && shape !== 'circle';
 }
 
-for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) {
+for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) {
   $(id).oninput = () => {
     if (id === 'bokeh') showBokehShape();
     showFNumber();
@@ -2651,7 +2656,7 @@ function localSettings() {
 // picture is drawn, like the pivot.
 const TRACK_NAMES = {
   aperture: 'Aperture', depth: 'Depth of field', focus: 'Focus', view: 'Viewpoint', zoom: 'Zoom', panX: 'Pan X', panY: 'Pan Y', pivot: 'Pivot depth',
-  pointX: 'Focus point X', pointY: 'Focus point Y', spread: 'Spread', spreadSmooth: 'Smoothing', tilt: 'Tilt', tiltRotation: 'Rotation', highlights: 'Highlights',
+  pointX: 'Focus point X', pointY: 'Focus point Y', spread: 'Spread', spreadSmooth: 'Smoothing', spreadBlur: 'Blur', tilt: 'Tilt', tiltRotation: 'Rotation', highlights: 'Highlights',
   amount: 'Amount', near: 'Near', far: 'Far',
 };
 
@@ -2659,7 +2664,7 @@ const TRACK_NAMES = {
 // panel's framing), each a group of its own under Camera.
 const CAMERA_SECTIONS = [
   { id: 'cam-depth', name: 'Depth', tracks: ['aperture', 'depth', 'focus'] },
-  { id: 'cam-spread', name: 'Focus Spread', tracks: ['pointX', 'pointY', 'spread', 'spreadSmooth'] },
+  { id: 'cam-spread', name: 'Focus Spread', tracks: ['pointX', 'pointY', 'spread', 'spreadSmooth', 'spreadBlur'] },
   // Tilt and Pivot depth show (and count) only while they are on.
   { id: 'cam-tilt', name: 'Tilt', tracks: ['tilt', 'tiltRotation'], when: () => $('tilt-on').checked },
   { id: 'cam-perspective', name: 'Perspective', tracks: ['view', 'pivot'] },
@@ -2751,7 +2756,7 @@ function tracks(mode) {
 // keyframes). Filled when a keyframe sits at the playhead.
 const KEY_CONTROLS = {
   fstop: ['aperture'], 'dof-depth': ['depth'], 'focus-point': ['focus', 'pointX', 'pointY'],
-  spread: ['spread'], 'spread-smooth': ['spreadSmooth'], tilt: ['tilt'], 'tilt-rotation': ['tiltRotation'],
+  spread: ['spread'], 'spread-smooth': ['spreadSmooth'], 'spread-blur': ['spreadBlur'], tilt: ['tilt'], 'tilt-rotation': ['tiltRotation'],
   viewpoint: ['view'], pivot: ['pivot'], highlights: ['highlights'],
   'frame-zoom': ['zoom'], 'frame-pan-x': ['panX'], 'frame-pan-y': ['panY'],
   amount: ['amount'], near: ['near'], far: ['far'],
@@ -3057,6 +3062,7 @@ function currentValue(k) {
     case 'pointY': return state.focusPoint.y;
     case 'spread': return +$('spread').value;
     case 'spreadSmooth': return +$('spread-smooth').value;
+    case 'spreadBlur': return +$('spread-blur').value;
     case 'tilt': return +$('tilt').value;
     case 'tiltRotation': return +$('tilt-rotation').value;
     case 'highlights': return +$('highlights').value;
@@ -3068,7 +3074,7 @@ function currentValue(k) {
 }
 
 // Camera tracks set straight from a slider.
-const TRACK_SLIDERS = { spread: 'spread', spreadSmooth: 'spread-smooth', tilt: 'tilt', tiltRotation: 'tilt-rotation', highlights: 'highlights', amount: 'amount', near: 'near', far: 'far' };
+const TRACK_SLIDERS = { spread: 'spread', spreadSmooth: 'spread-smooth', spreadBlur: 'spread-blur', tilt: 'tilt', tiltRotation: 'tilt-rotation', highlights: 'highlights', amount: 'amount', near: 'near', far: 'far' };
 
 // Shows a keyframe's value in the controls (and the picture).
 // Sets the control behind track k to v.
@@ -3847,6 +3853,7 @@ const CHANNELS = [
   { k: 'pointY', c: 0, name: 'Focus point Y', color: '#9ccc65' },
   { k: 'spread', c: 0, name: 'Spread', color: '#7986cb' },
   { k: 'spreadSmooth', c: 0, name: 'Smoothing', color: '#4db6ac' },
+  { k: 'spreadBlur', c: 0, name: 'Blur', color: '#9575cd' },
   { k: 'tilt', c: 0, name: 'Tilt', color: '#ff8a65' },
   { k: 'tiltRotation', c: 0, name: 'Rotation', color: '#a1887f' },
   { k: 'highlights', c: 0, name: 'Highlights', color: '#f06292' },
@@ -3922,6 +3929,7 @@ function channelLimits(ch) {
     case 'highlights': return [0, 1];
     case 'spread':
     case 'spreadSmooth': return [0, 100];
+    case 'spreadBlur': return [0, 100];
     case 'tilt': return [-100, 100];
     case 'tiltRotation': return [-90, 90];
     case 'amount': return [0.1, 1];
@@ -5539,6 +5547,7 @@ async function applySettings() {
   const settings = {
     ...colorSettings(),
     mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
+    hotPixels: $('nr-hot').checked,
     depthSmoothing: $('depth-smooth').value / 100,
     depthQuality: $('depth-hq').checked ? 'high' : 'normal',
     details: {
@@ -5550,6 +5559,7 @@ async function applySettings() {
       color: +$('nr-color').value,
       dust: +$('nr-dust').value,
       speckle: +$('nr-speckle').value,
+      speckleSize: +$('nr-speckle-size').value,
     },
     detail: +$('detail').value,
     local: localSettings(),
@@ -5901,6 +5911,7 @@ function showSliderValue(input) {
   else if (input.closest('.mask-shape')) out.textContent = `${v}`;
   else if (input.id === 'wb-temperature') out.textContent = `${v} K`;
   else if (input.id === 'sharp-radius') out.textContent = v.toFixed(1);
+  else if (input.id === 'nr-speckle-size') out.textContent = `${v} px`;
   else if (input.parentElement.closest('.details-panel')) out.textContent = `${v}`;
   else out.textContent = `${sign}${Math.abs(v)}`;
 }
@@ -5945,7 +5956,7 @@ $('flare-amount').oninput = () => {
   showSliderValue($('flare-amount'));
   applySettingsSoon();
 };
-for (const id of ['awb', 'mv-on', 'detail', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
+for (const id of ['awb', 'mv-on', 'nr-hot', 'detail', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])]) $(id).onchange = applySettings;
 $('fringe-radius').oninput = () => { $('fringe-radius-label').textContent = `${$('fringe-radius').value} px`; };
 for (const key of FRINGES) $(`fringe-${key}-hue`).oninput = showFringeHues;
 

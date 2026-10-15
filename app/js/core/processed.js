@@ -260,7 +260,7 @@ export class ProcessedPicture {
   render({ u = 0, v = 0, alpha = 0, blur = 0, bokeh = {} }) {
     const lambda = this.toLambda(alpha);
     const rgb = this.base(u, v, lambda);
-    if (!(blur > 0) || !this.depth || this.kind === 'focus') return rgb;
+    if (!(blur > 0 || bokeh.blur > 0) || !this.depth || this.kind === 'focus') return rgb;
     const scale = (this.lambdaRange[1] - this.lambdaRange[0]) / 2 / FOCUS_RANGE;
     const lambdaGrid = this.depthGrid();
     return applyDepthOfField(rgb, this.width, this.height, lambdaGrid.lambda, lambdaGrid.width, lambdaGrid.height, lambda,
@@ -274,6 +274,7 @@ export class ProcessedPicture {
         clip: 1,
         spread: (bokeh.spread || 0) * scale,
         smooth: (bokeh.smooth || 0) * scale,
+        blur: (bokeh.blur || 0) * scale * APERTURE_RADIUS * this.pxPerLambda,
         tilt: (bokeh.tilt || [0, 0]).map((t) => t * scale),
         point: bokeh.point,
       });

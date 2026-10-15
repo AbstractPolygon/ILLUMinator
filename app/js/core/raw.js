@@ -154,25 +154,33 @@ export function cameraInfo(metadata, fallbackLayout) {
   };
 }
 
-// Hot pixels: sensor pixels stuck far brighter than their surroundings
-// (more of them in long exposures and at high ISO). Through the microlenses
-// each one becomes a small red, green or blue blotch, so they are replaced
-// by the average of their four same-color neighbors (two pixels away).
-// A pixel counts as hot when it is over three times that average plus a
-// margin; real detail at this scale never jumps that much in one pixel.
-// Modifies `raw` in place and returns the number replaced.
-export function removeHotPixels(raw, width, height) {
-  let count = 0;
+// Hot and dead pixels: a copy of the raw image with each pixel that stands
+// far from the median of its eight nearest same-color neighbors (two pixels
+// away, diagonals included) replaced by that median. The median is not
+// thrown by a second bad pixel nearby, and "warm" pixels (twice as bright
+// as their surroundings, not only three times) are caught too. Returns
+// { raw, count }.
+export function fixHotPixels(raw, width, height) {
+  const out = raw.slice();
+  const nb = new Float64Array(8);
   const w2 = 2 * width;
+  const offs = [-w2 - 2, -w2, -w2 + 2, -2, 2, w2 - 2, w2, w2 + 2];
+  let count = 0;
   for (let y = 2; y < height - 2; y++) {
     let i = y * width + 2;
     for (let x = 2; x < width - 2; x++, i++) {
-      const m = (raw[i - 2] + raw[i + 2] + raw[i - w2] + raw[i + w2]) * 0.25;
-      if (raw[i] > m * 3 + 40) {
-        raw[i] = Math.round(m);
+      const v = raw[i];
+      // Quick reject against the four nearest: most pixels are fine.
+      const m4 = (raw[i - 2] + raw[i + 2] + raw[i - w2] + raw[i + w2]) * 0.25;
+      if (v <= m4 * 1.6 + 20 && !(v < m4 * 0.4 && m4 > 100)) continue;
+      for (let k = 0; k < 8; k++) nb[k] = raw[i + offs[k]];
+      nb.sort();
+      const m = (nb[3] + nb[4]) * 0.5;
+      if (v > m * 2 + 30 || (v < m * 0.3 && m > 100)) {
+        out[i] = Math.round(m);
         count++;
       }
     }
   }
-  return count;
+  return { raw: out, count };
 }

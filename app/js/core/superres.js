@@ -108,7 +108,7 @@ export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1
 
 // Bright single-pixel defects (hot pixels) and dead pixels: compare with the
 // four nearest pixels of the same color.
-function isDefect(raw, width, i) {
+export function isDefect(raw, width, i) {
   const v = raw[i];
   const m = (raw[i - 2] + raw[i + 2] + raw[i - 2 * width] + raw[i + 2 * width]) * 0.25;
   return v > m * 3 + 40 || (v < m * 0.2 && m > 100);

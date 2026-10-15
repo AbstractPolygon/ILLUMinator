@@ -11,7 +11,7 @@
 //   panY      -1..1
 //   pivot     the Pivot depth slider (-100..100), used with Custom pivot on
 //   pointX, pointY  the focus point (0..1 across and down the picture)
-//   spread, spreadSmooth  Focus Spread and its Smoothing (0..100)
+//   spread, spreadSmooth, spreadBlur  Focus Spread, its Smoothing and Blur (0..100)
 //   tilt, tiltRotation  Tilt (-100..100) and its rotation (degrees), used
 //             with Tilt on
 //   highlights  bokeh highlights (0..1)
@@ -24,7 +24,7 @@
 // clamped handles: the speed carries through each keyframe, flattening at
 // highs, lows and the ends, without overshooting.
 
-export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY', 'pivot', 'pointX', 'pointY', 'spread', 'spreadSmooth', 'tilt', 'tiltRotation', 'highlights', 'amount', 'near', 'far'];
+export const TRACKS = ['aperture', 'depth', 'focus', 'view', 'zoom', 'panX', 'panY', 'pivot', 'pointX', 'pointY', 'spread', 'spreadSmooth', 'spreadBlur', 'tilt', 'tiltRotation', 'highlights', 'amount', 'near', 'far'];
 // Besides those, 'mask:<id>:<attr>': a setting of local adjustment <id>
 // (its strength, a shape setting or an effect; see core/local.js).
 export const isMaskTrack = (k) => /^mask:[\w-]+:[a-z]+$/.test(k);

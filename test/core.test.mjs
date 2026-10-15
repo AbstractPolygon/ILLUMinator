@@ -173,14 +173,20 @@ for (const name of samples ? fs.readdirSync(samples).filter((f) => /\.(lfr|lfp)$
 }
 
 test('hot pixels are replaced by their same-color neighbors', async () => {
-  const { removeHotPixels } = await import('../app/js/core/raw.js');
-  const w = 10;
+  const { fixHotPixels } = await import('../app/js/core/raw.js');
+  const w = 12;
   const raw = new Uint16Array(w * w).fill(100);
   raw[5 * w + 5] = 1000; // hot
+  raw[5 * w + 7] = 900; // hot, next to the first (same color)
+  raw[8 * w + 8] = 260; // warm
   raw[3 * w + 4] = 180; // ordinary detail
-  assert.equal(removeHotPixels(raw, w, w), 1);
-  assert.equal(raw[5 * w + 5], 100);
-  assert.equal(raw[3 * w + 4], 180);
+  const { raw: out, count } = fixHotPixels(raw, w, w);
+  assert.equal(count, 3);
+  assert.equal(out[5 * w + 5], 100);
+  assert.equal(out[5 * w + 7], 100);
+  assert.equal(out[8 * w + 8], 100);
+  assert.equal(out[3 * w + 4], 180);
+  assert.equal(raw[5 * w + 5], 1000); // the original is kept
 });
 
 test('depth smoothing evens out noise but keeps edges where the picture has them', async () => {

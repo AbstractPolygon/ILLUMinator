@@ -517,6 +517,9 @@
           <label title="Softens the edges of the sharp range: blur builds up gradually instead of starting at once">Smoothing <output data-for="spread-smooth" for="spread-smooth">0</output>
             <input id="spread-smooth" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
+          <label title="Blurs the sharp range itself; Smoothing still adds its gradual blur on top past the range">Blur <output data-for="spread-blur" for="spread-blur">0</output>
+            <input id="spread-blur" type="range" min="0" max="100" step="1" value="0" data-default="0">
+          </label>
           <label class="check"><input id="spread-show" type="checkbox"> Show spread</label>
         </details>
         <details class="subpanel">
@@ -582,6 +585,7 @@
         </details>
         <details class="subpanel">
           <summary><h3>Noise Reduction</h3></summary>
+          <label class="check" title="Finds hot and dead pixels on the sensor and fills them from their neighbors before the picture is made"><input id="nr-hot" type="checkbox" checked> Remove hot pixels</label>
           <label class="check"><input id="mv-on" type="checkbox"> Multi-view</label>
           <label title="How much the other views are blended in to reduce noise">Blend <output for="mv-blend" data-for="mv-blend">100</output>
             <input id="mv-blend" type="range" min="0" max="100" step="1" value="100" data-default="100" disabled>
@@ -595,8 +599,11 @@
           <label title="Fills small, faint dark spots left by dust on the sensor or lens: higher removes larger spots">Dust <output for="nr-dust" data-for="nr-dust">0</output>
             <input id="nr-dust" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
-          <label title="Removes single bright or dark pixels that stand out from their neighbors">Speckles <output for="nr-speckle" data-for="nr-speckle">0</output>
+          <label title="Removes small bright or dark specks (one to four pixels) that stand out from their surroundings; lines and edges are kept">Despeckle <output for="nr-speckle" data-for="nr-speckle">0</output>
             <input id="nr-speckle" type="range" min="0" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label title="The largest speck removed, in pixels across: specks up to this size go, larger spots and lines stay">Speck size <output for="nr-speckle-size" data-for="nr-speckle-size">2 px</output>
+            <input id="nr-speckle-size" type="range" min="1" max="5" step="1" value="2" data-default="2">
           </label>
         </details>
       </details>

@@ -194,7 +194,8 @@ function boostHighlights(rgb, clip, amount) {
 // oval (0..1), rotation (degrees) and onion (0..1) (see bokehKernel),
 // highlights (0..1), clip (the developed level where highlights clip), and
 // the focus field: spread (depth kept sharp on each side of the focus),
-// smooth (width of the soft edge where blur starts after the spread),
+// smooth (width of the soft edge where blur starts after the spread), blur
+// (pixels of blur added everywhere, the sharp range included),
 // tilt ([x, y] focus change across the picture) turning around point
 // Focus distance past the sharp range -> amount of blur. With `smooth` the
 // blur starts gradually (a quadratic ease over that width) instead of at
@@ -207,11 +208,11 @@ export function softEdge(excess, smooth) {
 
 // ([x, y], normalized).
 export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxPerUnit = 14, options = {}) {
-  if (!(strength > 0)) return rgb;
-  const { highlights = 0, clip = 1, spread = 0, smooth = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
+  if (!(strength > 0) && !(options.blur > 0)) return rgb;
+  const { blur: blurPx = 0, highlights = 0, clip = 1, spread = 0, smooth = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
   const kernel = bokehKernel(options);
   const src = boostHighlights(rgb, clip, highlights);
-  const maxR = Math.max(1, strength * 1.6 * pxPerUnit);
+  const maxR = Math.max(1, strength * 1.6 * pxPerUnit + blurPx);
   const radii = [0];
   for (let r = 1; r < maxR * 1.5; r *= kernel.kind ? Math.SQRT2 : 2) radii.push(r);
   if (radii.length < 2) radii.push(1);
@@ -225,7 +226,7 @@ export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxP
     for (let x = 0; x < w; x++) {
       const d = depth[dy * dw + Math.min(dw - 1, Math.floor((x + 0.5) * sx))];
       const f = rowFocus + tilt[0] * ((x + 0.5) / w - point[0]);
-      const r = strength * softEdge(Math.abs(d - f) - spread, smooth) * pxPerUnit;
+      const r = strength * softEdge(Math.abs(d - f) - spread, smooth) * pxPerUnit + blurPx;
       let k = 0;
       while (k < radii.length - 2 && radii[k + 1] < r) k++;
       const t = Math.max(0, Math.min(1, (r - radii[k]) / (radii[k + 1] - radii[k] || 1)));

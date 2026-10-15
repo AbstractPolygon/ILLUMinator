@@ -47,3 +47,14 @@ test('refocus prefers views that did not clip', async () => {
   const out = refocus(views, w, h, 0);
   assert.ok(out[0] > 1.5, `got ${out[0]}`);
 });
+
+test('spread blur softens the sharp range too', () => {
+  const w = 21, h = 21;
+  const rgb = new Float32Array(w * h * 3).fill(0.1);
+  rgb.set([1, 1, 1], (10 * w + 10) * 3);
+  const depth = new Float32Array(w * h).fill(0); // all in focus
+  const sharp = applyDepthOfField(rgb, w, h, depth, w, h, 0, 1, 14, { spread: 0.5 });
+  const soft = applyDepthOfField(rgb, w, h, depth, w, h, 0, 1, 14, { spread: 0.5, blur: 3 });
+  assert.equal(sharp[(10 * w + 10) * 3], 1);
+  assert.ok(soft[(10 * w + 10) * 3] < 0.9);
+});

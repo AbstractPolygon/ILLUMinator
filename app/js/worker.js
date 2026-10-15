@@ -18,6 +18,7 @@ import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt } from './core/superres.js';
+import { fixHotPixels } from './core/raw.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
@@ -236,7 +237,7 @@ function toPixels(rgb, w, h, ctx, cs = state) {
 // before the color pass, so color changes can redraw it (see view()).
 async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, color = null }, message) {
   const gpu = state.gpu;
-  if (dof > 0 && (await ensureDepth(id))) {
+  if ((dof > 0 || bokeh.blur > 0) && (await ensureDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
       focus: alpha,
       strength: dof * pxPerUnit,
@@ -250,6 +251,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       point: bokeh.point,
       spread: bokeh.spread,
       smooth: bokeh.smooth,
+      blur: (bokeh.blur || 0) * pxPerUnit,
       clip: state.dev.clip,
       draft,
     });
@@ -395,6 +397,9 @@ async function open({ id, bytes, synthetic }) {
     updateColor();
   }
   if (state.lf.raw) {
+    state.rawOriginal = state.lf.raw;
+    state.rawFixed = null;
+    if (state.settings.hotPixels !== false) useHotPixelFix(true);
     state.dev = makeDevelopParams(state.lf.cam);
     if (state.gpu === null && state.settings.gpu !== false) {
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
@@ -523,12 +528,12 @@ function apertureOptions({ u = 0, v = 0, aperture = 1 }) {
 // `bokeh` is { shape: 'smooth' | 'circle' | 'blades', blades, oval, rotation,
 // onion, highlights: 0..1 } (see core/dof.js).
 async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}) {
-  if (!(dof > 0)) return rgb;
+  if (!(dof > 0 || bokeh.blur > 0)) return rgb;
   if (!(await ensureDepth(id))) return rgb;
   const { outW, outH } = state.sampler;
   return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail, {
     shape: bokeh.shape, blades: bokeh.blades, oval: bokeh.oval, rotation: bokeh.rotation, onion: bokeh.onion, highlights: bokeh.highlights, clip: state.dev.clip, tilt: bokeh.tilt, point: bokeh.point, spread: bokeh.spread,
-    smooth: bokeh.smooth,
+    smooth: bokeh.smooth, blur: (bokeh.blur || 0) * 14 * scale * state.settings.detail,
   });
 }
 
@@ -652,7 +657,17 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
   return undefined;
 }
 
+// Remove hot pixels: the raw image with hot and dead pixels fixed (made
+// once per photo) or the original.
+function useHotPixelFix(on) {
+  const { lf } = state;
+  if (on && !state.rawFixed) state.rawFixed = fixHotPixels(state.rawOriginal, lf.cam.width, lf.cam.height);
+  lf.raw = on ? state.rawFixed.raw : state.rawOriginal;
+  lf.hotPixels = on ? state.rawFixed.count : 0;
+}
+
 async function settings({ id, settings: s }) {
+  const hotChanged = s.hotPixels !== undefined && s.hotPixels !== (state.settings.hotPixels ?? true);
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
@@ -670,7 +685,13 @@ async function settings({ id, settings: s }) {
     return summary();
   }
   if (state.lf && state.lf.raw) {
-    if (detailChanged) rebuildSampler();
+    if (hotChanged && state.rawOriginal) {
+      useHotPixelFix(s.hotPixels);
+      if (state.gpu) state.gpu.setRaw(state.lf.raw, state.lf.cam, state.dev);
+      state.depth = null;
+      state.depthRaw = null;
+    }
+    if (detailChanged || hotChanged) rebuildSampler();
     else updateColor();
   }
   return state.lf && state.lf.raw ? summary() : null;
