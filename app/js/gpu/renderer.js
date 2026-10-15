@@ -17,6 +17,7 @@
 import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
+import { CHROMA_EDGE } from '../core/render.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -149,6 +150,42 @@ void main() {
   // refocusing then takes the highlight from there (see REFOCUS_PASS).
   float trust = wsum > 0.0 ? 1.0 - clipped / wsum : 1.0;
   outColor = vec4(lum * frac, max(0.03, trust * trust));
+}`;
+
+// Edge-aware color (core/render.js edgeAwareChroma): each lens takes its
+// color from the neighboring lenses whose brightness is like its own, so
+// color stops at edges instead of bleeding across them. Brightness and
+// trust (alpha) are kept.
+const CHROMA_PASS = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uLens;   // per lens r, g, b, luminance (LENS_PASS)
+uniform sampler2D uBright; // per lens color, trust (BRIGHTNESS_PASS)
+uniform ivec2 uSize;
+uniform int uRadius;
+uniform float uSigma;
+out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 c = texelFetch(uBright, p, 0);
+  float lum = dot(c.rgb, LUMA);
+  float lc = sqrt(max(lum, 0.0));
+  float k = -1.0 / (2.0 * uSigma * uSigma);
+  vec4 s = vec4(0.0);
+  for (int dy = -3; dy <= 3; dy++) {
+    for (int dx = -3; dx <= 3; dx++) {
+      if (abs(dx) > uRadius || abs(dy) > uRadius) continue;
+      ivec2 q = p + ivec2(dx, dy);
+      if (q.x < 0 || q.y < 0 || q.x >= uSize.x || q.y >= uSize.y) continue;
+      float l = sqrt(max(dot(texelFetch(uBright, q, 0).rgb, LUMA), 0.0));
+      float d = (l - lc) / max(0.02, lc);
+      s += texelFetch(uLens, q, 0) * exp(k * d * d);
+    }
+  }
+  vec3 f = s.a > 1e-9 ? s.rgb / s.a : vec3(0.0);
+  float norm = dot(f, LUMA);
+  outColor = norm > 1e-9 && s.a > 1e-9 ? vec4(lum * f / norm, c.a) : c;
 }`;
 
 const VIEW_PASS = `#version 300 es
@@ -1538,6 +1575,7 @@ export class GpuRenderer {
       bright: program(gl, BRIGHTNESS_PASS),
       view: program(gl, VIEW_PASS),
       refocus: program(gl, REFOCUS_PASS),
+      chroma: program(gl, CHROMA_PASS),
       dofPrep: program(gl, DOF_PREP),
       dofGather: program(gl, DOF_GATHER),
       dofTiles: program(gl, DOF_TILES),
@@ -1732,10 +1770,22 @@ export class GpuRenderer {
     gl.uniform1f(P.bright.u.uInv2s2, 1 / (2 * 0.9 * 0.9));
     this.draw();
 
+    // Edge-aware color into tmpTex (free again after the box passes).
+    this.target(this.tmpTex, lensW, lensH);
+    gl.useProgram(P.chroma.p);
+    gl.uniform1i(P.chroma.u.uLens, 1);
+    this.bindTex(1, this.lensTex);
+    gl.uniform1i(P.chroma.u.uBright, 2);
+    this.bindTex(2, this.brightTex);
+    gl.uniform2i(P.chroma.u.uSize, lensW, lensH);
+    gl.uniform1i(P.chroma.u.uRadius, 3);
+    gl.uniform1f(P.chroma.u.uSigma, CHROMA_EDGE);
+    this.draw();
+
     this.target(tex, sampler.outW, sampler.outH, layer);
     gl.useProgram(P.view.p);
     gl.uniform1i(P.view.u.uLens, 1);
-    this.bindTex(1, this.brightTex);
+    this.bindTex(1, this.tmpTex);
     gl.uniform2i(P.view.u.uLensSize, lensW, lensH);
     gl.uniform2i(P.view.u.uLens0, sampler.lenses.c0, sampler.lenses.r0);
     gl.uniform4f(P.view.u.uGrid, sampler.grid.pitch, sampler.grid.rowStep, 0, 0);

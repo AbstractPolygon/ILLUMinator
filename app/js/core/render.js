@@ -171,6 +171,9 @@ function lensBoxSum(src, rows, cols, r) {
 }
 
 const CHROMA_RADIUS = 3; // lenses
+// Edge-aware color (edgeAwareChroma): how much brightness difference, as a
+// share of the square-root brightness, still counts as the same surface.
+export const CHROMA_EDGE = 0.15;
 const LUMA_SIGMA = 0.9; // sensor pixels
 
 // Linear RGB for each lens at offset (u, v) (sensor pixels, grid axes).
@@ -214,10 +217,11 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
   }
   // Neighborhood color as fractions of brightness.
   const { rows, cols } = lenses;
-  const sR = lensBoxSum(R, rows, cols, CHROMA_RADIUS);
-  const sG = lensBoxSum(G, rows, cols, CHROMA_RADIUS);
-  const sB = lensBoxSum(B, rows, cols, CHROMA_RADIUS);
-  const sY = lensBoxSum(Y, rows, cols, CHROMA_RADIUS);
+  const cr = dev.chromaRadius ?? CHROMA_RADIUS;
+  const sR = lensBoxSum(R, rows, cols, cr);
+  const sG = lensBoxSum(G, rows, cols, cr);
+  const sB = lensBoxSum(B, rows, cols, cr);
+  const sY = lensBoxSum(Y, rows, cols, cr);
   const reach = Math.ceil(2 * LUMA_SIGMA);
   const inv2s2 = 1 / (2 * LUMA_SIGMA * LUMA_SIGMA);
   for (let i = 0; i < n; i++) {
@@ -253,6 +257,53 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
     out[3 * i] = lum * frac[0];
     out[3 * i + 1] = lum * frac[1];
     out[3 * i + 2] = lum * frac[2];
+  }
+  const edge = dev.chromaEdge ?? CHROMA_EDGE;
+  if (edge > 0) edgeAwareChroma(R, G, B, Y, out, rows, cols, cr, edge);
+}
+
+// Color from the neighboring lenses whose brightness (in `out`) is like
+// this lens's: color then stops at edges instead of bleeding across them.
+function edgeAwareChroma(R, G, B, Y, out, rows, cols, r, sigma) {
+  const n = rows * cols;
+  const L = new Float32Array(n);
+  for (let i = 0; i < n; i++) L[i] = Math.sqrt(Math.max(0, 0.2126 * out[3 * i] + 0.7152 * out[3 * i + 1] + 0.0722 * out[3 * i + 2]));
+  const k = -1 / (2 * sigma * sigma);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = y * cols + x;
+      const lc = L[i];
+      let sr = 0;
+      let sg = 0;
+      let sb = 0;
+      let sy = 0;
+      for (let dy = -r; dy <= r; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= rows) continue;
+        for (let dx = -r; dx <= r; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= cols) continue;
+          const j = yy * cols + xx;
+          const d = (L[j] - lc) / Math.max(0.02, lc);
+          const w = Math.exp(k * d * d);
+          sr += R[j] * w;
+          sg += G[j] * w;
+          sb += B[j] * w;
+          sy += Y[j] * w;
+        }
+      }
+      if (!(sy > 1e-9)) continue;
+      const lum = 0.2126 * out[3 * i] + 0.7152 * out[3 * i + 1] + 0.0722 * out[3 * i + 2];
+      // Keep the brightness, change only the color.
+      const fr = sr / sy;
+      const fg = sg / sy;
+      const fb = sb / sy;
+      const norm = 0.2126 * fr + 0.7152 * fg + 0.0722 * fb;
+      if (!(norm > 1e-9)) continue;
+      out[3 * i] = (lum * fr) / norm;
+      out[3 * i + 1] = (lum * fg) / norm;
+      out[3 * i + 2] = (lum * fb) / norm;
+    }
   }
 }
 
