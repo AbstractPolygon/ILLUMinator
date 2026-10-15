@@ -30,7 +30,7 @@ In the keyframe editor:
 The desktop app has a menu bar (on macOS, at the top of the screen):
 
 - **File:** Import Lytro File…, Import Lytro Library…, Quit (on macOS, Quit is in the ILLUMinator menu)
-- **Edit:** Undo, Redo, Cut, Copy, Paste, Delete and Select All, for text fields
+- **Edit:** *Undo* and *Redo* step through the photo's edits (in a text field, its typing); Cut, Copy, Paste and Select All for text fields
 - **View:** Actual Size, Zoom In and Zoom Out (the size of the whole window's contents), and Toggle Full Screen
 - **Window:** Minimize, Zoom and Close
 - **Help:** About shows the About window; Wiki opens this wiki in your browser
