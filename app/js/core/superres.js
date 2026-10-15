@@ -416,9 +416,10 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // each pixel for the nearest and farthest depth, `smooth` the window (in
 // output pixels) over which ray agreement is compared, `margin` how much
 // worse than the best a candidate may agree and still count, `keep` the
-// extra weight of the depth map as is. On the fence of one test photo:
-// no doubled edges, fine detail 3% closer to Lytro Desktop's.
-export const EDGE_SNAP = { on: true, radius: 4, smooth: 2, margin: 0.25, keep: 1.5 };
+// extra weight of the depth map as is. On the fence of one test photo this
+// removes the doubled outlines and most of the comb-like striping along a
+// near wire's edge; on three other photos it changes under 0.05% of pixels.
+export const EDGE_SNAP = { on: true, radius: 6, smooth: 2, margin: 0.1, keep: 1 };
 
 // Nearest (fn = Math.min) or farthest (Math.max) depth within `r`.
 export function depthFilter(depth, w, h, r, fn) {
