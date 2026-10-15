@@ -1535,6 +1535,65 @@ void main() {
   outColor = vec4(texelFetch(uLum, p, 0).r - texelFetch(uLocal, p, 0).r, 0.0, 0.0, 0.0);
 }`;
 
+// Edge-aware weighted median of a depth map (core/depth.js weightedMedian):
+// each pixel takes the depth below which half of the weight of its (2r+1)^2
+// neighbours lies, a neighbour's weight falling with how different its color
+// is. The median bin is found by bisection over the quantized depths.
+const DEPTH_MEDIAN = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uAlpha;
+uniform sampler2D uColor;   // rgb 0..1
+uniform int uRadius;
+uniform int uLevels;
+uniform float uLo;
+uniform float uHi;
+uniform float uSigma;
+out vec4 outColor;
+int bin(ivec2 q) {
+  float a = texelFetch(uAlpha, q, 0).r;
+  return min(uLevels - 1, int(floor((a - uLo) / (uHi - uLo) * float(uLevels))));
+}
+vec3 col8(ivec2 q) { return floor(clamp(texelFetch(uColor, q, 0).rgb, 0.0, 1.0) * 255.0 + 0.5); }
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uAlpha, 0);
+  vec3 c0 = col8(p);
+  float k2 = 1.0 / (2.0 * uSigma * uSigma * 255.0 * 255.0);
+  float total = 0.0;
+  for (int dy = -uRadius; dy <= uRadius; dy++) {
+    for (int dx = -uRadius; dx <= uRadius; dx++) {
+      ivec2 q = p + ivec2(dx, dy);
+      if (q.x < 0 || q.y < 0 || q.x >= sz.x || q.y >= sz.y) continue;
+      vec3 d = abs(col8(q) - c0);
+      float m = max(d.r, max(d.g, d.b));
+      total += exp(-m * m * k2);
+    }
+  }
+  float half_ = 0.5 * total;
+  int lo = 0;
+  int hi = uLevels - 1;
+  // Smallest bin whose cumulative weight reaches half the total.
+  for (int it = 0; it < 8; it++) {
+    if (lo >= hi) break;
+    int mid = (lo + hi) / 2;
+    float cum = 0.0;
+    for (int dy = -uRadius; dy <= uRadius; dy++) {
+      for (int dx = -uRadius; dx <= uRadius; dx++) {
+        ivec2 q = p + ivec2(dx, dy);
+        if (q.x < 0 || q.y < 0 || q.x >= sz.x || q.y >= sz.y) continue;
+        if (bin(q) > mid) continue;
+        vec3 d = abs(col8(q) - c0);
+        float m = max(d.r, max(d.g, d.b));
+        cum += exp(-m * m * k2);
+      }
+    }
+    if (cum >= half_) hi = mid; else lo = mid + 1;
+  }
+  float own = texelFetch(uAlpha, p, 0).r;
+  outColor = vec4(bin(p) == lo ? own : uLo + ((float(lo) + 0.5) / float(uLevels)) * (uHi - uLo), 0.0, 0.0, 0.0);
+}`;
+
 // Spread of the views' detail, shifted for trial depth uAlpha, relative to
 // local brightness; with occlusion the best half of the aperture where it
 // is clearly better. Output: (cost, guide * cost) for the guided filter.
@@ -1777,6 +1836,7 @@ export class GpuRenderer {
       depthLum: program(gl, DEPTH_LUM),
       boxMean: program(gl, BOX_MEAN),
       depthDetail: program(gl, DEPTH_DETAIL),
+      depthMedian: program(gl, DEPTH_MEDIAN),
       depthVariance: program(gl, DEPTH_VARIANCE),
       depthGuidedAB: program(gl, DEPTH_GUIDED_AB),
       depthGuidedOut: program(gl, DEPTH_GUIDED_OUT),
@@ -2474,6 +2534,37 @@ export class GpuRenderer {
     const [alpha, cost, meanCost] = this.readChannels(best, w, h, 3);
     this.releaseDepthWork();
     return { alpha, cost, meanCost };
+  }
+
+  // core/depth.js weightedMedian on the GPU; `color`: rgb 0..1 per pixel.
+  weightedMedian(alpha, color, w, h, r = 4, sigma = 0.06, levels = 96) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < alpha.length; i++) {
+      if (alpha[i] < lo) lo = alpha[i];
+      if (alpha[i] > hi) hi = alpha[i];
+    }
+    if (!(hi > lo)) return alpha;
+    const gl = this.gl;
+    const a = this.uploadFloat(alpha, w, h, 'medianAlpha');
+    const c = this.uploadFloat(color, w, h, 'medianColor', 3);
+    const out = this.scratch32(w, h, 'medianOut');
+    const Q = this.programs.depthMedian;
+    this.target(out, w, h);
+    gl.useProgram(Q.p);
+    gl.uniform1i(Q.u.uAlpha, 1);
+    this.bindTex(1, a);
+    gl.uniform1i(Q.u.uColor, 2);
+    this.bindTex(2, c);
+    gl.uniform1i(Q.u.uRadius, r);
+    gl.uniform1i(Q.u.uLevels, levels);
+    gl.uniform1f(Q.u.uLo, lo);
+    gl.uniform1f(Q.u.uHi, hi);
+    gl.uniform1f(Q.u.uSigma, sigma);
+    this.draw();
+    const [result] = this.readChannels(out, w, h, 1);
+    this.releaseDepthWork();
+    return result;
   }
 
   // Edge-aware depth smoothing (core/depth.js smoothDepth) on the GPU.

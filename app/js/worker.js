@@ -1000,7 +1000,7 @@ async function ensureDepth(id) {
         const coarse = state.gpu.measureDepth({ ...DEPTH_SEARCH, window: DEPTH_SEARCH.window + 1, detail: DEPTH_COARSE.detail, blur: DEPTH_COARSE.blur, occlusion: false, guided: true, floor, guide });
         measured = combineCoarse(measured, coarse);
       }
-      state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb) });
+      state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu) });
     } else {
       state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
         ...(fast ? { occlusion: false, guided: false, refine: false } : {}),

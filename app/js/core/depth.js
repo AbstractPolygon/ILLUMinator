@@ -456,7 +456,8 @@ function bestDepth(scores, alphas, n) {
 // The finishing steps of the depth measurement, from the best trial depth
 // per pixel (`alpha`), its cost and the mean cost over the trial depths
 // (measured here or on the GPU): confidence, filling in, outlier removal.
-export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null } = {}) {
+// `median`: the edge-aware weighted median to use (the GPU's, if given).
+export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null } = {}) {
   const n = width * height;
   const confidence = Float32Array.from(cost);
   // A pronounced minimum is trustworthy; in blank regions every depth looks
@@ -476,7 +477,7 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
   const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color);
-  let result = refine ? weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
+  let result = refine ? (median && color ? median(cleaned, color, width, height, 4, 0.06, 96) : weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color)) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
   // High quality: region cleanup (core/segments.js).
   if (refine && color && DEPTH_REGIONS.on) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
   return { alpha: result, confidence, range: [min, max] };
