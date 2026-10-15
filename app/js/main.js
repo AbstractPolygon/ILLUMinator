@@ -2062,7 +2062,7 @@ async function importFolder() {
   // Libraries are imported by the desktop app; the browser version points
   // there.
   if (!native) {
-    $('desktop-only-dialog').showModal();
+    showDesktopOnly();
     return;
   }
   const picked = await pickFolder('Import a Lytro Desktop library or a folder of photos').catch((err) => {
@@ -2092,6 +2092,15 @@ async function importFolder() {
 }
 
 $('import-folder').onclick = importFolder;
+
+// The browser version points to the desktop app for imports that need it.
+const LIBRARY_ONLY = { title: $('desktop-only-title').textContent, text: $('desktop-only-text').textContent };
+function showDesktopOnly(title = LIBRARY_ONLY.title, text = LIBRARY_ONLY.text) {
+  $('desktop-only-title').textContent = title;
+  $('desktop-only-text').textContent = text;
+  $('desktop-only-hint').hidden = title !== LIBRARY_ONLY.title;
+  $('desktop-only-dialog').showModal();
+}
 
 // ---- camera calibration
 
@@ -2148,8 +2157,10 @@ async function addCalibration(source) {
   }
 }
 
-$('cal-add').onclick = async () => addCalibration(await openCalibrationFile().catch(() => null));
+const CALIBRATION_ONLY = ['Add camera calibration', 'Adding camera calibration data needs the ILLUMinator desktop app, for Windows, macOS and Linux. Backups are over a gigabyte, so the desktop app reads them on your computer and keeps the calibration in your library.'];
+$('cal-add').onclick = async () => (!native ? showDesktopOnly(...CALIBRATION_ONLY) : addCalibration(await openCalibrationFile().catch(() => null)));
 $('cal-folder').onclick = async () => {
+  if (!native) return showDesktopOnly(...CALIBRATION_ONLY);
   const picked = await pickFolder('Choose the camera’s calibration folder', { calibration: true }).catch(() => null);
   if (picked && picked.files.length) addCalibration(picked.files.map((f) => ({ path: f.path, file: f.file })));
 };
