@@ -29,8 +29,8 @@ Lytro Desktop keeps its albums in a database ILLUMinator does not read, so they 
 
 ## From another ILLUMinator library
 
-An album exported with *Export album…* (see [[Library and Albums]]) is a `.zip`. Open it with the **Open** icon in the top bar or drop it on the window: its photos join the library with their edits, and the album is made again (or joined, if one has its name). A photo already in the library is not copied twice, and its edits there are kept. This is how to move photos from the browser version to the desktop app.
+An album exported with *Export album…* (see [[Library and Albums]]) is a `.zip`. Drop it on the window: its photos join the library with their edits, and the album is made again (or joined, if one has its name). A photo already in the library is not copied twice, and its edits there are kept. This is how to move photos from the browser version to the desktop app.
 
 ## From files
 
-The **Open** icon (a folder) in the top bar, or drag files onto the window. To bring Lytro Desktop's edits for a single picture, open its `raw.lfp` together with its `stack.view.lfp`; an exported `IMG_0001.LFP` opened with `IMG_0001.LFR` works the same way.
+Drag files onto the window (in the desktop app, also *File → Import Lytro File…*). To bring Lytro Desktop's edits for a single picture, open its `raw.lfp` together with its `stack.view.lfp`; an exported `IMG_0001.LFP` opened with `IMG_0001.LFR` works the same way.
