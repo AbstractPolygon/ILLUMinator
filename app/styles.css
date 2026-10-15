@@ -675,3 +675,6 @@ label.lut-amount { margin-top: 14px; }
 /* Lenslets: the full sensor sampling of the part of the sensor shown. */
 .lens-side { display: block; width: 100%; height: auto; image-rendering: pixelated; background: #000; border-radius: 4px; }
 .lens-side-title { margin: 6px 0 4px; font-size: 12px; color: var(--muted); }
+
+/* No photo open: the sidebar's settings are shown disabled. */
+.controls.no-photo > .panel > :not(summary), .controls.no-photo > .render-actions { opacity: 0.45; }

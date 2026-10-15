@@ -12,14 +12,25 @@
 
 ## Play bar
 
-Below the picture: **Stop** (back to the start), **Pause**, **Play** and **Loop** (play over and over; off, playback stops at the end). The readout shows the current frame and time of the whole, and *Length* sets the length in frames. Drag the slider to move through the animation at any time; before the frames are rendered, the picture shows the animation's settings there. Space plays and pauses, also right after using a slider or button (only fields you type in keep it).
+Below the picture:
+
+<img src="images/stop.png" width="20" height="20" alt="Stop"> **Stop:** back to the start.
+
+<img src="images/pause.png" width="20" height="20" alt="Pause"> **Pause**
+
+<img src="images/play.png" width="20" height="20" alt="Play"> **Play**
+
+<img src="images/loop.png" width="20" height="20" alt="Loop"> **Loop:** play over and over; off, playback stops at the end.
+
+The readout shows the current frame and time of the whole, and *Length* sets the length in frames. Drag the slider to move through the animation at any time; before the frames are rendered, the picture shows the animation's settings there. Space plays and pauses, also right after using a slider or button (only fields you type in keep it).
 
 ## Keyframes in the sidebar
 
-With a photo open, every setting that can be animated has ◀ ◆ ▶ at its right in the sidebar, in a separate column (as in DaVinci Resolve's Inspector):
+Every setting that can be animated has <img src="images/key-prev.png" width="8" height="14" alt="previous keyframe"> ◆ <img src="images/key-next.png" width="8" height="14" alt="next keyframe"> at its right in the sidebar, in a separate column (as in DaVinci Resolve's Inspector):
 
-- **◆** turns the setting's animation on or off. *Hollow:* not animated; clicking it adds a keyframe at the playhead, and turns on *Animate: Keyframes* if needed. *Filled:* animated; clicking it removes all of that setting's keyframes. *Blue:* a keyframe of the setting sits at the playhead.
-- **◀ ▶** move the playhead to the setting's previous and next keyframe. Each shows only when there is a keyframe that way.
+**◆** turns the setting's animation on or off. *Hollow:* not animated; clicking it adds a keyframe at the playhead, and turns on *Animate: Keyframes* if needed. *Filled:* animated; clicking it removes all of that setting's keyframes. *Blue:* a keyframe of the setting sits at the playhead.
+
+<img src="images/key-prev.png" width="8" height="14" alt="previous keyframe"> <img src="images/key-next.png" width="8" height="14" alt="next keyframe"> move the playhead to the setting's previous and next keyframe. Each shows only when there is a keyframe that way.
 
 They are on every slider of [[Process]] (the color matrix numbers aside), on every setting of the selected local adjustment (its strength, position, size, angle, fade, feather and every effect), on every Camera setting (the *Focus Point* row covers the focus and the focus point together, the *Viewpoint* row the viewpoint), on every slider of [[Optics]], and in the Animation panel on *Zoom*, *Pan X*, *Pan Y*, *Amount*, *Near* and *Far*. A slider without them keeps its full width.
 
@@ -65,4 +76,4 @@ A group's summary row shows a diamond wherever the group has keyframes; dragging
 
 Every animation frame uses its keyframed settings (color, optics, focus spread, tilt and bokeh highlights included) in the preview, in exported videos and in full sensor renders.
 
-**Curves view.** The second button at the left of the editor shows each setting as a curve over time, like Blender's Graph Editor. Each curve is fitted to the height of the view. Drag a keyframe up or down to change its value, or sideways to change its time. The selected keyframe shows its handles on the curve: drag them to shape the curve, and the handle on the other side turns with them, so the curve stays smooth. Checkboxes in the list hide curves.
+**Curves view.** <img src="images/tl-curves.png" width="20" height="20" alt="Curves view"> at the left of the editor (beside <img src="images/tl-keyframes.png" width="20" height="20" alt="Keyframes view">, the keyframes view) shows each setting as a curve over time, like Blender's Graph Editor. Each curve is fitted to the height of the view. Drag a keyframe up or down to change its value, or sideways to change its time. The selected keyframe shows its handles on the curve: drag them to shape the curve, and the handle on the other side turns with them, so the curve stays smooth. Checkboxes in the list hide curves.

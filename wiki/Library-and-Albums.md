@@ -37,4 +37,4 @@ Photos you open while an album is selected are added to that album too.
 
 ## Thumbnail grid
 
-Choosing *All photos* or an album shows its photos as a grid in the middle of the window. Make the thumbnails bigger or smaller with the slider and buttons above the grid, or the **+** and **−** keys. Click a thumbnail (or select it and press Enter) to open the photo.
+Choosing *All photos* or an album shows its photos as a grid in the middle of the window. Make the thumbnails bigger or smaller with the slider and <img src="images/thumb-smaller.png" width="20" height="20" alt="Smaller thumbnails"> <img src="images/thumb-bigger.png" width="20" height="20" alt="Bigger thumbnails"> above the grid, or the **+** and **−** keys. Click a thumbnail (or select it and press Enter) to open the photo.

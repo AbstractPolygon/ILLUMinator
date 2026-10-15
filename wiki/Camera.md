@@ -1,6 +1,6 @@
 # Camera
 
-The light field controls. Each can be animated: the ◀ ◆ ▶ at the right of a setting adds or removes its keyframes and moves between them (see [[Animation]]).
+The light field controls. Each can be animated: the <img src="images/key-prev.png" width="8" height="14" alt="previous keyframe"> ◆ <img src="images/key-next.png" width="8" height="14" alt="next keyframe"> at the right of a setting adds or removes its keyframes and moves between them (see [[Animation]]).
 
 ## Depth
 

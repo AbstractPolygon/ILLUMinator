@@ -601,6 +601,7 @@ function resetView() {
   $('spread-overlay').hidden = true;
   setFullRes(false, { restore: false });
   setDepthShown(false, { restore: false });
+  showSidebarEnabled();
 }
 
 function closePhoto() {
@@ -1462,7 +1463,16 @@ function showLensSampling(msg, scale) {
 
 // ---------------------------------------------------------------- modes
 
+// Without a photo nothing in the right sidebar can be used: every section's
+// settings (and the Render buttons) are disabled; the sections still open.
+function showSidebarEnabled() {
+  const off = !state.info;
+  for (const el of document.querySelectorAll('.controls > .panel > :not(summary), .controls > .render-actions')) el.inert = off;
+  $('controls').classList.toggle('no-photo', off);
+}
+
 function setMode(mode) {
+  showSidebarEnabled();
   // The Lenslets view compares the sensor with the picture shown before.
   if (mode === 'lenslets' && state.mode === 'camera' && state.lastImage && !state.lastImage.pair) state.lensPicture = state.lastImage;
   state.mode = mode;
