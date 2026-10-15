@@ -3764,13 +3764,12 @@ $('tl-curve-canvas').addEventListener('pointerdown', (e) => {
   move(e);
 });
 
-// Length, beside the play bar: of the keyframed animation, or of the
-// viewpoint path (its number of frames).
+// Length, beside the play bar: of the keyframed animation, the viewpoint
+// path, or the focus sweep (their numbers of frames).
 function showAnimationLength() {
   const kind = $('anim').value;
-  $('anim-length-row').hidden = kind === 'focus';
-  $('anim-length').value = kind === 'keyframes' ? frameCount(anim, KEY_FPS) : +$('frames').value;
-  $('anim-length').max = String(Math.round(120 * KEY_FPS) + 1);
+  $('anim-length').value = kind === 'keyframes' ? frameCount(anim, KEY_FPS) : +$(kind === 'focus' ? 'steps' : 'frames').value;
+  $('anim-length').max = kind === 'focus' ? $('steps').max : String(Math.round(120 * KEY_FPS) + 1);
 }
 
 // Length in frames (as the play bar counts them).
@@ -3779,6 +3778,12 @@ $('anim-length').onchange = () => {
   if ($('anim').value === 'keyframes') {
     anim.length = (frames - 1) / KEY_FPS;
     saveAnimation();
+  } else if ($('anim').value === 'focus') {
+    // Steps: odd, so the sweep has a middle frame.
+    const steps = $('steps');
+    $('steps').value = Math.min(+steps.max, Math.max(+steps.min, frames | 1));
+    scheduleSave();
+    animationSettingsChanged();
   } else {
     $('frames').value = frames;
     scheduleSave();
