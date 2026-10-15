@@ -31,7 +31,7 @@ Rendering runs on the GPU (WebGL 2); without it, on the CPU, much more slowly. O
 
 - *Size:* how much saved photos and 3D images are enlarged: *Native* (as rendered), 1.5×, 2×, 3× or 4×, with the [Upscaling](#upscaling) settings.
 - *File format:* *PNG* (lossless, bigger files) or *JPEG* (much smaller files). For JPEG, *JPEG quality* (50 to 100, 92 by default) sets how much detail is kept.
-- *Save PNG* (or *Save JPEG*) saves the picture as shown, at that size.
+- *Save PNG* (or *Save JPEG*), at the bottom of the panel under *Render*, saves the picture as shown, at that size.
 
 ## Video
 
