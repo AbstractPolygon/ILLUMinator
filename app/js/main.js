@@ -2912,6 +2912,7 @@ function updateKeyButtons() {
   const navs = document.querySelectorAll('.key-nav');
   if (!on) {
     for (const nav of navs) nav.hidden = true;
+    showKeyedSections();
     return;
   }
   const now = playheadTime();
@@ -2934,6 +2935,18 @@ function updateKeyButtons() {
     next.disabled = !times.some((x) => x > now + eps);
     const name = nav.closest('label').firstChild.textContent.trim().toLowerCase();
     b.title = keyed ? `Stop animating ${name} (removes its keyframes)` : `Animate ${name}: a keyframe at the playhead`;
+  }
+  showKeyedSections();
+}
+
+// Sections and subsections holding a keyframed setting are marked, so the
+// keyframes show while they are collapsed.
+function showKeyedSections() {
+  for (const d of document.querySelectorAll('aside details.panel, aside details.subpanel')) {
+    const keyed = !!d.querySelector('.key-nav.on:not([hidden])');
+    d.classList.toggle('keyed', keyed);
+    const s = d.querySelector(':scope > summary');
+    if (s) s.title = keyed ? 'Has keyframed settings' : '';
   }
 }
 

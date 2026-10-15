@@ -232,6 +232,14 @@ label:has(> .key-nav:not([hidden])) { position: relative; padding-right: 46px; }
 .key-toggle.on { color: var(--text); }
 .key-toggle.on .key-diamond { background: currentColor; }
 .key-toggle.here { color: var(--live); }
+/* A collapsed section or subsection holding keyframed settings shows the
+   keyframe diamond at the right of its title row, in line with the
+   sliders' keyframe buttons. */
+.panel.keyed:not([open]) > summary::after,
+.subpanel.keyed:not([open]) > summary::after {
+  content: ''; width: 6px; height: 6px; margin: 0 12px 0 auto; border-radius: 1px;
+  transform: rotate(45deg); background: var(--text); flex: none;
+}
 .row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
