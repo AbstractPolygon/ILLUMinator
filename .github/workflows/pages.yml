@@ -35,6 +35,9 @@ jobs:
           node-version: 22
       - run: node scripts/build-web.mjs --out dist/pages/app
       - run: cp -r site/. dist/pages/ && touch dist/pages/.nojekyll
+      # The site's download links and labels name the release files by
+      # version: {{version}} becomes package.json's.
+      - run: sed -i "s/{{version}}/$(node -p "require('./package.json').version")/g" dist/pages/index.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: dist/pages
