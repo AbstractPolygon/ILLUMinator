@@ -4881,12 +4881,39 @@ function frameGeometry(i, w, h) {
 // Full resolution: Scale and Detail recovery), with that frame's camera and
 // local adjustment settings. Kept as JPEGs: a hundred full resolution
 // frames would not fit in memory as pixels.
-async function fullResFrames(n) {
+// Every animation frame's render settings.
+function frameList() {
   const req = animationRequest();
   const a = req.args;
-  const list = req.type === 'frames'
+  return req.type === 'frames'
     ? a.path.map((f) => ({ u: f.u, v: f.v, alpha: f.alpha ?? a.alpha, aperture: f.aperture ?? a.aperture, dof: f.dof ?? a.dof, bokeh: f.bokeh ?? a.bokeh, masks: f.masks || null, color: f.color || null }))
     : a.alphas.map((alpha) => ({ u: a.u, v: a.v, alpha, aperture: a.aperture, dof: a.dof, bokeh: a.bokeh }));
+}
+
+// 3D video: each frame for both eyes (Show 3D's Baseline), as
+// [{ left, right }] of images (full sensor: JPEG blobs, as fullResFrames).
+async function stereoEyes(n, full) {
+  const b = eyeOffset();
+  const list = frameList().slice(0, n).flatMap((f) => [eyeParams(f, f.u - b), eyeParams(f, f.u + b)]);
+  let shots;
+  if (full) {
+    shots = await fullResFrames(list.length, list);
+  } else {
+    shots = new Array(list.length);
+    const { promise } = engine.job('frames', 'frames', { path: list }, {
+      onProgress: () => {},
+      onFrame: async (msg) => {
+        shots[msg.index] = msg.bitmap || (await createImageBitmap(toImageData(msg)));
+        showProgress('Rendering 3D frames', shots.filter(Boolean).length / list.length);
+      },
+    });
+    await promise;
+    if (shots.some((x) => !x)) throw new Error('3D rendering was stopped');
+  }
+  return Array.from({ length: list.length / 2 }, (_, i) => ({ left: shots[2 * i], right: shots[2 * i + 1] }));
+}
+
+async function fullResFrames(n, list = frameList()) {
   const scale = +$('still-scale').value;
   const passes = +$('still-passes').value;
   const count = Math.min(n, list.length);
@@ -4923,10 +4950,15 @@ async function exportVideo() {
       ? [...frames.keys(), ...[...frames.keys()].reverse().slice(1, -1)]
       : [...frames.keys(), ...frames.keys()];
     // Full resolution on: every frame rendered again from the whole sensor.
-    const full = state.fullResMode && state.info && state.info.hasRaw ? await fullResFrames(frames.length) : null;
-    const size = full ? full[0] : frames[0];
+    const fullOn = !!(state.fullResMode && state.info && state.info.hasRaw);
+    // Show 3D on: both eyes of every frame, combined in the 3D type.
+    const stereo = stereoShown() ? await stereoEyes(frames.length, fullOn) : null;
+    const mode = $('stereo-mode').value;
+    const full = fullOn && !stereo ? await fullResFrames(frames.length) : null;
+    const size = stereo ? stereo[0].left : full ? full[0] : frames[0];
     const g0 = frameGeometry(0, size.width, size.height);
-    const w = g0 ? g0.width : size.width;
+    const eyeW = g0 ? g0.width : size.width;
+    const w = stereo && mode !== 'anaglyph' ? 2 * eyeW : eyeW;
     const h = g0 ? g0.height : size.height;
     // Sized to the chosen Video size: a height (the short side, as in
     // 1080p) keeps the picture's shape; a social media size takes the
@@ -4958,18 +4990,46 @@ async function exportVideo() {
     // prepare (a full resolution frame is decoded first).
     const t0 = performance.now();
     recorder.start();
+    const eye = stereo ? Object.assign(document.createElement('canvas'), { width: Math.round(eyeW), height: Math.round(h) }) : null;
+    const eyeCtx = eye ? eye.getContext('2d', { willReadFrequently: mode === 'anaglyph' }) : null;
+    const decode = async (x) => (x && x.blob ? createImageBitmap(x.blob) : x);
     for (let n = 0; n < order.length; n++) {
       const i = order[n];
-      const img = full ? await createImageBitmap(full[i].blob) : frames[i];
-      const g = frameGeometry(i, img.width, img.height);
-      if (g) drawGeometry(nctx, img, g, native.width / g.width);
-      else nctx.drawImage(img, 0, 0, native.width, native.height);
+      let img = null;
+      if (stereo) {
+        // Each eye through the frame's crop and rotation, then side by side
+        // (right eye first for cross-eyed) or as an anaglyph (red from the
+        // left eye, green and blue from the right).
+        const eyes = [await decode(stereo[i].left), await decode(stereo[i].right)];
+        const drawn = eyes.map((img) => {
+          const g = frameGeometry(i, img.width, img.height);
+          eyeCtx.clearRect(0, 0, eye.width, eye.height);
+          if (g) drawGeometry(eyeCtx, img, g, eye.width / g.width);
+          else eyeCtx.drawImage(img, 0, 0, eye.width, eye.height);
+          if (fullOn) img.close();
+          return eyeCtx.getImageData(0, 0, eye.width, eye.height);
+        });
+        const [L, R] = drawn;
+        if (mode === 'anaglyph') {
+          for (let k = 0; k < L.data.length; k += 4) R.data[k] = 0.299 * L.data[k] + 0.587 * L.data[k + 1] + 0.114 * L.data[k + 2];
+          nctx.putImageData(R, 0, 0);
+        } else {
+          const [first, second] = mode === 'cross' ? [R, L] : [L, R];
+          nctx.putImageData(first, 0, 0);
+          nctx.putImageData(second, eye.width, 0);
+        }
+      } else {
+        img = full ? await createImageBitmap(full[i].blob) : frames[i];
+        const g = frameGeometry(i, img.width, img.height);
+        if (g) drawGeometry(nctx, img, g, native.width / g.width);
+        else nctx.drawImage(img, 0, 0, native.width, native.height);
+      }
       if (!whole) part.getContext('2d').drawImage(native, cut.x, cut.y, cut.w, cut.h, 0, 0, part.width, part.height);
       const big = upscaleImage(part, c.width, c.height, opts);
       const wait = t0 + (n * 1000) / state.fps - performance.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       cctx.drawImage(big, 0, 0);
-      if (full) img.close();
+      if (full && img) img.close();
       showProgress('Recording video', n / order.length);
     }
     await new Promise((r) => setTimeout(r, 1000 / state.fps));
