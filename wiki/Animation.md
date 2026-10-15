@@ -63,6 +63,6 @@ A group's summary row shows a diamond wherever the group has keyframes; dragging
 - *Auto (continuous):* one smooth curve through all the keyframes, like Blender's auto handles. It flattens at highs, lows and the ends, and never overshoots.
 - *Linear*, *Smooth*, *Ease in*, *Ease out*, *Hold*, or *Custom*, a curve you shape by dragging its two handles.
 
-Every animation frame uses its keyframed settings (color, optics, focus spread, tilt and bokeh highlights included) in the preview, in exported videos and in full resolution renders.
+Every animation frame uses its keyframed settings (color, optics, focus spread, tilt and bokeh highlights included) in the preview, in exported videos and in full sensor renders.
 
 **Curves view.** The second button at the left of the editor shows each setting as a curve over time, like Blender's Graph Editor. Each curve is fitted to the height of the view. Drag a keyframe up or down to change its value, or sideways to change its time. The selected keyframe shows its handles on the curve: drag them to shape the curve, and the handle on the other side turns with them, so the curve stays smooth. Checkboxes in the list hide curves.

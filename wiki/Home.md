@@ -15,7 +15,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 - [[Importing]]: from Lytro Desktop, from files
 - [[Editing]]: the photo viewer, and every panel:
   [[Crop]] · [[Process]] · [[Local Adjustments]] · [[Camera]] · [[Details]] · [[Optics]] · [[Animation]] · [[Render]]
-- [[Exporting]]: stills, full resolution renders and videos
+- [[Exporting]]: stills, full sensor renders and videos
 - [[Keyboard Shortcuts]]
 - [[File Formats]]: the library, the edits files and the Lytro files ILLUMinator reads
 - [[Troubleshooting]]
@@ -24,7 +24,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 
 | File | From | What ILLUMinator does with it |
 | --- | --- | --- |
-| `.LFR` | Lytro ILLUM (camera) | Full light field: refocus, aperture, viewpoint, depth, full resolution |
+| `.LFR` | Lytro ILLUM (camera) | Full light field: refocus, aperture, viewpoint, depth, full sensor |
 | `.LFP` (raw) | First generation Lytro, Lytro Desktop libraries (`raw.lfp`) | Full light field |
 | `.LFP` (processed) | Exported from Lytro Desktop, shared online | The pictures stored in it: focus stack, viewpoints or depth based |
 | `stack.view.lfp` | Lytro Desktop | The edits Lytro Desktop saved for a picture |

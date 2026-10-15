@@ -537,7 +537,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const base = allInFocus ? equalize(render(u, v)) : refocusRGB(alpha, opts);
   if (state.gpu) {
     // The whole render on the GPU: the picture stays there for the color pass.
-    progress('Rendering full resolution', 0);
+    progress('Rendering from the full sensor', 0);
     const params = superResParams(sampler, { scale, apertureSigma: allInFocus ? Infinity : opts.sigma });
     const tex = state.gpu.superRes({
       ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
@@ -552,7 +552,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
     scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
-    onProgress: (p) => progress('Rendering full resolution', p),
+    onProgress: (p) => progress('Rendering from the full sensor', p),
     gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });
   if (state.jobs.superres !== job) return { cancelled: true };

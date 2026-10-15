@@ -18,5 +18,5 @@ The editing panels are in the right sidebar; click a title to open or close it. 
 - [[Details]]: sharpening and noise reduction
 - [[Optics]]: chromatic aberration, lens correction and flare
 - [[Animation]]: animations, the play bar and the keyframe editor
-- [[Render]]: quality, full resolution, 3D and export
+- [[Render]]: quality, full sensor, 3D and export
 - [[Microlens Grid]]

@@ -724,7 +724,7 @@
             </select>
           </label>
           <div class="stack">
-            <label class="check" title="Full resolution on/off (F)"><input id="fullres-on" type="checkbox"> Full resolution</label>
+            <label class="check" title="Rebuilds the picture from every pixel the sensor recorded, on/off (F)"><input id="fullres-on" type="checkbox"> Full sensor</label>
             <div id="fullres-panel" hidden>
               <label>Scale
                 <select id="still-scale">
@@ -755,7 +755,7 @@
           <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none">Sharpen <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
             <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
           </label>
-          <p class="hint">Used for photos and video. Enlarging adds pixels, not detail. For the most detail, turn on Full resolution under Quality.</p>
+          <p class="hint">Used for photos and video. Enlarging adds pixels, not detail. For the most detail, turn on Full sensor under Quality.</p>
         </details>
         <details class="subpanel">
           <summary><h3>Photo</h3></summary>
@@ -816,8 +816,8 @@
         </details>
       </details>
       <div class="render-actions">
-        <button id="render-btn" class="wide" title="Renders the full resolution still (F turns Full resolution on)" disabled>Render</button>
-        <label id="auto-render-row" class="check" title="With Full resolution on, renders the full resolution still again by itself after each change"><input id="auto-render" type="checkbox" disabled> Auto render</label>
+        <button id="render-btn" class="wide" title="Renders the full sensor still (F turns Full sensor on)" disabled>Render</button>
+        <label id="auto-render-row" class="check" title="With Full sensor on, renders the full sensor still again by itself after each change"><input id="auto-render" type="checkbox" disabled> Auto render</label>
         <button id="png-btn" class="wide" disabled>Save PNG</button>
         <button id="webm-btn" class="wide">Export video</button>
       </div>

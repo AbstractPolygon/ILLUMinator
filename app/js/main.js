@@ -46,7 +46,7 @@ const state = {
   fps: DEFAULT_FPS,
   lastTick: 0,
   still: null, // ImageData of the full resolution render
-  fullResMode: false, // the Full resolution checkbox
+  fullResMode: false, // the Full sensor checkbox
   fullRes: false, // a full resolution still is shown (or rendering)
   depthShown: false,
   album: null, // album shown in the sidebar (null: all photos)
@@ -4575,10 +4575,10 @@ async function fullResFrames(n) {
   const passes = +$('still-passes').value;
   const count = Math.min(n, list.length);
   const render = (i) => engine.job('superRes', 'superres', { ...list[i], scale, passes }, {
-    onProgress: (_, p) => showProgress(`Rendering frame ${i + 1} of ${n} at full resolution`, (i + (p || 0)) / n),
+    onProgress: (_, p) => showProgress(`Rendering frame ${i + 1} of ${n} from the full sensor`, (i + (p || 0)) / n),
   }).promise;
   const encode = async (msg) => {
-    if (!msg || !(msg.pixels || msg.bitmap)) throw new Error('Full resolution rendering was stopped');
+    if (!msg || !(msg.pixels || msg.bitmap)) throw new Error('Full sensor rendering was stopped');
     const img = toImageData(msg);
     const c = new OffscreenCanvas(img.width, img.height);
     const g = c.getContext('2d');

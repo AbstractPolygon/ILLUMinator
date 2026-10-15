@@ -15,7 +15,7 @@ A stereo pair from two viewpoints across the lens.
 
 - *High quality depth map:* sharper depth edges that match the photo, about twice as slow to measure. Off, the faster depth map is used.
 - *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
-- *Full resolution* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it; *Save PNG* then saves the still, enlarged to the Photo *Size*. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
+- *Full sensor* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it; *Save PNG* then saves the still, enlarged to the Photo *Size*. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Upscaling
 
@@ -23,7 +23,7 @@ Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*
 
 - *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's own sharpening. It has no effect at *Native* size.
 
-Enlarging adds pixels, not detail. For the most detail, render with *Full resolution* and enlarge that.
+Enlarging adds pixels, not detail. For the most detail, render with *Full sensor* and enlarge that.
 
 ## Speed
 
@@ -49,4 +49,4 @@ Photo and Video are the last two subsections of *Render Settings*. Below Render 
 - *Compression:* the codec. WebM: *VP9*, *VP8* or *AV1*; MP4: *H.264*, *H.265 (HEVC)* or *AV1*. Only the kinds this browser or computer can record are offered; the others are marked *not available here*. H.265 depends on the computer's video hardware.
 - *File format:* *WebM* (plays in browsers and most players) or *MP4* (plays nearly everywhere).
 - *Quality:* the video's bitrate, 1 to 40 Mbit/s (16 by default). Higher keeps more detail and makes bigger files; for 4K, 30 or more works well.
-- *Export video* saves the animation, at the current *Resolution*, or with *Full resolution* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
+- *Export video* saves the animation, at the current *Resolution*, or with *Full sensor* on, every frame rendered from the whole sensor with its *Scale* and *Detail recovery*. See [[Exporting]].
