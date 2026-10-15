@@ -661,8 +661,8 @@ async function setGrid({ id, grid, mode }) {
 // pixels drawn into ow x oh pixels (blocks averaged when zoomed out, nearest
 // pixel when zoomed in), with the lens centers in it. Brightness is scaled to
 // the whole sensor's highlights, so it does not jump while moving around.
-// With `sampling`, also how a full sensor render at `scale` uses the window.
-async function rawCrop({ id, x0, y0, w, h, ow, oh, scale = 3, alpha = 0, allInFocus = false, sampling = false }) {
+// Also how a full sensor render at `scale` uses the window.
+async function rawCrop({ id, x0, y0, w, h, ow, oh, scale = 3, alpha = 0, allInFocus = false }) {
   requireRaw();
   const { raw, cam, grid } = state.lf;
   const { width, height } = cam;
@@ -707,7 +707,7 @@ async function rawCrop({ id, x0, y0, w, h, ow, oh, scale = 3, alpha = 0, allInFo
       if (cx >= -grid.pitch && cy >= -grid.pitch && cx < w + grid.pitch && cy < h + grid.pitch) centers.push(cx, cy);
     }
   }
-  const extra = sampling ? samplingAt(x0, y0, w, h, scale, alpha, allInFocus) : { rUse: superResParams(state.sampler, { scale }).rUse };
+  const extra = samplingAt(x0, y0, w, h, scale, alpha, allInFocus);
   const transfer = [pixels.buffer];
   if (extra.coverage) transfer.push(extra.coverage.buffer);
   post({ id, type: 'result', pitch: grid.pitch, pixels: pixels.buffer, centers, ...extra }, transfer);
@@ -741,8 +741,13 @@ function samplingAt(x0, y0, w, h, scale, alpha, allInFocus) {
   const by1 = Math.max(...corners.map((c) => c[1]));
   const cx0 = Math.floor(bx0 * scale);
   const cy0 = Math.floor(by0 * scale);
-  const cw = Math.max(1, Math.ceil(bx1 * scale) - cx0);
-  const ch = Math.max(1, Math.ceil(by1 * scale) - cy0);
+  const fullW = Math.max(1, Math.ceil(bx1 * scale) - cx0);
+  const fullH = Math.max(1, Math.ceil(by1 * scale) - cy0);
+  // Zoomed out, render pixels are gathered in bin x bin blocks (the lattice
+  // is then too fine to see; the coverage of each area still shows).
+  const bin = Math.max(1, Math.ceil(Math.max(fullW, fullH) / 400));
+  const cw = Math.ceil(fullW / bin);
+  const ch = Math.ceil(fullH / bin);
   const coverage = new Float32Array(cw * ch);
   const depth = allInFocus && state.depth ? state.depth.alpha : null;
   const bw = sampler.outW;
@@ -787,6 +792,12 @@ function samplingAt(x0, y0, w, h, scale, alpha, allInFocus) {
         const conf = 1 - (u * u + v * v) / r2;
         const ox = (lu - a * u) * scale - cx0;
         const oy = (lv - a * v) * scale - cy0;
+        if (bin > 1) {
+          const bx = Math.floor(ox / bin);
+          const by = Math.floor(oy / bin);
+          if (bx >= 0 && by >= 0 && bx < cw && by < ch) coverage[by * cw + bx] += conf;
+          continue;
+        }
         const px = Math.round(ox);
         const py = Math.round(oy);
         for (let j = -reach; j <= reach; j++) {
@@ -802,7 +813,7 @@ function samplingAt(x0, y0, w, h, scale, alpha, allInFocus) {
       }
     }
   }
-  return { rUse, coverage, cw, ch, scale, box: [bx0, by0, bx1, by1], baseW: bw / detail };
+  return { rUse, coverage, cw, ch, bin, scale, box: [bx0, by0, bx1, by1], baseW: bw / detail };
 }
 
 // Maps a point of the rendered image back to the sensor (for the calibration

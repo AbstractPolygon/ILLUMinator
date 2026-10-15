@@ -1285,9 +1285,6 @@ function setDepthShown(on, { restore = true } = {}) {
 // Lenslets mode: the raw sensor, zoomed and moved like a map (scroll to
 // zoom, drag to move); lensView is declared with the other view state.
 const LENS_MAX_ZOOM = 32;
-// The full sensor sampling is worked out for windows up to this many sensor
-// pixels; zoomed further out there are too many samples to show.
-const LENS_SAMPLING_AREA = 700 * 700;
 let lensBusy = false;
 let lensAgain = false;
 
@@ -1356,8 +1353,7 @@ async function renderLenslets() {
     const y0 = lensView.y - h / 2;
     const scale = +$('still-scale').value;
     const p = cameraParams();
-    const sampling = w * h <= LENS_SAMPLING_AREA;
-    const msg = await engine.request('rawCrop', { x0, y0, w, h, ow, oh, scale, alpha: p.alpha, allInFocus: !(p.aperture > 0), sampling });
+    const msg = await engine.request('rawCrop', { x0, y0, w, h, ow, oh, scale, alpha: p.alpha, allInFocus: !(p.aperture > 0) });
     if (state.mode !== 'lenslets' || !msg) return;
     canvas.width = ow;
     canvas.height = oh;
@@ -1406,12 +1402,7 @@ function showLensSampling(msg, scale) {
   const patch = $('lens-patch');
   const cctx = cov.getContext('2d');
   const pctx = patch.getContext('2d');
-  const shown = !!msg.coverage;
-  for (const id of ['lens-coverage', 'lens-coverage-title', 'lens-patch', 'lens-patch-title', 'lens-patch-note']) $(id).hidden = !shown;
-  if (!shown) {
-    $('lens-coverage-note').textContent = 'Zoom in to see how a Full sensor render samples this part of the sensor.';
-    return;
-  }
+  for (const id of ['lens-patch', 'lens-patch-title', 'lens-patch-note']) $(id).hidden = false;
   // Coverage: the splat weight each output pixel gets, against the mean.
   const { cw, ch } = msg;
   const data = new Float32Array(msg.coverage);
@@ -1430,18 +1421,28 @@ function showLensSampling(msg, scale) {
     for (let c = 0; c < 3; c++) img.data[4 * i + c] = STOPS[k][c] * (1 - a) + STOPS[k + 1][c] * a;
     img.data[4 * i + 3] = 255;
   }
-  const fit = (W, H) => {
-    const k = Math.min(280 / W, 280 / H);
-    return [Math.round(W * k), Math.round(H * k)];
+  // Both views keep one size, the viewer's shape across the sidebar; the
+  // window is fitted inside it.
+  const VW = 560;
+  const VH = Math.round((VW * viewer.clientHeight) / Math.max(1, viewer.clientWidth));
+  for (const c of [cov, patch]) {
+    if (c.width !== VW || c.height !== VH) {
+      c.width = VW;
+      c.height = VH;
+    }
+  }
+  const place = (c2d, src, sx, sy, sw, sh) => {
+    const k = Math.min(VW / sw, VH / sh);
+    c2d.fillStyle = '#000';
+    c2d.fillRect(0, 0, VW, VH);
+    c2d.imageSmoothingEnabled = false;
+    c2d.drawImage(src, sx, sy, sw, sh, (VW - sw * k) / 2, (VH - sh * k) / 2, sw * k, sh * k);
   };
-  const [dw, dh] = fit(cw, ch);
-  cov.width = dw;
-  cov.height = dh;
   const tmp = Object.assign(document.createElement('canvas'), { width: cw, height: ch });
   tmp.getContext('2d').putImageData(img, 0, 0);
-  cctx.imageSmoothingEnabled = false;
-  cctx.drawImage(tmp, 0, 0, dw, dh);
-  $('lens-coverage-note').textContent = `${cw}×${ch} pixels of a ${scale}× render. Dark: few samples (filled in from the standard picture); ${Math.round((100 * thin) / data.length)}% get less than half the average.`;
+  place(cctx, tmp, 0, 0, cw, ch);
+  const px = msg.bin > 1 ? `${cw * msg.bin}×${ch * msg.bin} pixels of a ${scale}× render, in ${msg.bin}×${msg.bin} blocks` : `${cw}×${ch} pixels of a ${scale}× render`;
+  $('lens-coverage-note').textContent = `${px}. Dark: few samples (filled in from the standard picture); ${Math.round((100 * thin) / data.length)}% get less than half the average.`;
 
   // The same part of the last full sensor render, or else of the picture.
   const still = state.lensStill;
@@ -1454,18 +1455,12 @@ function showLensSampling(msg, scale) {
   const [bx0, by0, bx1, by1] = msg.box;
   const sw = (bx1 - bx0) * k;
   const sh = (by1 - by0) * k;
-  const [pw, ph] = fit(sw, sh);
-  patch.width = pw;
-  patch.height = ph;
   let drawable = src;
   if (src instanceof ImageData) {
     drawable = Object.assign(document.createElement('canvas'), { width: src.width, height: src.height });
     drawable.getContext('2d').putImageData(src, 0, 0);
   }
-  pctx.imageSmoothingEnabled = false;
-  pctx.fillStyle = '#000';
-  pctx.fillRect(0, 0, pw, ph);
-  pctx.drawImage(drawable, bx0 * k, by0 * k, sw, sh, 0, 0, pw, ph);
+  place(pctx, drawable, bx0 * k, by0 * k, sw, sh);
   $('lens-patch-title').textContent = still ? `Last Full sensor render (${still.scale}×)` : 'Camera view';
   $('lens-patch-note').textContent = still
     ? `${Math.round(sw)}×${Math.round(sh)} pixels of the render.`
@@ -5216,7 +5211,13 @@ $('library-import').onclick = () => importFolder();
 // Commands from the desktop app's menu bar.
 if (native && native.onMenu) {
   native.onMenu((id) => {
-    if (id === 'open') $('open-btn').click();
+    if (id === 'undo' || id === 'redo') {
+      // The key itself may already have been handled in the page.
+      if (performance.now() - lastHistoryKey < 300) return;
+      if (typing(document.activeElement)) document.execCommand(id);
+      else if (id === 'undo') undo();
+      else redo();
+    } else if (id === 'open') $('open-btn').click();
     else if (id === 'import-library') importFolder();
     else if (id === 'about') $('about-btn').click();
   });
@@ -5456,7 +5457,7 @@ function resetTemperature(info, { keep = false } = {}) {
 // shortly after each change. Photos without saved edits start from the
 // defaults.
 const DEFAULT_EDITS = readEdits(document);
-let saveTimer = null;
+let saveTimer = 0;
 
 function photoKey(info) {
   if (info && info.photoId) return info.photoId;
@@ -5488,6 +5489,13 @@ async function restoreEdits(info) {
   const reset = !!(saved && saved.reset);
   if (reset) saved = null;
   else if (!saved) saved = await lytroEdits(info, state.current);
+  await applyEdits(info, saved);
+  resetHistory();
+}
+
+// Sets every control from an edits document (null: the defaults) and
+// renders the result.
+async function applyEdits(info, saved) {
   state.restoring = true;
   try {
     const { view, focusPoint } = writeEdits(document, saved, DEFAULT_EDITS);
@@ -5596,16 +5604,98 @@ function scheduleSave() {
   const key = state.editsKey;
   const photo = state.current && state.current.photo;
   saveTimer = setTimeout(() => {
+    saveTimer = 0;
     if (key !== state.editsKey) return;
     const edits = readEdits(document, {
       photo: { id: key, name: state.current ? state.current.name : null },
       view: state.camera,
       focusPoint: state.focusPoint,
     });
+    recordHistory(edits);
     if (photo) lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
     else editsStore.save(key, edits);
   }, 500);
 }
+
+// ---------------------------------------------------------------- undo
+
+// Undo and redo (Ctrl / ⌘ + Z, Ctrl / ⌘ + Y or Shift + Ctrl / ⌘ + Z): every
+// saved state of the open photo's edits is a step, so one slider drag or
+// keyframe change is one step. History starts over when a photo opens.
+const HISTORY_LIMIT = 200;
+const history = { undo: [], redo: [], current: null };
+const editsState = (edits) => {
+  const { modified, photo, ...rest } = edits;
+  return JSON.stringify(rest);
+};
+function currentEdits() {
+  return readEdits(document, { view: { ...state.camera }, focusPoint: { ...state.focusPoint } });
+}
+function resetHistory() {
+  history.undo = [];
+  history.redo = [];
+  history.current = state.info ? currentEdits() : null;
+}
+function recordHistory(edits) {
+  if (!history.current) {
+    history.current = edits;
+    return;
+  }
+  if (editsState(edits) === editsState(history.current)) return;
+  history.undo.push(history.current);
+  if (history.undo.length > HISTORY_LIMIT) history.undo.shift();
+  history.redo = [];
+  history.current = edits;
+}
+// A change still waiting to be saved counts as a step.
+function flushSave() {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = 0;
+  const key = state.editsKey;
+  const photo = state.current && state.current.photo;
+  const edits = readEdits(document, { photo: { id: key, name: state.current ? state.current.name : null }, view: state.camera, focusPoint: state.focusPoint });
+  recordHistory(edits);
+  if (photo) lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
+  else if (key) editsStore.save(key, edits);
+}
+let historyBusy = false;
+async function stepHistory(back) {
+  if (historyBusy || !state.info || state.restoring) return;
+  flushSave();
+  const from = back ? history.undo : history.redo;
+  const to = back ? history.redo : history.undo;
+  if (!from.length) return;
+  historyBusy = true;
+  try {
+    if (state.playing) setPlaying(false);
+    to.push(history.current);
+    await applyEdits(state.info, from.pop());
+    // What the controls hold now (the document as applied).
+    history.current = currentEdits();
+    scheduleSave();
+  } catch (err) {
+    showError(err);
+  } finally {
+    historyBusy = false;
+  }
+}
+const undo = () => stepHistory(true);
+const redo = () => stepHistory(false);
+// Text fields keep their own undo.
+const typing = (el) => el && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|number|email|url|password)$/.test(el.type)));
+let lastHistoryKey = 0;
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || typing(document.activeElement)) return;
+  const k = e.key.toLowerCase();
+  const isUndo = k === 'z' && !e.shiftKey;
+  const isRedo = k === 'y' || (k === 'z' && e.shiftKey);
+  if (!isUndo && !isRedo) return;
+  e.preventDefault();
+  lastHistoryKey = performance.now();
+  if (isUndo) undo();
+  else redo();
+});
 
 for (const type of ['input', 'change']) $('controls').addEventListener(type, scheduleSave);
 
@@ -5727,17 +5817,17 @@ document.addEventListener('keydown', (e) => {
   } else if (state.grid && (e.key === '-' || e.key === '_')) {
     setThumbSize(+$('thumb-size').value / 1.25);
   } else if (e.key === '+' || e.key === '=') {
-    zoomBy(1.5);
+    $('zoom-in').click();
   } else if (e.key === '-' || e.key === '_') {
-    zoomBy(1 / 1.5);
+    $('zoom-out').click();
   } else if (e.key === 'f' || e.key === 'F') {
     setFullResMode(!state.fullResMode);
   } else if (e.key === 'd' || e.key === 'D') {
     setDepthShown(!state.depthShown);
   } else if (e.key === '0') {
-    zoomFit();
+    $('zoom-label').click();
   } else if (e.key === '1') {
-    zoomActual();
+    $('zoom-1').click();
   }
 });
 

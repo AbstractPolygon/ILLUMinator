@@ -638,7 +638,6 @@
       <details class="panel" data-panel="lenslets" hidden open>
         <summary><h2>Microlens grid</h2></summary>
         <p id="grid-info" class="hint"></p>
-        <p class="hint">Scroll to zoom (out to the whole sensor), drag to move around it.</p>
         <div class="row">
           <button id="grid-auto">Recalibrate</button>
           <button id="grid-meta">Use metadata</button>
@@ -647,10 +646,10 @@
           <summary><h3>Full Sensor Sampling</h3></summary>
           <label class="check" title="Circles around each lens: the pixels inside are the ones a Full sensor render uses at the chosen Scale"><input id="lens-circles" type="checkbox" checked> Sampling circles</label>
           <p class="lens-side-title" id="lens-coverage-title">Coverage at the current focus</p>
-          <canvas id="lens-coverage" class="lens-side" width="280" height="280"></canvas>
+          <canvas id="lens-coverage" class="lens-side" width="560" height="420"></canvas>
           <p id="lens-coverage-note" class="hint"></p>
           <p class="lens-side-title" id="lens-patch-title">Rendered picture</p>
-          <canvas id="lens-patch" class="lens-side" width="280" height="280"></canvas>
+          <canvas id="lens-patch" class="lens-side" width="560" height="420"></canvas>
           <p id="lens-patch-note" class="hint"></p>
         </details>
       </details>

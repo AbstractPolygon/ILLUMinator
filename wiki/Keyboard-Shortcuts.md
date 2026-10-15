@@ -2,9 +2,11 @@
 
 | Key | Does |
 | --- | --- |
+| Ctrl / ⌘ + Z | Undo the last change to the photo's settings, keyframes or masks |
+| Ctrl / ⌘ + Y, Shift + Ctrl / ⌘ + Z | Redo |
 | Space | Play / pause the animation (also right after using a slider or button) |
 | + / − | Zoom in / out (in the thumbnail grid: bigger / smaller thumbnails) |
-| 0 | Fit to window |
+| 0 | Fit to window (Lenslets: the whole sensor) |
 | 1 | Actual pixels (1:1) |
 | F | Full sensor on / off |
 | D | Show the depth map on / off |

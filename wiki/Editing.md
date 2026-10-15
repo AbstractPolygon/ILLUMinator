@@ -8,6 +8,8 @@ The editing panels are in the right sidebar; click a title to open or close it. 
 - **Drag** to move the viewpoint, like grabbing the scene and turning it.
 - **Shift-drag**, **middle mouse button drag**, or drag when zoomed in on the lenslet view, to pan. Zoom with the − / + buttons beside *Camera* and *Lenslets*, *Fit* and *1:1*.
 
+**Undo and redo:** Ctrl / ⌘ + Z undoes the last change to the photo (any setting, keyframe or mask; a whole slider drag is one step), Ctrl / ⌘ + Y or Shift + Ctrl / ⌘ + Z redoes it. The history starts over when you open another photo.
+
 ## Panels
 
 - [[Histogram and Info]]

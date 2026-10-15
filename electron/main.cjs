@@ -122,7 +122,14 @@ function buildMenu() {
       { label: 'Import Lytro Library…', click: send('import-library') },
       ...(mac ? [] : [{ type: 'separator' }, { role: 'quit' }]),
     ] },
-    { role: 'editMenu' },
+    // Undo and redo step through a photo's edits (text fields keep their
+    // own); the page decides which.
+    { label: 'Edit', submenu: [
+      { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: send('undo') },
+      { label: 'Redo', accelerator: process.platform === 'darwin' ? 'Shift+Cmd+Z' : 'Ctrl+Y', click: send('redo') },
+      { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ] },
     { label: 'View', submenu: [
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
       { type: 'separator' },
