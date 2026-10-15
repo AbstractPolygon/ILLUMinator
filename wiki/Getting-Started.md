@@ -31,7 +31,6 @@ ILLUMinator needs a browser with WebGL 2 for fast rendering (any current Chrome,
 ## Open a photo
 
 - **Open…** in the top bar, or drag `.LFR` / `.LFP` files anywhere onto the window.
-- **Import from camera…** for photos still on the camera ([[Importing]]).
 - **Settings (gear) → Import Lytro Desktop library…** for your old Lytro Desktop library.
 
 Every photo you open is added to your library, so it is there next time ([[Library and Albums]]).

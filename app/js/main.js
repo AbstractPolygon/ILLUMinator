@@ -5,7 +5,7 @@ import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './co
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { upscaleImage } from './gpu/upscale.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
-import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
+import { openFiles, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
@@ -138,7 +138,9 @@ function saveThumbnail() {
   }, 'image/jpeg', 0.85);
 }
 
-const EMPTY_LIBRARY = 'Open .LFR / .LFP files, drop them here, or import from a camera or Lytro Desktop.';
+const EMPTY_LIBRARY = CAMERA_IMPORT
+  ? 'Open .LFR / .LFP files, drop them here, or import from a camera or Lytro Desktop.'
+  : 'Open .LFR / .LFP files, drop them here, or import from Lytro Desktop.';
 
 // The Camera section's state (see setCameraSection).
 let cameraSection = {};
@@ -5552,8 +5554,12 @@ $('version').textContent = VERSION;
 // it is connected (a drive, or adb). WebUSB plug-in events (any OS; the main
 // process lets the page see Lytro's vendor ID only) show it at once, before
 // its drive mounts, and make the main process look for the drive sooner.
-if (native) {
-  document.body.classList.add('native');
+if (native) document.body.classList.add('native');
+if (CAMERA_IMPORT) {
+  $('camera-btn').hidden = false;
+  $('camera-status').hidden = false;
+}
+if (native && CAMERA_IMPORT) {
   let lastCams = [];
   let usbLytros = 0;
   const showCameras = () => {
@@ -5600,7 +5606,7 @@ if (native) {
 // the camera's drive is chosen once and remembered, and its photos show in
 // the Camera section on later plug-ins (the browser may ask to allow
 // reading it again).
-if (!native && navigator.usb) {
+if (!native && navigator.usb && CAMERA_IMPORT) {
   const isLytro = (d) => d.vendorId === LYTRO_USB_VENDOR;
   const allowedKey = 'illuminator.usbWatch';
   let allowed = false;

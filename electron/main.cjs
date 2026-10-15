@@ -18,6 +18,9 @@ const POLL_MS = 3000;
 // drive mounts.
 const FAST_POLL_MS = 1000;
 const FAST_POLL_FOR_MS = 20000;
+// Importing straight from a connected camera (as CAMERA_IMPORT in
+// app/js/platform.js): off until it works with real cameras.
+const CAMERA_IMPORT = false;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -402,11 +405,11 @@ app.whenReady().then(async () => {
   });
   // USB plug-in events reach the page (WebUSB) for Lytro cameras only,
   // without asking: the page only watches them come and go.
-  session.defaultSession.setDevicePermissionHandler((details) => details.deviceType === 'usb' && camera.isLytroUsb(details.device));
+  if (CAMERA_IMPORT) session.defaultSession.setDevicePermissionHandler((details) => details.deviceType === 'usb' && camera.isLytroUsb(details.device));
   registerIpc();
   buildMenu();
   createWindow();
-  pollCameras();
+  if (CAMERA_IMPORT) pollCameras();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

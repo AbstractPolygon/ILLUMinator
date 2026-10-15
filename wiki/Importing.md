@@ -1,12 +1,5 @@
 # Importing
 
-## From the camera
-
-**Import from camera…** in the top bar.
-
-- **Desktop app:** connect the ILLUM with its USB cable and switch it on; it appears as a drive and ILLUMinator finds it by itself (the top bar shows *Lytro camera connected*). Cameras with USB debugging enabled are also found if `adb` is installed. Pick the photos and *Import selected*; they are copied into your library.
-- **Browser:** the camera appears as a removable drive. Choose the drive (or its `DCIM` folder) when asked.
-
 ## From Lytro Desktop
 
 **Settings → Import Lytro Desktop library…**, then choose your Lytro Desktop library folder. It is usually:
