@@ -541,8 +541,20 @@
               <option value="natural">Natural</option>
               <option value="optical">Optical (softer)</option>
               <option value="circle">Circle</option>
-              <option value="hexagon">Hexagon</option>
+              <option value="blades">Blades</option>
             </select>
+          </label>
+          <label id="bokeh-blades-row" title="Number of aperture blades: the bokeh's number of sides" hidden>Blades <output data-for="bokeh-blades" for="bokeh-blades">6</output>
+            <input id="bokeh-blades" type="range" min="3" max="12" step="1" value="6" data-default="6">
+          </label>
+          <label id="bokeh-oval-row" title="Stretches the circle into an oval, like the cat's-eye bokeh near a lens's edges" hidden>Oval <output data-for="bokeh-oval" for="bokeh-oval">0</output>
+            <input id="bokeh-oval" type="range" min="0" max="100" step="1" value="0" data-default="0">
+          </label>
+          <label id="bokeh-rotation-row" title="Turns the blades or the oval" hidden>Rotation <output data-for="bokeh-rotation" for="bokeh-rotation">0°</output>
+            <input id="bokeh-rotation" type="range" min="-90" max="90" step="1" value="0" data-default="0">
+          </label>
+          <label id="bokeh-onion-row" title="Onion rings: concentric rings inside each bokeh ball, like those from aspherical lens elements" hidden>Onion <output data-for="bokeh-onion" for="bokeh-onion">0</output>
+            <input id="bokeh-onion" type="range" min="0" max="100" step="1" value="0" data-default="0">
           </label>
           <label title="How brightly highlights glow into bokeh">Highlights <input id="highlights" type="range" min="0" max="1" step="0.05" value="0.3"></label>
         </details>
@@ -716,7 +728,7 @@
         </fieldset>
       </details>
 
-      <details class="panel">
+      <details class="panel" data-panel="camera">
         <summary><h2>Render Settings</h2></summary>
         <details class="subpanel">
           <summary><h3>3D</h3></summary>

@@ -30,4 +30,9 @@ Moving the viewpoint shifts every depth but one, the focus plane (or, with the a
 
 ## Bokeh
 
-The shape of out-of-focus highlights: *Natural*, *Optical (softer)*, *Circle* or *Hexagon*, and *Highlights* to make bright points glow into bokeh balls.
+The shape of out-of-focus highlights: *Natural*, *Optical (softer)*, *Circle* or *Blades*, and *Highlights* to make bright points glow into bokeh balls.
+
+- *Blades* (Blades shape): the number of aperture blades, 3 to 12, which is the number of sides of each bokeh ball.
+- *Oval* (Circle shape): stretches the circle into an oval, like the cat's-eye bokeh near the edges of a fast lens.
+- *Rotation* (Circle and Blades): turns the blades or the oval.
+- *Onion* (Circle and Blades): concentric rings inside each bokeh ball, like those from aspherical lens elements.

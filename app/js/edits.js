@@ -24,7 +24,7 @@ export const EDIT_GROUPS = {
     'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`),
     'ccm-mode', ...Array.from({ length: 9 }, (_, i) => `ccm-${i}`),
     'curve-points', 'curve-highlights', 'curve-lights', 'curve-darks', 'curve-shadows'],
-  camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'depth-hq', 'spread', 'spread-smooth', 'tilt-on', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'highlights'],
+  camera: ['fstop', 'focus', 'dof-depth', 'depth-smooth', 'depth-hq', 'spread', 'spread-smooth', 'tilt-on', 'tilt', 'tilt-rotation', 'pivot-on', 'pivot', 'bokeh', 'bokeh-blades', 'bokeh-oval', 'bokeh-rotation', 'bokeh-onion', 'highlights'],
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'sharp-masking', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color', 'nr-dust', 'nr-speckle'],
   defringe: ['lens-distortion', 'lens-vignetting', 'lens-midpoint', 'flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim-on', 'fps', 'anim', 'anim-keys', 'frame-zoom', 'frame-pan-x', 'frame-pan-y', 'path', 'amount', 'frames', 'near', 'far', 'steps'],

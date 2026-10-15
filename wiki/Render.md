@@ -1,6 +1,6 @@
 # Render
 
-The *Render Settings* section of the sidebar (3D, Quality, Upscaling, Photo and Video) and the Render, Save and Export buttons below it.
+The *Render Settings* section of the sidebar (3D, Quality, Upscaling, Photo and Video) and the Render, Save and Export buttons below it. Render Settings shows in the Camera view, not the Lenslets view.
 
 ## 3D
 

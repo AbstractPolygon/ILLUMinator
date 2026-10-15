@@ -833,9 +833,18 @@ function focusField(v = {}) {
 }
 
 // Bokeh options for the worker: shape and highlights, and the focus field.
+const BOKEH_SHAPE = ['bokeh-blades', 'bokeh-oval', 'bokeh-rotation', 'bokeh-onion'];
 function bokehParams(v = {}) {
   const shape = ['natural', 'optical'].includes($('bokeh').value) ? 'smooth' : $('bokeh').value;
-  return { shape, highlights: v.highlights ?? +$('highlights').value, ...focusField(v) };
+  return {
+    shape,
+    highlights: v.highlights ?? +$('highlights').value,
+    blades: +$('bokeh-blades').value,
+    oval: shape === 'circle' ? +$('bokeh-oval').value / 100 : 0,
+    rotation: +$('bokeh-rotation').value,
+    onion: shape === 'smooth' ? 0 : +$('bokeh-onion').value / 100,
+    ...focusField(v),
+  };
 }
 
 function showViewpoint() {
@@ -1530,7 +1539,7 @@ function setMode(mode) {
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
   for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq']) $(id).disabled = !depthTools;
-  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt-on', 'tilt', 'tilt-rotation']) $(id).disabled = !depthTools || stack;
+  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
   if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = true;
   $('mv-on').disabled = !raw;
   $('detail').disabled = !raw;
@@ -1909,8 +1918,19 @@ $('pivot').onchange = () => {
   geometryChanged();
 };
 
-for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation']) {
+// Shape settings show for the shapes they change: blades for Blades, oval
+// for Circle, rotation for both (a round circle has nothing to turn).
+function showBokehShape() {
+  const shape = $('bokeh').value;
+  $('bokeh-blades-row').hidden = shape !== 'blades';
+  $('bokeh-oval-row').hidden = shape !== 'circle';
+  $('bokeh-rotation-row').hidden = shape !== 'blades' && shape !== 'circle';
+  $('bokeh-onion-row').hidden = shape !== 'blades' && shape !== 'circle';
+}
+
+for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) {
   $(id).oninput = () => {
+    if (id === 'bokeh') showBokehShape();
     showFNumber();
     showSliderValue($(id));
     cameraChanged({ final: false });
@@ -5554,6 +5574,9 @@ async function applyEdits(info, saved) {
     // the tilt they had.
     const cam = saved && saved.camera;
     if (cam && !('tilt-on' in cam) && +cam.tilt) $('tilt-on').checked = true;
+    // Hexagon became Blades (six of them by default).
+    if (cam && cam.bokeh === 'hexagon') $('bokeh').value = 'blades';
+    showBokehShape();
     for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = !$('tilt-on').checked || $('tilt-on').disabled;
     $('pivot').disabled = !$('pivot-on').checked;
     curve.draw();
@@ -5777,7 +5800,7 @@ function showSliderValue(input) {
   const sign = v > 0 ? '+' : v < 0 ? '−' : '';
   if (input.id === 'ev') out.textContent = `${sign}${Math.abs(v).toFixed(2)} EV`;
   else if (input.id === 'focus') out.textContent = `${sign}${Math.abs(v).toFixed(2)}`;
-  else if (input.id === 'tilt-rotation') out.textContent = `${v}°`;
+  else if (input.id === 'tilt-rotation' || input.id === 'bokeh-rotation') out.textContent = `${v}°`;
   else if (input.id === 'straighten') out.textContent = `${v.toFixed(1)}°`;
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;

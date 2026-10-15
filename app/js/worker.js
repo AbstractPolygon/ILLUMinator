@@ -219,6 +219,10 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       focus: alpha,
       strength: dof * pxPerUnit,
       shape: bokeh.shape,
+      blades: bokeh.blades,
+      oval: bokeh.oval,
+      rotation: bokeh.rotation,
+      onion: bokeh.onion,
       highlights: bokeh.highlights,
       tilt: bokeh.tilt,
       point: bokeh.point,
@@ -484,13 +488,14 @@ function apertureOptions({ u = 0, v = 0, aperture = 1 }) {
 
 // Narrows the depth of field synthetically (strength `dof`, 0 = off) around
 // focus value `alpha`; `scale` is the image's size relative to the views.
-// `bokeh` is { shape: 'smooth' | 'circle' | 'hexagon', highlights: 0..1 }.
+// `bokeh` is { shape: 'smooth' | 'circle' | 'blades', blades, oval, rotation,
+// onion, highlights: 0..1 } (see core/dof.js).
 async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}) {
   if (!(dof > 0)) return rgb;
   if (!(await ensureDepth(id))) return rgb;
   const { outW, outH } = state.sampler;
   return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail, {
-    shape: bokeh.shape, highlights: bokeh.highlights, clip: state.dev.clip, tilt: bokeh.tilt, point: bokeh.point, spread: bokeh.spread,
+    shape: bokeh.shape, blades: bokeh.blades, oval: bokeh.oval, rotation: bokeh.rotation, onion: bokeh.onion, highlights: bokeh.highlights, clip: state.dev.clip, tilt: bokeh.tilt, point: bokeh.point, spread: bokeh.spread,
     smooth: bokeh.smooth,
   });
 }

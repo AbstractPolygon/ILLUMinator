@@ -266,6 +266,10 @@ export class ProcessedPicture {
     return applyDepthOfField(rgb, this.width, this.height, lambdaGrid.lambda, lambdaGrid.width, lambdaGrid.height, lambda,
       blur, APERTURE_RADIUS * this.pxPerLambda, {
         shape: bokeh.shape,
+        blades: bokeh.blades,
+        oval: bokeh.oval,
+        rotation: bokeh.rotation,
+        onion: bokeh.onion,
         highlights: bokeh.highlights,
         clip: 1,
         spread: (bokeh.spread || 0) * scale,

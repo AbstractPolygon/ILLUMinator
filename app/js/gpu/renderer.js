@@ -16,6 +16,7 @@
 
 import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
 import { MAX_MASKS } from '../core/local.js';
+import { bokehKernel } from '../core/dof.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -294,7 +295,7 @@ const MAX_TAPS = 512;
 
 // Depth of field, step 2: each pixel gathers light from neighbors whose own
 // blur reaches it, inside the aperture shape. Bright out-of-focus points thus
-// spread into discs or hexagons (bokeh). Points behind this pixel only reach
+// spread into discs, ovals or polygons (bokeh). Points behind this pixel only reach
 // it within its own blur, so blurred background does not bleed over sharp
 // foreground edges.
 // Each pixel looks only as far as the largest blur around it reaches
@@ -312,18 +313,25 @@ uniform sampler2D uHalf;
 uniform int uTaps;
 uniform float uMaxR;
 uniform float uReach;  // how far past its radius a blur still counts
-uniform int uShape;    // 0 smooth, 1 circle, 2 hexagon
+uniform int uShape;    // 0 smooth, 1 circle, 2 blades (see core/dof.js bokehKernel)
+uniform int uBlades;
+uniform float uAspect; // the circle's width to height
+uniform vec2 uRot;     // rotation: cos, sin
+uniform float uOnion;  // onion rings, 0..1
 uniform int uPass;     // 0 full size, 1 half size, 2 full size with half size
 uniform float uHalfFrom;
 out vec4 outColor;
 
+// Distance in units of the shape's radius (as kernelDistance in core/dof.js).
 float shapeDist(vec2 o) {
+  vec2 q = vec2(uRot.x * o.x + uRot.y * o.y, -uRot.y * o.x + uRot.x * o.y);
   if (uShape == 2) {
-    vec2 a = abs(o);
-    // Pointy-top regular hexagon with circumradius 1.
-    return max(a.x * 1.1547005, a.x * 0.5773503 + a.y);
+    // Regular polygon, one corner up, circumradius 1.
+    float seg = 6.2831853 / float(uBlades);
+    float m = mod(atan(q.x, q.y), seg) - 0.5 * seg;
+    return length(q) * cos(m) / cos(0.5 * seg);
   }
-  return length(o);
+  return length(vec2(q.x / uAspect, q.y));
 }
 
 float weightFor(float dist, float r) {
@@ -331,7 +339,10 @@ float weightFor(float dist, float r) {
   float inside = uShape == 0
     ? exp(-2.0 * (dist / r) * (dist / r))
     : clamp(r + 0.5 - dist, 0.0, 1.0);
-  return inside / (r * r);
+  // Onion rings (as onionGain in core/dof.js), once the ball is big enough
+  // to show them.
+  if (uOnion > 0.0 && uShape != 0 && r > 4.0) inside *= 1.0 + uOnion * 0.6 * cos(6.2831853 * 3.0 * dist / r);
+  return inside / (r * r * uAspect);
 }
 
 // The gathered color at full size pixel position pf (pixel centers at
@@ -2167,7 +2178,7 @@ export class GpuRenderer {
   // of this image per unit of focus difference. Returns the result texture.
   // `draft`: quicker, for previews while dragging: more of the blur at half
   // size and fewer taps.
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, draft = false }) {
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, draft = false }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -2196,10 +2207,11 @@ export class GpuRenderer {
     const reach = Math.abs(tilt[0]) + Math.abs(tilt[1]);
     const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread));
     const taps = Math.max(32, Math.min(draft ? 160 : MAX_TAPS, Math.round(maxR * maxR * 1.2)));
-    const shapeId = shape === 'hexagon' ? 2 : shape === 'circle' ? 1 : 0;
+    const kernel = bokehKernel({ shape, blades, oval, rotation, onion });
+    const shapeId = kernel.kind;
     // How far past its own radius a blur still adds light (the smooth shape
-    // fades out gradually; a hexagon's corners reach past its radius).
-    const blurReach = shapeId === 0 ? 1.5 : shapeId === 2 ? 1.16 : 1;
+    // fades out gradually).
+    const blurReach = shapeId === 0 ? 1.5 : 1.05;
 
     // Largest blur within reach of each tile.
     const tw = Math.ceil(w / DOF_TILE);
@@ -2234,6 +2246,10 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uMaxR, Math.max(1, maxR));
     gl.uniform1f(P.u.uReach, blurReach);
     gl.uniform1i(P.u.uShape, shapeId);
+    gl.uniform1i(P.u.uBlades, kernel.blades);
+    gl.uniform1f(P.u.uAspect, kernel.aspect);
+    gl.uniform2f(P.u.uRot, kernel.cos, kernel.sin);
+    gl.uniform1f(P.u.uOnion, kernel.onion);
     // Strong blur: render the strongly blurred pixels at half size.
     const halfFrom = draft ? 1.5 : 6;
     const half = maxR > 2 * halfFrom ? this.scratch(Math.ceil(w / 2), Math.ceil(h / 2), 'dofHalf') : null;

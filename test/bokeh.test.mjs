@@ -1,0 +1,35 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { bokehKernel, kernelDistance, applyDepthOfField } from '../app/js/core/dof.js';
+
+test('blades: corner up at radius 1, flat sides closer', () => {
+  const k = bokehKernel({ shape: 'blades', blades: 6 });
+  assert.ok(Math.abs(kernelDistance(k, 0, 1) - 1) < 1e-9);
+  assert.ok(Math.abs(kernelDistance(k, Math.cos(Math.PI / 6), 0) - 1) < 1e-9);
+  // Five blades rotated by half a segment put a flat side on top.
+  const k5 = bokehKernel({ shape: 'blades', blades: 5, rotation: 36 });
+  assert.ok(kernelDistance(k5, 0, Math.cos(Math.PI / 5)) < 1 + 1e-9);
+  assert.equal(bokehKernel({ shape: 'hexagon' }).blades, 6);
+});
+
+test('oval narrows the circle and turns with rotation', () => {
+  const k = bokehKernel({ shape: 'circle', oval: 1 });
+  assert.ok(kernelDistance(k, 0.5, 0) > 1);
+  assert.ok(kernelDistance(k, 0, 0.9) < 1);
+  const t = bokehKernel({ shape: 'circle', oval: 1, rotation: 90 });
+  assert.ok(kernelDistance(t, 0.9, 0) < 1 + 1e-9);
+  assert.ok(kernelDistance(t, 0, 0.5) > 1);
+});
+
+test('onion rings keep a point light bright and finite', () => {
+  const w = 41, h = 41;
+  const rgb = new Float32Array(w * h * 3);
+  rgb.fill(0.1);
+  rgb.set([1, 1, 1], (20 * w + 20) * 3);
+  const depth = new Float32Array(w * h).fill(1);
+  for (const opts of [{ shape: 'circle', onion: 1 }, { shape: 'blades', blades: 7, rotation: 20, onion: 0.5 }, { shape: 'circle', oval: 0.5 }]) {
+    const out = applyDepthOfField(rgb, w, h, depth, w, h, 0, 0.5, 14, opts);
+    assert.ok(out.every(Number.isFinite));
+    assert.ok(out[(20 * w + 20) * 3] < 1);
+  }
+});
