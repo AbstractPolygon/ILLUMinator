@@ -757,8 +757,8 @@
         </details>
         <details class="subpanel">
           <summary><h3>Quality</h3></summary>
-          <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
-          <label>Resolution
+          <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo, for photos and videos; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
+          <label title="Size of the picture made from the lenses, for photos and every video frame">Resolution
             <select id="detail">
               <option value="1" selected>1× (fast)</option>
               <option value="1.5">1.5×</option>
@@ -766,16 +766,16 @@
             </select>
           </label>
           <div class="stack">
-            <label class="check" title="Rebuilds the picture from every pixel the sensor recorded, on/off (F)"><input id="fullres-on" type="checkbox"> Full sensor</label>
+            <label class="check" title="Rebuilds the picture from every pixel the sensor recorded, on/off (F). Photos: press Render. Videos: every frame is rebuilt this way when exported (much slower)"><input id="fullres-on" type="checkbox"> Full sensor</label>
             <div id="fullres-panel" hidden>
-              <label>Scale
+              <label title="Size of the full sensor picture, for photos and every video frame">Scale
                 <select id="still-scale">
                   <option value="2">2× lens grid</option>
                   <option value="3" selected>3× lens grid</option>
                   <option value="4">4× lens grid</option>
                 </select>
               </label>
-              <label>Detail recovery
+              <label title="Extra passes that bring back finer detail in full sensor pictures and video frames (slower)">Detail recovery
                 <select id="still-passes">
                   <option value="0">Off</option>
                   <option value="2" selected>Low (2 passes)</option>
