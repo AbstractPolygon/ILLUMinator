@@ -214,8 +214,8 @@ label output { float: right; color: var(--muted); font-variant-numeric: tabular-
    that way. */
 /* Only settings showing keyframe controls leave room for the column;
    other sliders keep the full width. */
-label:has(> .key-nav:not([hidden])) { position: relative; padding-right: 38px; }
-.key-nav { position: absolute; right: 0; top: -1px; display: flex; align-items: center; height: 18px; }
+label:has(> .key-nav:not([hidden])) { position: relative; padding-right: 46px; }
+.key-nav { position: absolute; right: -4px; top: -1px; display: flex; align-items: center; gap: 4px; height: 18px; }
 .key-nav button {
   width: 12px; height: 18px; padding: 0; border: 0; background: none; color: var(--muted);
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;

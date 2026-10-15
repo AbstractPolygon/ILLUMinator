@@ -695,6 +695,7 @@ async function openWith(args, transfer) {
 
 function draw(img) {
   if (!img) return;
+  state.enlarged = false;
   if (img.pair) return drawPair(img);
   startNoticeTimer();
   state.lastImage = img;
@@ -1235,7 +1236,8 @@ async function renderStill() {
       state.still = toImageData(msg);
       state.lensStill = { img: state.still, scale };
       draw(state.still);
-      $('frame-label').textContent = `${msg.width}×${msg.height}`;
+      showAtPhotoSize();
+      $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
     }
   } catch (err) {
     showError(err);
@@ -4732,7 +4734,25 @@ function upscaleSettings() {
   return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
 }
 
+// A rendered still is shown at the Photo Size, enlarged with the Upscaling
+// settings, exactly as it will be saved (the picture already on the canvas,
+// through crop and rotation, is enlarged; clicks map back through the same
+// scale). Save then writes the canvas as it is.
+function showAtPhotoSize() {
+  const k = +$('photo-size').value || 1;
+  if (k === 1) return;
+  const big = enlargeForSave(canvas);
+  canvas.width = big.width;
+  canvas.height = big.height;
+  ctx.drawImage(big, 0, 0);
+  layoutCanvas();
+  if (state.geom) state.geom = { ...state.geom, inverse: invert(state.geom.matrix.map((v) => v * k)) };
+  state.enlarged = true;
+  scheduleHistogram();
+}
+
 function enlargeForSave(source) {
+  if (source === canvas && state.enlarged) return source;
   const k = +$('photo-size').value || 1;
   if (k === 1) return source;
   return upscaleImage(source, Math.round(source.width * k), Math.round(source.height * k), upscaleSettings());

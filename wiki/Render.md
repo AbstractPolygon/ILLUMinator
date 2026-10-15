@@ -15,7 +15,7 @@ A stereo pair from two viewpoints across the lens.
 
 - *High quality depth map:* sharper depth edges that match the photo, about twice as slow to measure. Off, the faster depth map is used.
 - *Resolution:* the picture's resolution while editing, 1× (fast), 1.5× or 2×.
-- *Full sensor* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it; *Save PNG* then saves the still, enlarged to the Photo *Size*. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
+- *Full sensor* (F): renders a high resolution still from every pixel of the sensor. *Scale* sets its size (2×, 3× or 4× the lens grid) and *Detail recovery* adds passes that bring back more fine detail (slower). *Render*, just below the Render Settings section, starts it; The still is shown at the Photo *Size*, enlarged with the Upscaling settings, just as it will be saved; *Save PNG* then saves it. With *Auto render* (under the *Render* button) checked, the still is rendered again by itself shortly after each change, once you stop dragging.
 
 ## Upscaling
 
