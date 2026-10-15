@@ -1557,6 +1557,7 @@ function setMode(mode) {
   $('detail').disabled = !raw;
   for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !$('anim-on').checked;
   $('png-btn').disabled = !state.info;
+  $('quick-export-btn').disabled = !state.info;
   $('stereo-btn').disabled = !(state.info && state.info.hasRaw) || !camera;
   $('stereo-on').disabled = !(state.info && state.info.hasRaw) || !camera;
   if (!state.info) return;
@@ -5360,6 +5361,54 @@ $('scrub').oninput = () => {
 };
 $('png-btn').onclick = savePng;
 $('webm-btn').onclick = exportVideo;
+
+// Quick export (top bar): the Photo and Video settings of Render Settings
+// in a popup. Each field mirrors its sidebar control: read when shown, and
+// a change is made on the sidebar control (so it is saved and undoable like
+// any setting), then everything is read back (the video format limits the
+// compressions offered).
+const QUICK_EXPORT = ['photo-size', 'photo-format', 'photo-quality', 'video-size', 'video-codec', 'video-format', 'video-quality'];
+function showQuickExport() {
+  for (const id of QUICK_EXPORT) {
+    const src = $(id);
+    const el = $(`qe-${id}`);
+    if (src.tagName === 'SELECT') el.innerHTML = src.innerHTML;
+    else for (const a of ['min', 'max', 'step']) el[a] = src[a];
+    el.value = src.value;
+    el.disabled = src.disabled;
+    const out = document.querySelector(`output[data-for="qe-${id}"]`);
+    const shown = document.querySelector(`output[data-for="${id}"]`);
+    if (out && shown) out.textContent = shown.textContent;
+  }
+  $('qe-photo-quality-row').hidden = $('photo-quality-row').hidden;
+  $('qe-photo-btn').textContent = $('png-btn').textContent;
+  $('qe-photo-btn').disabled = $('png-btn').disabled;
+  $('qe-video-btn').disabled = $('webm-btn').disabled;
+  $('qe-video-btn').title = $('webm-btn').disabled ? 'Turn on Animation (in the Camera view) to export a video' : '';
+}
+for (const id of QUICK_EXPORT) {
+  const el = $(`qe-${id}`);
+  const copy = (type) => {
+    $(id).value = el.value;
+    $(id).dispatchEvent(new Event(type, { bubbles: true }));
+    if (type === 'input') showSliderValue($(id));
+    showQuickExport();
+  };
+  el.addEventListener('input', () => copy('input'));
+  el.addEventListener('change', () => copy('change'));
+}
+$('quick-export-btn').onclick = () => {
+  showQuickExport();
+  $('quick-export-dialog').showModal();
+};
+$('qe-photo-btn').onclick = () => {
+  $('quick-export-dialog').close();
+  savePng();
+};
+$('qe-video-btn').onclick = () => {
+  $('quick-export-dialog').close();
+  exportVideo();
+};
 $('fullres-on').onchange = () => setFullResMode($('fullres-on').checked);
 $('render-btn').onclick = renderFullRes;
 $('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
@@ -5817,6 +5866,7 @@ function showSliderValue(input) {
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
   else if (input.id === 'video-quality') out.textContent = `${v} Mbit/s`;
+  else if (input.id === 'photo-quality' || input.id === 'bokeh-blades') out.textContent = `${v}`;
   else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;

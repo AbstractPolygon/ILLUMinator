@@ -97,6 +97,9 @@
             <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.6" r="2.6"/><circle cx="16" cy="5.6" r="2.6"/><circle cx="4" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="20" cy="12" r="2.6"/><circle cx="8" cy="18.4" r="2.6"/><circle cx="16" cy="18.4" r="2.6"/></svg>
           </button>
         </nav>
+        <button id="quick-export-btn" class="icon-only" title="Quick export: save the photo or a video" aria-label="Quick export" disabled>
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12.5v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-5.5"/></svg>
+        </button>
         <span class="spacer"></span>
         <div class="zoom" role="group" aria-label="Zoom">
           <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
@@ -876,6 +879,38 @@
       <menu>
         <span class="spacer"></span>
         <button value="close" class="primary">Done</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="quick-export-dialog">
+    <form method="dialog">
+      <h2>Quick export</h2>
+      <div class="qe-cols">
+        <section>
+          <h3>Photo</h3>
+          <label>Size <select id="qe-photo-size"></select></label>
+          <label>File format <select id="qe-photo-format"></select></label>
+          <label id="qe-photo-quality-row">JPEG quality <output data-for="qe-photo-quality"></output>
+            <input id="qe-photo-quality" type="range">
+          </label>
+          <button type="button" id="qe-photo-btn" class="primary">Save PNG</button>
+        </section>
+        <section>
+          <h3>Video</h3>
+          <label>Size <select id="qe-video-size"></select></label>
+          <label>Compression <select id="qe-video-codec"></select></label>
+          <label>File format <select id="qe-video-format"></select></label>
+          <label>Quality <output data-for="qe-video-quality"></output>
+            <input id="qe-video-quality" type="range">
+          </label>
+          <button type="button" id="qe-video-btn" class="primary">Export video</button>
+        </section>
+      </div>
+      <p class="hint">The same settings as Render Settings → Photo and Video; changes here change them there too.</p>
+      <menu>
+        <span class="spacer"></span>
+        <button value="close">Close</button>
       </menu>
     </form>
   </dialog>

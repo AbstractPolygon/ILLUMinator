@@ -30,6 +30,8 @@ Albums are listed at the top of the left sidebar.
 - **Remove from an album:** **•••** on the photo, untick the album.
 - **Rename or delete an album:** **•••** next to the album. Deleting an album keeps its photos in the library.
 - **Export an album:** **•••** next to the album → *Export album…* saves one `.zip` with the album's original photos, their edits, Lytro Desktop edits and thumbnails. Drop that file on the window in another library, such as the desktop app's after using the browser version, and the photos join that library with their edits and the album is made again.
+- **Photo menu:** **•••** on a photo, or right-click it, in the list or the grid.
+- **Copy settings to other photos:** on the photo with the look you want, **•••** → *Copy settings*; then on each other photo, **•••** → *Paste settings from …*. Every setting comes across except the focus point clicked and the viewpoint, which belong to each scene.
 - **Reset a photo's settings:** **•••** on the photo → *Reset settings…* puts every setting in the right sidebar back to how a newly opened photo starts: adjustments, keyframes, local adjustments, crop and export settings. Edits from Lytro Desktop are not applied again.
 - **Delete a photo:** **•••** on the photo → *Delete from library…*. In the desktop app its folder goes to the trash.
 

@@ -19,9 +19,9 @@ A stereo pair from two viewpoints across the lens.
 
 ## Upscaling
 
-Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*, a filter that keeps edges crisp; *Smooth*, the softer ordinary enlarging; or *FSR 1* (AMD FidelityFX Super Resolution 1), which enlarges along the edges it finds and then sharpens with its own contrast-adaptive sharpening. All three run on the graphics card, or on the processor where WebGL 2 is not available (slower). When a picture is made smaller, FSR 1 uses Lanczos.
+Settings for every enlarged picture, photo or video. *Method*: *Lanczos (sharp)*, a filter that keeps edges crisp; *Smooth*, the softer ordinary enlarging; or *FSR 1* (AMD FidelityFX Super Resolution 1), which enlarges along the edges it finds and then sharpens with its built-in contrast-adaptive sharpening. All three run on the graphics card, or on the processor where WebGL 2 is not available (slower). When a picture is made smaller, FSR 1 uses Lanczos.
 
-- *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's own sharpening. It has no effect at *Native* size.
+- *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's built-in sharpening. It has no effect at *Native* size.
 
 Enlarging adds pixels, not detail. For the most detail, render with *Full sensor* and enlarge that.
 
