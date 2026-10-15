@@ -38,7 +38,7 @@ Every photo you open is added to your library, so it is there next time ([[Libra
 ## The window
 
 - **Left sidebar:** the library: *All photos*, your albums and the photos in the selected album. Choosing an album shows its photos as a grid of thumbnails in the middle; click a photo to open it.
-- **Middle:** the picture. Click to focus on that spot; drag to move the viewpoint. Below it, *Camera* / *Lenslets* switch between the picture and the raw microlens image, and the animation and zoom controls.
+- **Middle:** the picture. Click to focus on that spot; drag to move the viewpoint. Above it, the camera and lenslets icons switch between the picture and the raw microlens image, with the zoom controls on the right; below it, the animation controls.
 - **Right sidebar:** the editing panels ([[Editing]]). Click a title to open or close it.
 - **Top bar, right:** Full screen (the four corners; click again or press Esc to leave), About (ⓘ) and Settings (gear).
 

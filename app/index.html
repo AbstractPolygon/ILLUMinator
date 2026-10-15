@@ -88,6 +88,23 @@
         <p id="grid-empty" class="hint" hidden></p>
         <p id="grid-camera-choose-row" hidden><button id="grid-camera-choose" type="button">Choose DCIM folder…</button></p>
       </div>
+      <div class="modes-row top">
+        <nav class="modes" id="modes">
+          <button data-mode="camera" class="icon-only active" title="Camera: the photo" aria-label="Camera">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 8.5a1.5 1.5 0 0 1 1.5-1.5h2.3l1.5-2h5.4l1.5 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12.8" r="3.3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </button>
+          <button data-mode="lenslets" class="icon-only" title="Lenslets: the raw sensor under the microlenses" aria-label="Lenslets">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.6" r="2.6"/><circle cx="16" cy="5.6" r="2.6"/><circle cx="4" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="20" cy="12" r="2.6"/><circle cx="8" cy="18.4" r="2.6"/><circle cx="16" cy="18.4" r="2.6"/></svg>
+          </button>
+        </nav>
+        <span class="spacer"></span>
+        <div class="zoom" role="group" aria-label="Zoom">
+          <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+          <button id="zoom-label" title="Fit to window (0)">Fit</button>
+          <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+          <button id="zoom-1" title="Actual pixels (1)">1:1</button>
+        </div>
+      </div>
       <div id="drop-zone" class="viewer">
         <canvas id="view"></canvas>
         <canvas id="spread-overlay" hidden></canvas>
@@ -106,19 +123,6 @@
         <div id="progress" class="progress" hidden>
           <div class="bar"><div id="progress-fill"></div></div>
           <span id="progress-text"></span>
-        </div>
-      </div>
-      <div class="modes-row">
-        <nav class="modes" id="modes">
-          <button data-mode="camera" class="active">Camera</button>
-          <button data-mode="lenslets">Lenslets</button>
-        </nav>
-        <span class="spacer"></span>
-        <div class="zoom" role="group" aria-label="Zoom">
-          <button id="zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
-          <button id="zoom-label" title="Fit to window (0)">Fit</button>
-          <button id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
-          <button id="zoom-1" title="Actual pixels (1)">1:1</button>
         </div>
       </div>
       <div class="transport">
