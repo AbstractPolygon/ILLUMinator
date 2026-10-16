@@ -274,3 +274,12 @@ test('focus spread smoothing eases blur in without changing the sharp range', as
   assert.ok(Math.abs(softEdge(0.4, 0.4) - 0.2) < 1e-9);
   assert.ok(Math.abs(softEdge(1, 0.4) - 0.8) < 1e-9);
 });
+
+test('depth sampling keeps surface steps: no in-between depth at an edge, bilinear elsewhere', async () => {
+  const { sampleDepth } = await import('../app/js/core/superres.js');
+  const img = Float32Array.from([0, 0, 10, 10, 0, 0, 10, 10, 0, 0, 10, 10]); // 4 x 3, a step between columns 1 and 2
+  assert.ok(sampleDepth(img, 4, 3, 1.4, 1) === 0);
+  assert.ok(sampleDepth(img, 4, 3, 1.6, 1) === 10);
+  const flat = Float32Array.from([1, 1.05, 1, 1.05, 1, 1.05, 1, 1.05, 1, 1.05, 1, 1.05]);
+  assert.ok(Math.abs(sampleDepth(flat, 4, 3, 0.5, 1) - 1.025) < 1e-6);
+});

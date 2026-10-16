@@ -114,6 +114,36 @@ export function isDefect(raw, width, i) {
   return v > m * 3 + 40 || (v < m * 0.2 && m > 100);
 }
 
+// Depth sampled between texels, but without inventing depths that are not
+// there: where the four neighbors differ by more than `tol` (an edge between
+// two surfaces) the nearest texel is taken, so a ray meets one surface or the
+// other instead of a made-up depth in between. Lytro Desktop's depth maps are
+// flat with one pixel steps at edges (95-99% of neighbors equal, almost no
+// in-between values), and bilinear sampling turned each step into a ramp
+// whose rays landed in a dotted pattern along the edge.
+export const DEPTH_STEP_TOLERANCE = 0.12;
+export function sampleDepth(img, w, h, x, y) {
+  const fx = Math.min(w - 1.001, Math.max(0, x));
+  const fy = Math.min(h - 1.001, Math.max(0, y));
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const q = y0 * w + x0;
+  const a = img[q];
+  const b = img[q + 1];
+  const c = img[q + w];
+  const d = img[q + w + 1];
+  const lo = Math.min(a, b, c, d);
+  const hi = Math.max(a, b, c, d);
+  if (hi - lo > DEPTH_STEP_TOLERANCE) {
+    const ax = fx - x0;
+    const ay = fy - y0;
+    return ay < 0.5 ? (ax < 0.5 ? a : b) : ax < 0.5 ? c : d;
+  }
+  const ax = fx - x0;
+  const ay = fy - y0;
+  return (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+}
+
 function sampleBilinear(img, w, h, x, y) {
   const fx = Math.min(w - 1.001, Math.max(0, x));
   const fy = Math.min(h - 1.001, Math.max(0, y));
@@ -275,7 +305,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         lastLens = lensX + lensY * 1e6;
         tw = tileWeights(vg, x, y);
         if (allInFocus && depth) {
-          lensAlpha = sampleBilinear(rayDepth, bw, bh, ((lensX - xMin) / unit) * detail, ((lensY - yMin) / unit) * detail);
+          lensAlpha = sampleDepth(rayDepth, bw, bh, ((lensX - xMin) / unit) * detail, ((lensY - yMin) / unit) * detail);
         }
       }
       const ch = dev.cfa[y & 1][x & 1];
@@ -303,7 +333,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         // extended depth of field projection). Where a ray's depth does not
         // settle it meets two surfaces: the nearer one wins if the ray
         // lands on it, else the farther.
-        const at = (a) => sampleBilinear(rayDepth, bw, bh, (lx - a * du) * detail, (ly - a * dv) * detail);
+        const at = (a) => sampleDepth(rayDepth, bw, bh, (lx - a * du) * detail, (ly - a * dv) * detail);
         const a1 = at(rayAlpha);
         const a2 = at(a1);
         if (Math.abs(a2 - a1) <= RAY_DEPTH_TOLERANCE) rayAlpha = a2;
@@ -370,6 +400,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     const r = splat(null, 0);
     for (let p = 0; p < W * H; p++) sharpY[p] = (r.accY[p] + upY[p] * lambda) / (r.wsum[p] + lambda);
   }
+  let bestDis = null;
   if (allInFocus && depth && EDGE_SNAP.on) {
     // Edge snapping: the depth map is coarser than the picture, so at the
     // edge of a near object a pixel can take the wrong surface's depth and
@@ -382,7 +413,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       return splatOnCpu(null, null, null, true);
     });
     rayDepth = depth;
-    snapBlend(renders, upY, lambda, W, H, sharpY);
+    bestDis = snapBlend(renders, upY, lambda, W, H, sharpY);
   }
   // Back-projection: correct the result by how far each raw sample is from
   // what the result predicts for it. Damped, so noise is not amplified.
@@ -399,6 +430,10 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     sumSharp += sharpY[p];
   }
   const pattern = removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale });
+  if (bestDis) {
+    if (globalThis.__disStats) { const a = Float32Array.from(bestDis).sort(); globalThis.__disStats = [0.5, 0.75, 0.9, 0.95, 0.99].map((q) => a[Math.floor(q * (a.length - 1))]); }
+    smoothDisagreeing(sharpY, bestDis, W, H, scale);
+  }
   sharpenLuma(sharpY, W, H, scale);
   const match = sumSharp > 0 ? sumUp / sumSharp : 1;
   const out = new Float32Array(W * H * 3);
@@ -410,6 +445,45 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     out[3 * p + 2] = up[3 * p + 2] * k;
   }
   return { width: W, height: H, rgb: out, pattern, lensOffsets };
+}
+
+// Where the rays landing on a pixel disagree (an edge or a surface whose depth
+// is uncertain) each lens puts its samples a little off from its neighbors',
+// which leaves a dotted pattern with the lens spacing. There the luma is
+// blended toward a blur of half a lens spacing, more the more the rays
+// disagree; the final sharpening comes after, so the pixels stay crisp.
+export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
+
+function smoothDisagreeing(y, dis, W, H, scale) {
+  if (!DITHER_FIX.on) return;
+  const sigma = DITHER_FIX.sigma * scale;
+  const r = Math.ceil(2.5 * sigma);
+  const k = new Float32Array(2 * r + 1);
+  let ks = 0;
+  for (let i = -r; i <= r; i++) ks += (k[i + r] = Math.exp(-(i * i) / (2 * sigma * sigma)));
+  for (let i = 0; i < k.length; i++) k[i] /= ks;
+  const tmp = new Float32Array(W * H);
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      let s = 0;
+      for (let d = -r; d <= r; d++) s += k[d + r] * y[j * W + Math.min(W - 1, Math.max(0, i + d))];
+      tmp[j * W + i] = s;
+    }
+  }
+  const blur = new Float32Array(W * H);
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      let s = 0;
+      for (let d = -r; d <= r; d++) s += k[d + r] * tmp[Math.min(H - 1, Math.max(0, j + d)) * W + i];
+      blur[j * W + i] = s;
+    }
+  }
+  const span = DITHER_FIX.high - DITHER_FIX.low;
+  for (let p = 0; p < W * H; p++) {
+    const t = Math.min(1, Math.max(0, (dis[p] - DITHER_FIX.low) / span));
+    const w = t * t * (3 - 2 * t);
+    if (w > 0) y[p] += w * (blur[p] - y[p]);
+  }
 }
 
 // Edge snapping (see renderSuperRes): `radius` in depth map pixels around
@@ -468,9 +542,11 @@ export function rayDisagreement({ accY, wsum, accY2 }, W, H) {
 // Blends the candidate renders into `out` by how well their rays agree.
 function snapBlend(renders, upY, lambda, W, H, out) {
   const dis = renders.map((r) => rayDisagreement(r, W, H));
+  const bestDis = new Float32Array(W * H);
   for (let p = 0; p < W * H; p++) {
     let best = Infinity;
     for (const d of dis) best = Math.min(best, d[p]);
+    bestDis[p] = best;
     let ws = 0;
     let acc = 0;
     renders.forEach((r, k) => {
@@ -480,6 +556,7 @@ function snapBlend(renders, upY, lambda, W, H, out) {
     });
     out[p] = acc / ws;
   }
+  return bestDis;
 }
 
 // Per-lens center correction. Lens centers come from the regular grid fitted

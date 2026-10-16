@@ -16,17 +16,19 @@
 // pitch, left a purely radial difference that grows with zoom (about 2% of
 // the half diagonal at the corners at the widest zoom, 10% at the longest).
 // Applying it brings the difference at the edges down from about 20 pixels
-// to 2 (of a 922 pixel wide picture).
+// to 2 (of a 922 pixel wide picture). A second pass over the longest zooms
+// (420 and up) and zoom 11, which still fell about 1 to 2.7% of the corner
+// distance short of Lytro's, scaled those rows up by 12 to 20%.
 const AUTO_DISTORTION = [
   // zoom step, k1, k2
   [-500, 0.020, -0.041],
   [-278, 0.021, -0.059],
   [-106, 0.016, -0.047],
-  [11, 0.014, -0.059],
+  [11, 0.017, -0.071],
   [159, 0.030, -0.082],
   [222, 0.022, -0.079],
-  [420, 0.051, -0.145],
-  [479, 0.055, -0.156],
+  [420, 0.057, -0.162],
+  [479, 0.066, -0.187],
 ];
 
 // { k1, k2 } for a camera at `zoomStep` (null: unknown camera or zoom).

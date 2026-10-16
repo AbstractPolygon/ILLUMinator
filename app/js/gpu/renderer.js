@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, depthFilter } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, depthFilter, DEPTH_STEP_TOLERANCE, DITHER_FIX } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1084,6 +1084,11 @@ float depthAt(vec2 p) {
   float d10 = texelFetch(uDepth, i + ivec2(1, 0), 0).r;
   float d01 = texelFetch(uDepth, i + ivec2(0, 1), 0).r;
   float d11 = texelFetch(uDepth, i + ivec2(1, 1), 0).r;
+  // Between two surfaces take the nearest texel, not an in-between depth
+  // (core/superres.js sampleDepth).
+  float lo = min(min(d00, d10), min(d01, d11));
+  float hi = max(max(d00, d10), max(d01, d11));
+  if (hi - lo > ${DEPTH_STEP_TOLERANCE.toFixed(3)}) return a.y < 0.5 ? (a.x < 0.5 ? d00 : d10) : (a.x < 0.5 ? d01 : d11);
   return mix(mix(d00, d10, a.x), mix(d01, d11, a.x), a.y);
 }
 
@@ -1339,6 +1344,57 @@ void main() {
   vec3 y = vec3(a0.x, a1.x, a2.x) + upY * LAMBDA;
   y /= vec3(a0.y, a1.y, a2.y) + LAMBDA;
   outColor = vec4(dot(w, y) / (w.x + w.y + w.z), 0.0, 0.0, 0.0);
+}`;
+
+// Smoothing where the rays disagree (core/superres.js DITHER_FIX): the luma
+// is blended toward a Gaussian blur by how badly the three candidate splats
+// disagree around the pixel (the best of them, as SR_SNAP finds it).
+const SR_DITHER = `#version 300 es
+precision highp float;
+uniform sampler2D uAcc0;
+uniform sampler2D uAcc1;
+uniform sampler2D uAcc2;
+uniform sampler2D uSharp;
+uniform int uSmooth;
+uniform float uLow;
+uniform float uHigh;
+uniform float uSigma;
+out vec4 outColor;
+float disagree(vec3 a) {
+  float m = a.g > 1e-6 ? a.r / a.g : 0.0;
+  return a.g > 0.5 ? min(10.0, max(0.0, a.b / a.g - m * m) / (m * m + 1e-4)) : 10.0;
+}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uAcc0, 0);
+  float y0 = texelFetch(uSharp, p, 0).r;
+  vec3 d = vec3(0.0);
+  float n = 0.0;
+  for (int j = -uSmooth; j <= uSmooth; j++) {
+    for (int i = -uSmooth; i <= uSmooth; i++) {
+      ivec2 q = p + ivec2(i, j);
+      if (q.x < 0 || q.y < 0 || q.x >= sz.x || q.y >= sz.y) continue;
+      d += vec3(disagree(texelFetch(uAcc0, q, 0).rgb), disagree(texelFetch(uAcc1, q, 0).rgb), disagree(texelFetch(uAcc2, q, 0).rgb));
+      n += 1.0;
+    }
+  }
+  d /= n;
+  float best = min(d.x, min(d.y, d.z));
+  float t = clamp((best - uLow) / (uHigh - uLow), 0.0, 1.0);
+  float w = t * t * (3.0 - 2.0 * t);
+  if (w <= 0.0) { outColor = vec4(y0, 0.0, 0.0, 0.0); return; }
+  int r = int(ceil(2.5 * uSigma));
+  float s = 0.0;
+  float ws = 0.0;
+  for (int j = -r; j <= r; j++) {
+    for (int i = -r; i <= r; i++) {
+      ivec2 q = clamp(p + ivec2(i, j), ivec2(0), sz - 1);
+      float g = exp(-float(i * i + j * j) / (2.0 * uSigma * uSigma));
+      s += g * texelFetch(uSharp, q, 0).r;
+      ws += g;
+    }
+  }
+  outColor = vec4(y0 + w * (s / ws - y0), 0.0, 0.0, 0.0);
 }`;
 
 const SR_PHASE = `
@@ -1951,6 +2007,7 @@ export class GpuRenderer {
       srPrep: program(gl, SR_PREP),
       srCombine: program(gl, SR_COMBINE),
       srSnap: program(gl, SR_SNAP),
+      srDither: program(gl, SR_DITHER),
       srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
       srFinal: program(gl, SR_FINAL),
       srDivide: program(gl, SR_DIVIDE),
@@ -3264,6 +3321,7 @@ export class GpuRenderer {
       owned.push(inputs.lens.tex, again);
       combine(again, 0);
     }
+    let snapAccs = null;
     if (p.allInFocus && p.depth && EDGE_SNAP.on) {
       // Edge snapping (core/superres.js EDGE_SNAP).
       const depthTex = (values) => {
@@ -3277,6 +3335,7 @@ export class GpuRenderer {
       const far = depthTex(depthFilter(p.depth, p.baseW, p.baseH, EDGE_SNAP.radius, Math.max));
       const accs = [null, near, far].map((t) => this.splatInto(p, { ...inputs, depthTex: t }));
       owned.push(...accs);
+      snapAccs = accs;
       Q = P.srSnap;
       this.target(next, W, H);
       gl.useProgram(Q.p);
@@ -3308,6 +3367,24 @@ export class GpuRenderer {
       gl.deleteTexture(residual);
     }
     removePattern();
+    if (snapAccs && DITHER_FIX.on) {
+      // Where the rays disagree, the dotted pattern is smoothed away first.
+      Q = P.srDither;
+      this.target(next, W, H);
+      gl.useProgram(Q.p);
+      snapAccs.forEach((t, k) => {
+        gl.uniform1i(Q.u[`uAcc${k}`], 1 + k);
+        this.bindTex(1 + k, t);
+      });
+      gl.uniform1i(Q.u.uSharp, 4);
+      this.bindTex(4, sharp);
+      gl.uniform1i(Q.u.uSmooth, EDGE_SNAP.smooth);
+      gl.uniform1f(Q.u.uLow, DITHER_FIX.low);
+      gl.uniform1f(Q.u.uHigh, DITHER_FIX.high);
+      gl.uniform1f(Q.u.uSigma, DITHER_FIX.sigma * p.scale);
+      this.draw();
+      [sharp, next] = [next, sharp];
+    }
     {
       // Final sharpening (core/superres.js sharpenLuma).
       const blur = this.texture(W, H, gl.R32F);
