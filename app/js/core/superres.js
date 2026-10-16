@@ -463,7 +463,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // (see the visibility test in renderSuperRes); `tol` in depth units. Off: on
 // the turntable and fence photos it did not change the dotted edge pattern.
 export const OCCLUSION = { on: false, tol: 0.1 };
-export const DITHER_FIX = { on: true, low: 0.03, high: 0.2, sigma: 1.0 };
+export const DITHER_FIX = { on: true, low: 0.04, high: 0.25, sigma: 0.8 };
 
 function smoothDisagreeing(y, dis, W, H, scale) {
   if (!DITHER_FIX.on) return;
