@@ -639,11 +639,14 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   if (allInFocus && state.depth && state.focusOffset === undefined) {
     progress('Finding the focus', 0);
     const probeBase = await allInFocusBase(id, u, v);
-    state.focusOffset = estimateFocusOffset(lf.raw, lf.cam, dev, sampler, {
+    const probe = estimateFocusOffset(lf.raw, lf.cam, dev, sampler, {
       base: probeBase, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
       vignetting: state.vignetting, lensOffsets: state.lensOffsets, lambdaToAlpha: LAMBDA_TO_ALPHA,
-    }).focusOffset;
+    });
+    globalThis.__focusMetrics = probe.metrics;
+    state.focusOffset = probe.focusOffset;
     globalThis.__focusOffset = state.focusOffset;
+    if (globalThis.__probeOnly) return { cancelled: true };
     applyDepthSmoothing();
   }
   // Each lens's center is measured once per photo from an all-in-focus

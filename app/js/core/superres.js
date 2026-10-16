@@ -311,15 +311,35 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     const dr = (range.r1 - range.r0) / 4;
     const dc = (range.c1 - range.c0) / 4;
     const win = { r0: Math.floor(rm - dr), r1: Math.ceil(rm + dr), c0: Math.floor(cm - dc), c1: Math.ceil(cm + dc) };
+    // How well the rays landing on each pixel of the middle of the picture
+    // agree, averaged (as in the focus sweeps this was tuned against, with
+    // every ray of the lenses in the window: fewer rays make the spread look
+    // smaller whatever the focus).
+    const y0 = Math.floor(H * 0.35);
+    const y1 = Math.floor(H * 0.65);
+    const x0 = Math.floor(W * 0.35);
+    const x1 = Math.floor(W * 0.65);
+    // Only where the depth is flat around: at a depth edge the rays come
+    // from two surfaces whatever the focus.
+    const dHigh = depthFilter(depth, bw, bh, 4, Math.max);
+    const dLow = depthFilter(depth, bw, bh, 4, Math.min);
+    const flat = new Uint8Array(W * H);
+    for (let y = y0; y < y1; y++) {
+      const by = Math.min(bh - 1, Math.max(0, Math.floor(((y + 0.5) / scale) * detail)));
+      for (let x = x0; x < x1; x++) {
+        const bx = Math.min(bw - 1, Math.max(0, Math.floor(((x + 0.5) / scale) * detail)));
+        flat[y * W + x] = dHigh[by * bw + bx] - dLow[by * bw + bx] < 0.02 ? 1 : 0;
+      }
+    }
     const metrics = candidates.map((cand) => {
       rayDepth = Float32Array.from(depth, (x) => x + cand * lambdaToAlpha);
-      const dis = rayDisagreement(splatOnCpu(null, null, null, true, win, 2), W, H);
+      const dis = rayDisagreement(splatOnCpu(null, null, null, true, win, 1), W, H);
       let sum = 0;
       let n = 0;
-      for (let y = Math.floor(H * 0.35); y < Math.floor(H * 0.65); y++) {
-        for (let x = Math.floor(W * 0.35); x < Math.floor(W * 0.65); x++) {
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
           const q = y * W + x;
-          if (upY[q] > 0.02 && dis[q] < 9) {
+          if (flat[q] && upY[q] > 0.02 && dis[q] < 9) {
             sum += dis[q];
             n++;
           }
@@ -332,8 +352,11 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     metrics.forEach((m, i) => {
       if (m < metrics[best]) best = i;
     });
-    let focusOffset = candidates[best];
+    // No minimum among the candidates (the best is at an end): there is no
+    // evidence for a shift, so none is made.
+    let focusOffset = 0;
     if (best > 0 && best < candidates.length - 1) {
+      focusOffset = candidates[best];
       const [a, b, c] = [metrics[best - 1], metrics[best], metrics[best + 1]];
       const denom = a - 2 * b + c;
       if (denom > 0) {
@@ -905,9 +928,9 @@ export function vignettingGainAt(vg, u, v) {
 // by an amount that differs from photo to photo, and rays placed with it land
 // slightly out of focus and come out soft. Found from the middle of the
 // sensor at a coarse scale in a few seconds.
-export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, candidates = [-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
+export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, candidates = [-0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
   const r = renderSuperRes(raw, cam, dev, sampler, {
-    allInFocus: true, scale: 2, passes: 0, vignetting, base, baseW, baseH, depth, lensOffsets,
+    allInFocus: true, scale: 3, passes: 0, vignetting, base, baseW, baseH, depth, lensOffsets,
     probeFocus: { lambdaToAlpha, candidates },
   });
   return r;
