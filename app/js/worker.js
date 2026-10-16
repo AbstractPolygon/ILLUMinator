@@ -1103,7 +1103,7 @@ async function depthSource(id) {
   return { alpha: state.depth.alpha, w: state.sampler.outW, h: state.sampler.outH };
 }
 
-async function depthMap({ id }) {
+async function depthMap({ id, grey = false }) {
   const src = await depthSource(id);
   if (!src) return { cancelled: true };
   const { alpha } = src;
@@ -1113,10 +1113,20 @@ async function depthMap({ id }) {
   const pixels = new Uint8ClampedArray(alpha.length * 4);
   for (let i = 0; i < alpha.length; i++) {
     // alpha < 0 is nearer than the camera's focus plane.
-    const t = Math.max(0, Math.min(1, (alpha[i] - lo) / Math.max(1e-6, hi - lo)));
-    pixels[4 * i] = Math.round(255 * Math.min(1, 1.6 - 1.6 * t));
-    pixels[4 * i + 1] = Math.round(255 * (1 - Math.abs(t - 0.5) * 1.4));
-    pixels[4 * i + 2] = Math.round(255 * Math.min(1, 1.6 * t));
+    // 1 is nearest. The colors are the ones the depth maps on the Lytro
+    // comparison page use: warm near, cool far.
+    const t = 1 - Math.max(0, Math.min(1, (alpha[i] - lo) / Math.max(1e-6, hi - lo)));
+    if (grey) {
+      const v = Math.round(255 * t);
+      pixels[4 * i] = v;
+      pixels[4 * i + 1] = v;
+      pixels[4 * i + 2] = v;
+    } else {
+      const ramp = (a, b) => Math.round(255 * Math.max(0, Math.min(1, Math.min(4 * t + a, -4 * t + b))));
+      pixels[4 * i] = ramp(-1.5, 4.5);
+      pixels[4 * i + 1] = ramp(-0.5, 3.5);
+      pixels[4 * i + 2] = ramp(0.5, 2.5);
+    }
     pixels[4 * i + 3] = 255;
   }
   post({ id, type: 'result', width: src.w, height: src.h, pixels: pixels.buffer, near: lo, far: hi }, [pixels.buffer]);

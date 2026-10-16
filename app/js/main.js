@@ -1366,13 +1366,22 @@ function setFullRes(on, { restore = true } = {}) {
 
 async function renderDepth() {
   try {
-    const msg = await engine.request('depthMap', {}, { onProgress: showProgress });
+    const msg = await engine.request('depthMap', { grey: $('depth-grey').checked }, { onProgress: showProgress });
     hideProgress();
     if (msg && msg.pixels && state.depthShown) draw(toImageData(msg));
   } catch (err) {
     showError(err);
   }
 }
+
+function showDepthLegend() {
+  $('depth-legend').textContent = $('depth-grey').checked ? 'Light is near, dark is far.' : 'Warm colors are near, cool colors are far.';
+}
+
+$('depth-grey').addEventListener('change', () => {
+  showDepthLegend();
+  if (state.depthShown) renderDepth();
+});
 
 function setDepthShown(on, { restore = true } = {}) {
   if (on && !(hasDepth() && state.mode === 'camera')) {
@@ -1384,6 +1393,7 @@ function setDepthShown(on, { restore = true } = {}) {
   updateSpreadOverlay();
   $('depth-btn').checked = on;
   $('depth-legend').hidden = !on;
+  showDepthLegend();
   if (on) {
     setPlaying(false);
     state.showingFrames = false;
@@ -1600,7 +1610,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'spread-show', 'depth-smooth', 'depth-hq', 'lytro-depth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'depth-grey', 'spread-show', 'depth-smooth', 'depth-hq', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;

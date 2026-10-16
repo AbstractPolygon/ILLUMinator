@@ -9,6 +9,7 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 - *Smoothing:* smooths the depth map, following the picture's edges.
 - *Lytro Desktop depth map:* shown for photos imported from a Lytro Desktop library. On, the depth map Lytro Desktop computed (or the one edited there) is used for blur and depth masks; off, depth is measured from the light field as for any other photo. Lytro's map is usually the better one where the picture is blank or out of focus, such as a plain wall behind the subject.
 - *Show depth map:* warm colors are near, cool colors are far.
+- *Greyscale depth map:* shows the depth map in grey instead of in color, light for near and dark for far.
 
 How carefully the depth map is measured is set in [[Render]] (*High quality depth map*).
 
