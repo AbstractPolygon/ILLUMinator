@@ -2104,13 +2104,21 @@ function showDesktopOnly(title = LIBRARY_ONLY.title, text = LIBRARY_ONLY.text) {
 
 // ---- camera calibration
 
+const lensSource = () => {
+  try {
+    return localStorage.getItem('illuminator.lensSource') === 'measured' ? 'measured' : 'calibration';
+  } catch {
+    return 'calibration';
+  }
+};
+
 // Kept calibration goes to the render worker, keyed by camera serial number.
 async function sendCalibrations() {
   await libReady;
   const kept = await listCalibrations(lib.store).catch(() => []);
   const list = [];
   for (const k of kept) list.push(await loadCalibration(lib.store, k.serial).catch(() => null));
-  await engine.request('setCalibrations', { list: list.filter(Boolean) });
+  await engine.request('setCalibrations', { list: list.filter(Boolean), useWhites: lensSource() === 'calibration' });
   return kept;
 }
 
@@ -2158,6 +2166,17 @@ async function addCalibration(source) {
 }
 
 const CALIBRATION_ONLY = ['Add camera calibration', 'Adding camera calibration data needs the ILLUMinator desktop app, for Windows, macOS and Linux. Backups are over a gigabyte, so the desktop app reads them on your computer and keeps the calibration in your library.'];
+$('cal-lens-source').value = lensSource();
+$('cal-lens-source').onchange = () => {
+  try {
+    localStorage.setItem('illuminator.lensSource', $('cal-lens-source').value);
+  } catch {
+    // Not remembered.
+  }
+  sendCalibrations().then(() => {
+    if (state.current) $('cal-note').textContent = 'Applies to the open photo at its next full resolution render.';
+  });
+};
 $('cal-add').onclick = async () => (!native ? showDesktopOnly(...CALIBRATION_ONLY) : addCalibration(await openCalibrationFile().catch(() => null)));
 $('cal-folder').onclick = async () => {
   if (!native) return showDesktopOnly(...CALIBRATION_ONLY);

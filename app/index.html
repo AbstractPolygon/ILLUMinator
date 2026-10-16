@@ -898,6 +898,12 @@
         <h3>Camera calibration</h3>
         <p class="hint">Each camera has its calibration data: which pixels are defective, its lens grid at every zoom and focus, and white images. Add yours (a camera backup <code>.tar</code> file, or its unpacked folder) so photos from that camera render with it (adding a backup takes a minute or so while its white images are measured). It is kept in your library and used for photos with the same camera serial number.</p>
         <ul id="cal-list" class="cal-list"></ul>
+        <label class="row" title="Where each lens's center comes from. The camera's calibration uses its white images; the other measures every lens from the photo at its first full resolution render, which takes longer.">Lens centers
+          <select id="cal-lens-source">
+            <option value="calibration">Camera calibration (when added)</option>
+            <option value="measured">Measured from each photo</option>
+          </select>
+        </label>
         <div class="row">
           <button type="button" id="cal-add">Add calibration backup…</button>
           <button type="button" id="cal-folder">Add from a folder…</button>

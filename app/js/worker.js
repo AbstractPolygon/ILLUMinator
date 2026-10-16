@@ -747,9 +747,17 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
 // Calibration kept for each camera, by serial number: { hotPixelFile }.
 const calibrations = new Map();
 
-async function setCalibrations({ list }) {
+// `useWhites` false: lens centers are measured from each photo instead of
+// taken from the camera's white images.
+let useWhites = true;
+
+async function setCalibrations({ list, useWhites: use = true }) {
   calibrations.clear();
   for (const c of list) calibrations.set(c.serial, c);
+  const changed = use !== useWhites;
+  useWhites = use;
+  // The open photo takes the new choice at its next full render.
+  if (state.lf && state.lf.raw && changed) state.lensOffsets = calibratedLensOffsets();
   return true;
 }
 
@@ -765,6 +773,7 @@ async function measureWhiteImage({ id, bytes, meta }) {
 // calibration (matched by the geometry file's SHA-1), or null.
 function calibratedLensOffsets() {
   const { lf } = state;
+  if (!useWhites) return null;
   const serial = lf.privateMetadata && lf.privateMetadata.camera && lf.privateMetadata.camera.serialNumber;
   const cal = serial && calibrations.get(String(serial));
   const ref = lf.geometryRef && String(lf.geometryRef).replace(/^sha1-/i, '').toLowerCase();
