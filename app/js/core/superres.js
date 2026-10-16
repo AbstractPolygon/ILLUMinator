@@ -355,7 +355,12 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     // No minimum among the candidates (the best is at an end): there is no
     // evidence for a shift, so none is made.
     let focusOffset = 0;
-    if (best > 0 && best < candidates.length - 1) {
+    // A real minimum is clearly deeper than the scatter of the others: on a
+    // flat curve (every candidate within 4% of the best) the position of the
+    // minimum is noise, so there is no shift.
+    const worst = Math.max(...metrics.filter(Number.isFinite));
+    const clear = worst - metrics[best] >= 0.04 * metrics[best];
+    if (clear && best > 0 && best < candidates.length - 1) {
       focusOffset = candidates[best];
       const [a, b, c] = [metrics[best - 1], metrics[best], metrics[best + 1]];
       const denom = a - 2 * b + c;
