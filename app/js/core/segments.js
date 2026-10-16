@@ -1,3 +1,5 @@
+import { signatureDistance } from './objects.js';
+
 // Region cleanup of a depth map, the way Lytro Desktop's maps look: the
 // picture is cut into small regions of like color (SLIC superpixels), each
 // region takes the confidence-weighted median depth of its pixels, and
@@ -81,7 +83,7 @@ export function slic(lab, w, h, count = 2500, compactness = 8, iterations = 6) {
 
 // The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
 // picture's color (0..1, 3 per pixel). Returns new depths.
-export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25 } = {}) {
+export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, objects = null } = {}) {
   const n = w * h;
   const lab = new Float32Array(n * 3);
   for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
@@ -185,7 +187,11 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
   }
   const out = new Float32Array(n);
   for (let p = 0; p < n; p++) out[p] = cur[label[p]];
-  return edge > 0 ? smoothRamps(smoothSteps(out, lab, w, h, edge), lab, w, h, edge) : out;
+  if (!(edge > 0)) return out;
+  if (!objects) return smoothRamps(smoothSteps(out, lab, w, h, edge), lab, w, h, edge);
+  // With objects known, an outline (not the size of a step) is what keeps
+  // two sides apart, so depth flows freely within each object.
+  return smoothRamps(snapToObjects(out, objects, w, h), lab, w, h, Infinity, objects, 8, 4, 10);
 }
 
 // Depth edges (steps larger than `edge`) follow the superpixels' borders,
@@ -193,9 +199,12 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
 // that carries the most weight in its 17 x 17 neighbourhood (nearer and
 // more alike in color counts more), so the step stays hard but its border
 // straightens. Everywhere else the depth is left as it is.
+// How strongly an object's outline between two pixels counts against pairing
+// them (per outline crossed).
+const OBJECT_COST = 5;
 const R = 8;
 const SIGMA = 4;
-export function smoothSteps(depth, lab, w, h, edge) {
+export function smoothSteps(depth, lab, w, h, edge, objects = null) {
   const near = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -229,7 +238,7 @@ export function smoothSteps(depth, lab, w, h, edge) {
           const dl = lab[3 * q] - lab[3 * p];
           const da = lab[3 * q + 1] - lab[3 * p + 1];
           const db = lab[3 * q + 2] - lab[3 * p + 2];
-          const wt = Math.exp(-(dx * dx + dy * dy) / (2 * SIGMA * SIGMA) - (dl * dl + da * da + db * db) / 400);
+          const wt = Math.exp(-(dx * dx + dy * dy) / (2 * SIGMA * SIGMA) - (dl * dl + da * da + db * db) / 400 - (objects ? OBJECT_COST * signatureDistance(objects[p], objects[q]) : 0));
           let k = 0;
           while (k < m && Math.abs(vals[k] - depth[q]) > 1e-4) k++;
           if (k === m) {
@@ -253,7 +262,7 @@ export function smoothSteps(depth, lab, w, h, edge) {
 // photo (`lab`) and lie nearer, so depth follows the photo's own edges and
 // flows smoothly elsewhere. Neighbours more than `edge` away in depth (another
 // object across a step) do not count, so real hard steps stay hard.
-export function smoothRamps(depth, lab, w, h, edge, radius = 8, sigma = 4, colorSigma = 7) {
+export function smoothRamps(depth, lab, w, h, edge, objects = null, radius = 8, sigma = 4, colorSigma = 7) {
   const out = new Float32Array(w * h);
   const k = -1 / (2 * sigma * sigma);
   const kc = -1 / (2 * colorSigma * colorSigma);
@@ -275,12 +284,82 @@ export function smoothRamps(depth, lab, w, h, edge, radius = 8, sigma = 4, color
           const dl = lab[3 * q] - lab[3 * p];
           const da = lab[3 * q + 1] - lab[3 * p + 1];
           const db = lab[3 * q + 2] - lab[3 * p + 2];
-          const wt = Math.exp(k * (dx * dx + dy * dy) + kc * (dl * dl + da * da + db * db));
+          const wt = Math.exp(k * (dx * dx + dy * dy) + kc * (dl * dl + da * da + db * db) - (objects ? OBJECT_COST * signatureDistance(objects[p], objects[q]) : 0));
           sum += d * wt;
           wsum += wt;
         }
       }
       out[p] = sum / wsum;
+    }
+  }
+  return out;
+}
+
+// Depth edges on the objects' outlines. Near an outline (within `inner`
+// pixels of a pixel with other objects' signature) the measured depth is
+// unreliable, since it comes from blocks of the picture that straddle the
+// outline. Each such pixel takes the median depth of the same object's pixels
+// further inside (nearer ones count more), so each object's depth reaches
+// right up to its outline and stops there.
+export function snapToObjects(depth, objects, w, h, inner = 10, reach = 24) {
+  const interior = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const sig = objects[p];
+      let same = 1;
+      for (let dy = -inner; dy <= inner && same; dy += 1) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -inner; dx <= inner; dx += 1) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          if (objects[yy * w + xx] !== sig) {
+            same = 0;
+            break;
+          }
+        }
+      }
+      interior[p] = same;
+    }
+  }
+  const out = Float32Array.from(depth);
+  const k = -1 / (2 * (reach / 2.5) ** 2);
+  const vals = [];
+  const wts = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (interior[p]) continue;
+      const sig = objects[p];
+      vals.length = 0;
+      wts.length = 0;
+      let total = 0;
+      for (let dy = -reach; dy <= reach; dy += 2) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -reach; dx <= reach; dx += 2) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const q = yy * w + xx;
+          if (!interior[q] || objects[q] !== sig) continue;
+          const wt = Math.exp(k * (dx * dx + dy * dy));
+          vals.push(depth[q]);
+          wts.push(wt);
+          total += wt;
+        }
+      }
+      if (total < 0.05) continue;
+      // Weighted median: a halo of in-between depths cannot pull it.
+      const order = vals.map((_, i) => i).sort((i, j) => vals[i] - vals[j]);
+      let run = 0;
+      for (const i of order) {
+        run += wts[i];
+        if (run >= total / 2) {
+          out[p] = vals[i];
+          break;
+        }
+      }
     }
   }
   return out;

@@ -26,6 +26,7 @@ import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, 
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
+engine.onNotice = (text) => showNotice(text);
 const canvas = $('view');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
@@ -1610,7 +1611,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'depth-grey', 'spread-show', 'depth-smooth', 'depth-hq', 'lytro-depth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'depth-grey', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-objects', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
@@ -1996,6 +1997,7 @@ $('depth-smooth').oninput = () => {
 $('depth-smooth').onchange = () => {};
 // Normal or high quality depth: the depth map is measured again.
 $('depth-hq').onchange = () => applySettingsSoon();
+$('depth-objects').onchange = () => applySettingsSoon();
 $('lytro-depth').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {
@@ -5841,6 +5843,7 @@ async function applySettings() {
     hotPixels: $('nr-hot').checked,
     depthSmoothing: $('depth-smooth').value / 100,
     depthQuality: $('depth-hq').checked ? 'high' : 'normal',
+    depthObjects: $('depth-objects').checked,
     lytroDepth: $('lytro-depth').checked,
     details: {
       amount: +$('sharp-amount').value,

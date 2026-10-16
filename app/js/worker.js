@@ -12,7 +12,9 @@ import { makeSyntheticLfr } from './core/synthetic.js';
 import { userDepthAlpha } from './core/userdepth.js';
 import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
-import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, combineCoarse } from './core/depth.js';
+import { loadSegModel, findObjectMasks } from './core/segmodel.js';
+import { pickObjects, signatures } from './core/objects.js';
+import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
@@ -329,6 +331,7 @@ function rebuildSampler() {
   state.depth = null;
   state.depthRaw = null;
   state.focusOffset = undefined;
+  state.objects = null;
   if (state.gpu) {
     state.vignetting = estimateVignetting(lf.raw, lf.cam, state.dev, lf.grid);
     const vg = state.vignetting;
@@ -830,9 +833,10 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
+  const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
-  if ((qualityChanged || sourceChanged) && state.depthRaw && !detailChanged) {
+  if ((qualityChanged || sourceChanged || objectsChanged) && state.depthRaw && !detailChanged) {
     // Measure the depth again, the new way.
     state.depth = null;
     state.depthRaw = null;
@@ -1049,6 +1053,30 @@ async function outputToSensor({ x, y }) {
   return { x: (dx * (cy - ay) - dy * (cx - ax)) / det, y: ((bx - ax) * dy - (by - ay) * dx) / det };
 }
 
+// One label per pixel for the objects in the photo (core/segmodel.js), or
+// null when the model is not available: depth is then measured without it.
+async function findObjects(id) {
+  const { outW, outH } = state.sampler;
+  if (state.objects && state.objects.w === outW && state.objects.h === outH) return state.objects.labels;
+  try {
+    const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
+    const model = await loadSegModel(progress);
+    const found = await findObjectMasks(model, centerView(), outW, outH, { onProgress: progress });
+    const small = signatures(pickObjects(found.masks, found.w, found.h), found.w, found.h);
+    // Back to the depth map's size.
+    const labels = new Uint32Array(outW * outH);
+    for (let y = 0; y < outH; y++) {
+      const sy = Math.min(found.h - 1, Math.floor(((y + 0.5) * found.h) / outH));
+      for (let x = 0; x < outW; x++) labels[y * outW + x] = small[sy * found.w + Math.min(found.w - 1, Math.floor(((x + 0.5) * found.w) / outW))];
+    }
+    state.objects = { w: outW, h: outH, labels };
+    return state.objects.labels;
+  } catch (e) {
+    post({ id, type: 'notice', message: `Object edges are not available: ${e.message}` });
+    return null;
+  }
+}
+
 async function ensureDepth(id) {
   if (state.depth) return true;
   if (!(await ensureRefocusViews(id))) return false;
@@ -1068,6 +1096,9 @@ async function ensureDepth(id) {
     // Normal quality: the plain cost volume, about twice as fast; high adds
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
+    // Object outlines for the depth edges (high quality only; Camera > Depth).
+    DEPTH_REGIONS.objects = !fast && state.settings.depthObjects ? await findObjects(id) : null;
+    try {
     if (state.gpu) {
       post({ id, type: 'progress', stage: 'Measuring depth', progress: 0 });
       const rgb = centerView();
@@ -1086,6 +1117,9 @@ async function ensureDepth(id) {
         ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
         onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
       });
+    }
+    } finally {
+      DEPTH_REGIONS.objects = null;
     }
     applyDepthSmoothing();
   }

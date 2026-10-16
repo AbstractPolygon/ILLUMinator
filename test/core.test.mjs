@@ -283,3 +283,41 @@ test('depth sampling keeps surface steps: no in-between depth at an edge, biline
   const flat = Float32Array.from([1, 1.05, 1, 1.05, 1, 1.05, 1, 1.05, 1, 1.05, 1, 1.05]);
   assert.ok(Math.abs(sampleDepth(flat, 4, 3, 0.5, 1) - 1.025) < 1e-6);
 });
+
+test('objects: masks become one label per pixel; the smallest mask wins and specks vote away', async () => {
+  const { pickObjects, signatures, signatureDistance } = await import('../app/js/core/objects.js');
+  const w = 40;
+  const h = 30;
+  const mask = (x0, y0, x1, y1, quality = 0.95) => {
+    const bin = new Uint8Array(w * h);
+    let area = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { bin[y * w + x] = 1; area++; }
+    return { bin, area, quality };
+  };
+  const big = mask(0, 0, 40, 20);
+  const small = mask(10, 5, 20, 15);
+  const dup = mask(10, 5, 20, 15); // the same object found twice
+  const bad = mask(25, 5, 35, 15, 0.4); // unreliable
+  const picked = pickObjects([big, small, dup, bad], w, h, { minArea: 0.01, maxArea: 0.9 });
+  assert.equal(picked.length, 2, 'duplicates and unreliable masks dropped');
+  const labels = signatures(picked, w, h, { radius: 1, passes: 1 });
+  assert.equal(signatureDistance(labels[10 * w + 15], labels[10 * w + 15]), 0);
+  assert.equal(signatureDistance(labels[10 * w + 15], labels[2 * w + 2]), 1, 'inside the small mask differs from the big one');
+  assert.equal(labels[25 * w + 5], 0, 'outside every mask');
+});
+
+test('depth cleanup: depth reaches each object up to its outline', async () => {
+  const { snapToObjects } = await import('../app/js/core/segments.js');
+  const w = 60;
+  const h = 30;
+  const objects = new Uint32Array(w * h);
+  const depth = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    objects[y * w + x] = x < 30 ? 1 : 2;
+    // the measured step is misplaced by 4 pixels
+    depth[y * w + x] = x < 34 ? -1 : 1;
+  }
+  const out = snapToObjects(depth, objects, w, h, 4, 12);
+  assert.ok(out[10 * w + 31] > 0.9, 'right object, right up to the outline');
+  assert.ok(out[10 * w + 29] < -0.9, 'left object, right up to the outline');
+});

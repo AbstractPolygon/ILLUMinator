@@ -770,6 +770,7 @@
         <details class="subpanel">
           <summary><h3>Quality</h3></summary>
           <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo, for photos and videos; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
+          <label id="depth-objects-row" class="check" title="Finds the objects in the photo and puts depth edges on their outlines, for High quality depth maps. The first time, it downloads a 45 MB object model (kept for later); finding the objects takes a few seconds per photo"><input id="depth-objects" type="checkbox"> Object edges</label>
           <label title="Size of the picture made from the lenses, for photos and every video frame">Resolution
             <select id="detail">
               <option value="1" selected>1× (fast)</option>

@@ -13,6 +13,10 @@ export class Engine {
   }
 
   dispatch(msg) {
+    if (msg.type === 'notice') {
+      if (this.onNotice) this.onNotice(msg.message);
+      return;
+    }
     const p = this.pending.get(msg.id);
     if (!p) return;
     if (msg.type === 'progress') {
