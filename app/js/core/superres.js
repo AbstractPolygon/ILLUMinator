@@ -180,9 +180,12 @@ export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, s
   // At higher output scales there are fewer samples per output pixel; wider
   // splats keep them covering evenly.
   sigma ??= 0.6 * Math.max(1, scale / 3);
-  // 0.45 of each lens disc: measured against Lytro Desktop's pictures, more
-  // of the fine detail they show and less noise than 0.38.
-  aperture ??= 0.45;
+  // 0.36 of each lens disc: the outer samples of a lens sit slightly off
+  // where the model puts them and draw the dotted pattern with the lens
+  // spacing; at 0.36 the pattern is mostly gone (about a third of the
+  // energy of 0.45 at the lens frequency) for a little more noise, which
+  // the passes and despeckle absorb.
+  aperture ??= 0.36;
   const { grid: g, outW, outH, detail } = sampler;
   const rUse = g.pitch * aperture;
   return {
