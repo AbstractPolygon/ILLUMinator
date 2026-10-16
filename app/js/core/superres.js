@@ -414,7 +414,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     // render soft or doubled. Each pixel is rendered with the depth map as
     // is and with the nearest and farthest depth around it, and the three
     // are blended by how well the rays landing on the pixel agree.
-    const cands = [depth, depthFilter(depth, bw, bh, EDGE_SNAP.radius, Math.min), depthFilter(depth, bw, bh, EDGE_SNAP.radius, Math.max)];
+    const cands = snapCandidates(depth, bw, bh);
     const renders = cands.map((d) => {
       rayDepth = d;
       return splatOnCpu(null, null, null, true);
@@ -463,7 +463,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // (see the visibility test in renderSuperRes); `tol` in depth units. Off: on
 // the turntable and fence photos it did not change the dotted edge pattern.
 export const OCCLUSION = { on: false, tol: 0.1 };
-export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
+export const DITHER_FIX = { on: true, low: 0.03, high: 0.2, sigma: 1.0 };
 
 function smoothDisagreeing(y, dis, W, H, scale) {
   if (!DITHER_FIX.on) return;
@@ -504,7 +504,22 @@ function smoothDisagreeing(y, dis, W, H, scale) {
 // extra weight of the depth map as is. On the fence of one test photo this
 // removes the doubled outlines and most of the comb-like striping along a
 // near wire's edge; on three other photos it changes under 0.05% of pixels.
-export const EDGE_SNAP = { on: true, radius: 6, smooth: 2, margin: 0.1, keep: 1 };
+// `offsets`: depth shifts tried as well, which fixes a surface whose depth
+// is a little off all through (not just at an edge); the near and far
+// candidates and these number SNAP_CANDIDATES in all.
+export const EDGE_SNAP = { on: true, radius: 6, smooth: 2, margin: 0.1, keep: 1, offsets: [-0.3, -0.15, 0.15, 0.3] };
+export const SNAP_CANDIDATES = 3 + EDGE_SNAP.offsets.length;
+
+// The depth maps rendered for edge snapping: as is, nearest and farthest
+// around each pixel, then shifted by each of the offsets.
+export function snapCandidates(depth, bw, bh) {
+  return [
+    depth,
+    depthFilter(depth, bw, bh, EDGE_SNAP.radius, Math.min),
+    depthFilter(depth, bw, bh, EDGE_SNAP.radius, Math.max),
+    ...EDGE_SNAP.offsets.map((o) => Float32Array.from(depth, (x) => x + o)),
+  ];
+}
 
 // Nearest (fn = Math.min) or farthest (Math.max) depth within `r`.
 export function depthFilter(depth, w, h, r, fn) {

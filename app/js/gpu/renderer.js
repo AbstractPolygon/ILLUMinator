@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, depthFilter, DEPTH_STEP_TOLERANCE, DITHER_FIX } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1304,17 +1304,16 @@ void main() {
 }`;
 
 // Edge snapping (core/superres.js EDGE_SNAP): the splat with the depth map
-// as is and with the nearest and farthest depth around each pixel, blended
-// by how well the rays landing on the pixel agree.
-const SR_SNAP = `#version 300 es
+// as is, with the nearest and farthest depth around each pixel and with the
+// depth shifted, blended by how well the rays landing on the pixel agree.
+// Each candidate's accumulation is first reduced to (ray disagreement
+// averaged around the pixel, luma) so that only two floats per candidate
+// stay in memory.
+const SR_SNAP_CAND = `#version 300 es
 precision highp float;
-uniform sampler2D uAcc0;   // r: sum, g: weight, b: sum of squares
-uniform sampler2D uAcc1;
-uniform sampler2D uAcc2;
+uniform sampler2D uAcc;    // r: sum, g: weight, b: sum of squares
 uniform sampler2D uPrep;
 uniform int uSmooth;
-uniform float uMargin;
-uniform float uKeep;
 out vec4 outColor;
 const float LAMBDA = 0.15;
 float disagree(vec3 a) {
@@ -1323,63 +1322,74 @@ float disagree(vec3 a) {
 }
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
-  ivec2 sz = textureSize(uAcc0, 0);
-  vec3 d = vec3(0.0);
+  ivec2 sz = textureSize(uAcc, 0);
+  float d = 0.0;
   float n = 0.0;
   for (int j = -uSmooth; j <= uSmooth; j++) {
     for (int i = -uSmooth; i <= uSmooth; i++) {
       ivec2 q = p + ivec2(i, j);
       if (q.x < 0 || q.y < 0 || q.x >= sz.x || q.y >= sz.y) continue;
-      d += vec3(disagree(texelFetch(uAcc0, q, 0).rgb), disagree(texelFetch(uAcc1, q, 0).rgb), disagree(texelFetch(uAcc2, q, 0).rgb));
+      d += disagree(texelFetch(uAcc, q, 0).rgb);
       n += 1.0;
     }
   }
-  d /= n;
-  float best = min(d.x, min(d.y, d.z));
-  vec3 w = exp(-(d - best) / (uMargin * best + 1e-6)) * vec3(uKeep, 1.0, 1.0);
   float upY = dot(texelFetch(uPrep, p, 0).rgb, vec3(0.2126, 0.7152, 0.0722));
-  vec2 a0 = texelFetch(uAcc0, p, 0).rg;
-  vec2 a1 = texelFetch(uAcc1, p, 0).rg;
-  vec2 a2 = texelFetch(uAcc2, p, 0).rg;
-  vec3 y = vec3(a0.x, a1.x, a2.x) + upY * LAMBDA;
-  y /= vec3(a0.y, a1.y, a2.y) + LAMBDA;
-  outColor = vec4(dot(w, y) / (w.x + w.y + w.z), 0.0, 0.0, 0.0);
+  vec2 a = texelFetch(uAcc, p, 0).rg;
+  outColor = vec4(d / n, (a.x + upY * LAMBDA) / (a.y + LAMBDA), 0.0, 0.0);
+}`;
+
+const SR_CANDS = Array.from({ length: SNAP_CANDIDATES }, (_, k) => `uniform sampler2D uC${k};`).join('\n');
+const SR_CAND_AT = `
+float candD(int k, ivec2 p) {
+  ${Array.from({ length: SNAP_CANDIDATES }, (_, k) => `if (k == ${k}) return texelFetch(uC${k}, p, 0).r;`).join('\n  ')}
+  return 0.0;
+}
+float candY(int k, ivec2 p) {
+  ${Array.from({ length: SNAP_CANDIDATES }, (_, k) => `if (k == ${k}) return texelFetch(uC${k}, p, 0).g;`).join('\n  ')}
+  return 0.0;
+}`;
+
+const SR_SNAP = `#version 300 es
+precision highp float;
+${SR_CANDS}
+uniform int uCount;
+uniform float uMargin;
+uniform float uKeep;
+out vec4 outColor;
+${SR_CAND_AT}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float best = 1e9;
+  for (int k = 0; k < uCount; k++) best = min(best, candD(k, p));
+  float ws = 0.0;
+  float acc = 0.0;
+  for (int k = 0; k < uCount; k++) {
+    float w = exp(-(candD(k, p) - best) / (uMargin * best + 1e-6)) * (k == 0 ? uKeep : 1.0);
+    ws += w;
+    acc += w * candY(k, p);
+  }
+  outColor = vec4(acc / ws, 0.0, 0.0, 0.0);
 }`;
 
 // Smoothing where the rays disagree (core/superres.js DITHER_FIX): the luma
-// is blended toward a Gaussian blur by how badly the three candidate splats
+// is blended toward a Gaussian blur by how badly the candidate splats
 // disagree around the pixel (the best of them, as SR_SNAP finds it).
 const SR_DITHER = `#version 300 es
 precision highp float;
-uniform sampler2D uAcc0;
-uniform sampler2D uAcc1;
-uniform sampler2D uAcc2;
+${SR_CANDS}
+uniform int uCount;
 uniform sampler2D uSharp;
-uniform int uSmooth;
 uniform float uLow;
 uniform float uHigh;
 uniform float uSigma;
 out vec4 outColor;
-float disagree(vec3 a) {
-  float m = a.g > 1e-6 ? a.r / a.g : 0.0;
-  return a.g > 0.5 ? min(10.0, max(0.0, a.b / a.g - m * m) / (m * m + 1e-4)) : 10.0;
-}
+${SR_CAND_AT}
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
-  ivec2 sz = textureSize(uAcc0, 0);
+  ivec2 sz = textureSize(uSharp, 0);
   float y0 = texelFetch(uSharp, p, 0).r;
-  vec3 d = vec3(0.0);
-  float n = 0.0;
-  for (int j = -uSmooth; j <= uSmooth; j++) {
-    for (int i = -uSmooth; i <= uSmooth; i++) {
-      ivec2 q = p + ivec2(i, j);
-      if (q.x < 0 || q.y < 0 || q.x >= sz.x || q.y >= sz.y) continue;
-      d += vec3(disagree(texelFetch(uAcc0, q, 0).rgb), disagree(texelFetch(uAcc1, q, 0).rgb), disagree(texelFetch(uAcc2, q, 0).rgb));
-      n += 1.0;
-    }
-  }
-  d /= n;
-  float best = min(d.x, min(d.y, d.z));
+  float best = 1e9;
+  for (int k = 0; k < uCount; k++) best = min(best, candD(k, p));
   float t = clamp((best - uLow) / (uHigh - uLow), 0.0, 1.0);
   float w = t * t * (3.0 - 2.0 * t);
   if (w <= 0.0) { outColor = vec4(y0, 0.0, 0.0, 0.0); return; }
@@ -2006,6 +2016,7 @@ export class GpuRenderer {
       lensProbe: program(gl, LENS_PROBE_FRAGMENT, SPLAT_VERTEX),
       srPrep: program(gl, SR_PREP),
       srCombine: program(gl, SR_COMBINE),
+      srSnapCand: program(gl, SR_SNAP_CAND),
       srSnap: program(gl, SR_SNAP),
       srDither: program(gl, SR_DITHER),
       srHist: program(gl, SR_HIST_FRAGMENT, SR_HIST_VERTEX),
@@ -3331,21 +3342,32 @@ export class GpuRenderer {
         owned.push(t);
         return t;
       };
-      const near = depthTex(depthFilter(p.depth, p.baseW, p.baseH, EDGE_SNAP.radius, Math.min));
-      const far = depthTex(depthFilter(p.depth, p.baseW, p.baseH, EDGE_SNAP.radius, Math.max));
-      const accs = [null, near, far].map((t) => this.splatInto(p, { ...inputs, depthTex: t }));
-      owned.push(...accs);
-      snapAccs = accs;
+      const cands = [];
+      for (const values of snapCandidates(p.depth, p.baseW, p.baseH)) {
+        const acc = this.splatInto(p, values === p.depth ? inputs : { ...inputs, depthTex: depthTex(values) });
+        const c = this.texture(W, H, gl.RG32F);
+        Q = P.srSnapCand;
+        this.target(c, W, H);
+        gl.useProgram(Q.p);
+        gl.uniform1i(Q.u.uAcc, 1);
+        this.bindTex(1, acc);
+        gl.uniform1i(Q.u.uPrep, 2);
+        this.bindTex(2, prep);
+        gl.uniform1i(Q.u.uSmooth, EDGE_SNAP.smooth);
+        this.draw();
+        gl.deleteTexture(acc);
+        cands.push(c);
+      }
+      owned.push(...cands);
+      snapAccs = cands;
       Q = P.srSnap;
       this.target(next, W, H);
       gl.useProgram(Q.p);
-      accs.forEach((t, k) => {
-        gl.uniform1i(Q.u[`uAcc${k}`], 1 + k);
+      cands.forEach((t, k) => {
+        gl.uniform1i(Q.u[`uC${k}`], 1 + k);
         this.bindTex(1 + k, t);
       });
-      gl.uniform1i(Q.u.uPrep, 4);
-      this.bindTex(4, prep);
-      gl.uniform1i(Q.u.uSmooth, EDGE_SNAP.smooth);
+      gl.uniform1i(Q.u.uCount, cands.length);
       gl.uniform1f(Q.u.uMargin, EDGE_SNAP.margin);
       gl.uniform1f(Q.u.uKeep, EDGE_SNAP.keep);
       this.draw();
@@ -3373,12 +3395,12 @@ export class GpuRenderer {
       this.target(next, W, H);
       gl.useProgram(Q.p);
       snapAccs.forEach((t, k) => {
-        gl.uniform1i(Q.u[`uAcc${k}`], 1 + k);
+        gl.uniform1i(Q.u[`uC${k}`], 1 + k);
         this.bindTex(1 + k, t);
       });
-      gl.uniform1i(Q.u.uSharp, 4);
-      this.bindTex(4, sharp);
-      gl.uniform1i(Q.u.uSmooth, EDGE_SNAP.smooth);
+      gl.uniform1i(Q.u.uCount, snapAccs.length);
+      gl.uniform1i(Q.u.uSharp, 9);
+      this.bindTex(9, sharp);
       gl.uniform1f(Q.u.uLow, DITHER_FIX.low);
       gl.uniform1f(Q.u.uHigh, DITHER_FIX.high);
       gl.uniform1f(Q.u.uSigma, DITHER_FIX.sigma * p.scale);
