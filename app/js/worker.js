@@ -10,12 +10,12 @@ import {
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { userDepthAlpha } from './core/userdepth.js';
-import { LYTRO_EXPOSURE, LYTRO_BALANCE } from './core/base.js';
+import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
-import { makeDetail, applyDetail } from './core/detail.js';
+import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -159,7 +159,7 @@ function updateColor() {
   const ccm = colorMatrix(lf.cam, state.lytro ? { ...s, saturation: 1 } : s);
   // Fold the white balance gains into the matrix columns.
   // The Lytro Desktop look balances the result slightly (core/base.js).
-  state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3] * (state.lytro ? LYTRO_BALANCE[Math.floor(i / 3)] : 1));
+  state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3] * (state.lytro ? lytroBalance(state.lf.cam.capture && state.lf.cam.capture.cct)[Math.floor(i / 3)] : 1));
   // Reduce flare: the veil is measured once on the center view.
   const { outW, outH } = state.sampler;
   if (!(s.flare && s.flare.on)) state.veil = null;
@@ -194,7 +194,7 @@ function colorState(color) {
   }
   const gains = auto.map((g, i) => g * manual[i]);
   const lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
-  const matrix = colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3] * (lytro ? LYTRO_BALANCE[Math.floor(i / 3)] : 1));
+  const matrix = colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3] * (lytro ? lytroBalance(state.lf.cam.capture && state.lf.cam.capture.cct)[Math.floor(i / 3)] : 1));
   // The veil is measured once (with Reduce flare on); its amount animates.
   const veil = s.flare && s.flare.on ? state.veil : null;
   const veilAmount = veil ? s.flare.amount : 0;
@@ -212,10 +212,15 @@ function localFor(w, h, ctx) {
   return { masks: resolveMasks(state.masks, ctx), w, h, show: state.maskShow, ...d };
 }
 
+// Lens columns across the picture at one pixel per lens (the view at Resolution 1).
+function lensColumns() {
+  return state.sampler ? state.sampler.outW / state.settings.detail : 0;
+}
+
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
 // `cs`: the color pass to use (colorState), the photo's by default.
 function toPixels(rgb, w, h, ctx, cs = state) {
-  rgb = applyDetail(rgb, w, h, state.detail);
+  rgb = applyDetail(rgb, w, h, detailForSize(state.detail, w, lensColumns()));
   rgb = subtractVeil(rgb, w, h, cs.veil, cs.veilAmount);
   rgb = applyLens(rgb, w, h, cs.lens);
   const exposure = cs.baseExposure * Math.pow(2, cs.settings.ev);
@@ -265,7 +270,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       draft,
     });
   }
-  if (state.detail) tex = gpu.details(tex, w, h, state.detail);
+  if (state.detail) tex = gpu.details(tex, w, h, detailForSize(state.detail, w, lensColumns()));
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };

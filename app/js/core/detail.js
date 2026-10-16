@@ -36,6 +36,17 @@ export function makeDetail(settings = {}) {
   return p.amount > 0 || p.luminance > 0 || p.color > 0 || p.dust > 0 || p.speckle > 0 ? p : null;
 }
 
+// Sharpening radius is set for a picture one pixel per lens wide (the view).
+// A render with more pixels per lens has finer pixels, so its radius grows to
+// keep the same look: 1.5 at 3 pixels per lens, 2 at 4 (measured against
+// Lytro Desktop's sharpness on 10 photos at 4x). `lensColumns`: lens columns
+// across the picture at one pixel per lens.
+export function detailForSize(p, width, lensColumns) {
+  if (!p || !(lensColumns > 0)) return p;
+  const f = Math.max(1, width / lensColumns / 2);
+  return f === 1 ? p : { ...p, radius: Math.min(3, p.radius * f) };
+}
+
 // Window half-sizes and filter constants, shared with the GPU shaders.
 export const NR_RADIUS = 2; // luminance: 5 x 5
 export const CHROMA_RADIUS = 6; // color: up to 13 x 13

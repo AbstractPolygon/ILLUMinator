@@ -15,9 +15,16 @@
 export const LYTRO_EXPOSURE = 1.46;
 // A slight balance of the linear color before the curve (red, green, blue):
 // without it the look leans yellow-green on grays next to Lytro Desktop's.
-// Blue was raised 7% (median over 11 photos of Lytro Desktop's blue to green
-// against ours, on whole pictures and on low saturation pixels alike).
-export const LYTRO_BALANCE = [1.0223, 0.9836, 1.1733];
+export const LYTRO_BALANCE = [1.0223, 0.9836, 1.09];
+// Lytro Desktop's automatic white balance leans bluer than the camera's own
+// at warm light and less blue at daylight. Measured on low saturation
+// midtones of 10 photos against its pictures: blue wants about 1.12 at
+// 3000 K, falling 0.05 per 1000 K to about 1.0 at 5500 K.
+export function lytroBalance(cct) {
+  if (!Number.isFinite(cct)) return LYTRO_BALANCE;
+  const t = Math.min(2.5, Math.max(0, (cct - 3000) / 1000));
+  return [LYTRO_BALANCE[0], LYTRO_BALANCE[1], 1.12 - 0.05 * t];
+}
 // Color after the curve, per hue: for 12 hues around the opponent plane
 // (u = (R - G) / sqrt 2, v = (R + G - 2B) / sqrt 6; 30 degrees is red, 90
 // yellow, 150 green, 210 cyan, 270 blue, 330 magenta) the factor [re, im]

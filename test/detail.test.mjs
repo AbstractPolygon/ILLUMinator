@@ -79,3 +79,14 @@ test('dust: a faint dark spot is lifted, a strong dark mark is kept', () => {
   assert.ok(out[3 * (36 * w + 36)] < 0.1, `detail ${out[3 * (36 * w + 36)]}`);
   assert.ok(Math.abs(out[3 * (1 * w + 1)] - 0.5) < 1e-6);
 });
+
+import { detailForSize } from '../app/js/core/detail.js';
+
+test('sharpening radius grows with pixels per lens so big renders look the same', () => {
+  const p = { amount: 0.7, radius: 1 };
+  assert.equal(detailForSize(p, 615, 615).radius, 1);
+  assert.equal(detailForSize(p, 1230, 615).radius, 1);
+  assert.equal(detailForSize(p, 1845, 615).radius, 1.5);
+  assert.equal(detailForSize(p, 2460, 615).radius, 2);
+  assert.equal(detailForSize(null, 2460, 615), null);
+});
