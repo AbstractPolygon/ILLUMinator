@@ -481,8 +481,9 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color, fillOf);
   let result = refine ? (median && color ? median(cleaned, color, width, height, 4, 0.06, 96) : weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color)) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
   // High quality: region cleanup (core/segments.js).
-  if (refine && color && DEPTH_REGIONS.on) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
-  return { alpha: result, confidence, range: [min, max] };
+  const flat = !!(refine && color && DEPTH_REGIONS.on);
+  if (flat) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
+  return { alpha: result, confidence, range: [min, max], flat };
 }
 
 // Focus value that makes the neighborhood of (x, y) sharpest, measured
@@ -548,6 +549,11 @@ export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2
   return { alpha: alphas[best] + offset * step, confidence: mean > 0 ? (mean - costs[best]) / mean : 0 };
 }
 
+// Steps in the depth map (in focus units) that smoothing leaves alone: a
+// neighbor that far off belongs to another surface, so flat areas stay flat
+// and depth edges stay hard, as in Lytro Desktop's maps.
+export const DEPTH_STEP = 0.04;
+
 // Edge-aware depth smoothing (a joint bilateral filter): each depth value
 // becomes a weighted average of its neighbors, where neighbors that look
 // different in the photo (`guide`, linear RGB at the depth map's size)
@@ -555,7 +561,7 @@ export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2
 // edges stay on the photo's edges. `confidence` (0..1 per pixel, optional)
 // lets well-measured values outweigh guesses. `amount` 0..1 sets how far
 // the smoothing reaches (repeated 5 x 5 passes). Returns a new array.
-export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confidence = null } = {}) {
+export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confidence = null, step = 0 } = {}) {
   const passes = Math.round(amount * 8);
   if (passes <= 0) return alpha;
   const n = width * height;
@@ -587,6 +593,7 @@ export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confide
             const xx = x + dx;
             if (xx < 0 || xx >= width) continue;
             const j = yy * width + xx;
+            if (step > 0 && Math.abs(src[j] - src[i]) > step) continue;
             const d = g[j] - gi;
             let w = Math.exp(kSpace * (dx * dx + dy * dy) + kRange * d * d);
             if (conf) w *= 0.15 + conf[j];

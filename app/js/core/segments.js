@@ -81,7 +81,7 @@ export function slic(lab, w, h, count = 2500, compactness = 8, iterations = 6) {
 
 // The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
 // picture's color (0..1, 3 per pixel). Returns new depths.
-export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8 } = {}) {
+export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.04 } = {}) {
   const n = w * h;
   const lab = new Float32Array(n * 3);
   for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
@@ -146,6 +146,29 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
       den[b] += wgt * trust[a];
     }
     for (let c = 0; c < k; c++) cur[c] = den[c] > 0 ? num[c] / den[c] : cur[c];
+  }
+  // Neighbouring regions whose depths ended up within `plateau` of each
+  // other become one flat plateau, so the map has hard steps where the depth
+  // really changes and exactly flat areas in between (like Lytro Desktop's).
+  if (plateau > 0) {
+    const parent = Int32Array.from({ length: k }, (_, c) => c);
+    const root = (c) => {
+      while (parent[c] !== c) c = parent[c] = parent[parent[c]];
+      return c;
+    };
+    for (let i = 0; i < pairs.length; i += 3) {
+      const a = pairs[i];
+      const b = pairs[i + 1];
+      if (Math.abs(cur[a] - cur[b]) < plateau) parent[root(a)] = root(b);
+    }
+    const num = new Float64Array(k);
+    const den = new Float64Array(k);
+    for (let c = 0; c < k; c++) {
+      const r = root(c);
+      num[r] += (trust[c] + 1e-4) * members[c].length * cur[c];
+      den[r] += (trust[c] + 1e-4) * members[c].length;
+    }
+    for (let c = 0; c < k; c++) cur[c] = num[root(c)] / den[root(c)];
   }
   const out = new Float32Array(n);
   for (let p = 0; p < n; p++) out[p] = cur[label[p]];

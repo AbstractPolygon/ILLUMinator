@@ -1946,26 +1946,30 @@ uniform sampler2D uSrc;   // r: depth
 uniform sampler2D uGuide; // r: sqrt luminance, g: confidence
 uniform float uKRange;
 uniform int uUseConf;
+uniform float uStep;
 out vec4 outColor;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   ivec2 size = textureSize(uSrc, 0);
   float gi = texelFetch(uGuide, p, 0).r;
+  float vi = texelFetch(uSrc, p, 0).r;
   float sum = 0.0;
   float wsum = 0.0;
   for (int dy = -2; dy <= 2; dy++) {
     for (int dx = -2; dx <= 2; dx++) {
       ivec2 q = p + ivec2(dx, dy);
       if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
+      float vq = texelFetch(uSrc, q, 0).r;
+      if (uStep > 0.0 && abs(vq - vi) > uStep) continue;
       vec2 g = texelFetch(uGuide, q, 0).rg;
       float d = g.r - gi;
       float w = exp(-0.5 / (1.2 * 1.2) * float(dx * dx + dy * dy) + uKRange * d * d);
       if (uUseConf == 1) w *= 0.15 + g.g;
-      sum += texelFetch(uSrc, q, 0).r * w;
+      sum += vq * w;
       wsum += w;
     }
   }
-  outColor = vec4(wsum > 0.0 ? sum / wsum : texelFetch(uSrc, p, 0).r, 0.0, 0.0, 0.0);
+  outColor = vec4(wsum > 0.0 ? sum / wsum : vi, 0.0, 0.0, 0.0);
 }`;
 
 function compile(gl, type, src) {
@@ -2864,7 +2868,7 @@ export class GpuRenderer {
 
   // Edge-aware depth smoothing (core/depth.js smoothDepth) on the GPU.
   // `guide`: linear RGB (w x h); returns a new Float32Array.
-  smoothDepth(alpha, w, h, guide, { amount = 0.3, confidence = null } = {}) {
+  smoothDepth(alpha, w, h, guide, { amount = 0.3, confidence = null, step = 0 } = {}) {
     const passes = Math.round(amount * 8);
     if (passes <= 0) return alpha;
     const gl = this.gl;
@@ -2886,6 +2890,7 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uGuide, 3);
     gl.uniform1f(P.u.uKRange, -0.5 / (0.08 * mean) ** 2);
     gl.uniform1i(P.u.uUseConf, confidence ? 1 : 0);
+    gl.uniform1f(P.u.uStep, step);
     for (let pass = 0; pass < passes; pass++) {
       this.target(dst, w, h);
       this.bindTex(1, src);
