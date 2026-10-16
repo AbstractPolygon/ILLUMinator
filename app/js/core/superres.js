@@ -285,7 +285,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       // The same accumulation on the GPU: one point per raw pixel.
       const r = options.gpuSplat({
         W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
-        xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate, lensOffsets,
+        xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate, lensOffsets, lens,
       });
       if (progress) progress(1);
       return r;

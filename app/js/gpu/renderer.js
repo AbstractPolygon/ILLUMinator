@@ -1045,11 +1045,54 @@ void main() {
   outColor = vec4(s, 1.0);
 }`;
 
+// The lens correction as a position map (core/lens.js lensWarp), so the
+// distortion is corrected where each ray lands, before the rays are combined.
+// Positions are pixel center coordinates of the W x H picture.
+const WARP_GLSL = `
+uniform vec4 uWarp;     // k1, k2, edge ease, zoom
+uniform vec2 uWarpSize; // picture size in pixels
+uniform int uWarpOn;
+float warpRatio(float r) {
+  float r2 = r * r;
+  float t = max(0.0, (r - 0.75) * 4.0);
+  float e = r > 0.75 ? uWarp.z * t * t / r : 0.0;
+  return (1.0 + uWarp.x * r2 + uWarp.y * r2 * r2 + e) * uWarp.w;
+}
+// Corrected picture position -> position in the uncorrected picture.
+vec2 warpSource(vec2 pos) {
+  if (uWarpOn == 0) return pos;
+  vec2 c = uWarpSize * 0.5;
+  float R = length(c);
+  vec2 d = (pos - c) / R;
+  return c + d * warpRatio(length(d)) * R;
+}
+// Uncorrected picture position -> corrected one (the inverse).
+vec2 warpForward(vec2 pos) {
+  if (uWarpOn == 0) return pos;
+  vec2 c = uWarpSize * 0.5;
+  float R = length(c);
+  vec2 d = (pos - c) / R;
+  float rs = length(d);
+  if (rs < 1e-6) return pos;
+  float r = rs / uWarp.w;
+  // Newton on r * ratio(r) = rs, with the derivative worked out.
+  for (int i = 0; i < 4; i++) {
+    float r2 = r * r;
+    float t = max(0.0, (r - 0.75) * 4.0);
+    float g = r * uWarp.w * (1.0 + uWarp.x * r2 + uWarp.y * r2 * r2) + uWarp.w * uWarp.z * t * t - rs;
+    float dg = uWarp.w * (1.0 + 3.0 * uWarp.x * r2 + 5.0 * uWarp.y * r2 * r2 + 8.0 * uWarp.z * t);
+    r -= g / dg;
+  }
+  return c + d * (r / rs) * R;
+}
+`;
+
 // Full resolution: one point per raw pixel, drawn at the pixel's refocused
 // position and summed with additive blending (see core/superres.js).
 const SPLAT_VERTEX = `#version 300 es
 precision highp float;
 precision highp int;
+${WARP_GLSL}
 uniform highp usampler2D uRaw;
 uniform ivec2 uRawSize;
 uniform int uStart;
@@ -1177,9 +1220,10 @@ void main() {
     }
   }
   vec2 o = (lens - alpha * vec2(du, dv)) * uOutScale;
+  o = warpForward(o + 0.5) - 0.5;
   ivec2 pp = ivec2(floor(o + 0.5));
   if (pp.x < uReach || pp.y < uReach || pp.x >= uOutSize.x - uReach || pp.y >= uOutSize.y - uReach) return;
-  vec3 up = texture(uBase, (vec2(pp) + 0.5) / uOutScale * uDetail / uBaseSize).rgb;
+  vec3 up = texture(uBase, warpSource(vec2(pp) + 0.5) / uOutScale * uDetail / uBaseSize).rgb;
   float c = up[ch];
   if (!(c > 1e-5)) return;
   float upY = dot(up, vec3(0.2126, 0.7152, 0.0722));
@@ -1204,6 +1248,8 @@ void main() {
 // at where it would land, added up per lens by blending.
 const LENS_PROBE_FRAGMENT = `#version 300 es
 precision highp float;
+precision highp int;
+${WARP_GLSL}
 uniform highp sampler2D uEst;  // the picture so far (R32F)
 uniform float uOutScale;
 uniform int uCandStart;
@@ -1230,7 +1276,7 @@ void main() {
     int k = uCandStart + j;
     if (k >= side * side) break;
     vec2 c = vec2(float(k / side - uReachCand), float(k % side - uReachCand)) * uStep;
-    float d = vY - estAt((vLens - vAlpha * (vD - c)) * uOutScale);
+    float d = vY - estAt(warpForward((vLens - vAlpha * (vD - c)) * uOutScale + 0.5) - 0.5);
     e[j] = vConf * d * d;
   }
   outColor = e;
@@ -1238,6 +1284,7 @@ void main() {
 
 const SPLAT_FRAGMENT = `#version 300 es
 precision highp float;
+precision highp int;
 uniform float uInv2s2;
 flat in vec2 vCenter;
 flat in float vY;
@@ -1261,6 +1308,7 @@ void main() {
 const SR_PREP = `#version 300 es
 precision highp float;
 precision highp int;
+${WARP_GLSL}
 uniform sampler2D uBase;
 uniform vec2 uBaseSize;
 uniform highp sampler2D uDepth;
@@ -1273,7 +1321,7 @@ uniform float uSpread;
 out vec4 outColor;
 void main() {
   vec2 p = gl_FragCoord.xy - 0.5;
-  vec2 b = clamp((p + 0.5) / uScale * uDetail - 0.5, vec2(0.0), uBaseSize - 1.001);
+  vec2 b = clamp(warpSource(p + 0.5) / uScale * uDetail - 0.5, vec2(0.0), uBaseSize - 1.001);
   ivec2 i = ivec2(floor(b));
   vec2 a = b - vec2(i);
   // Bilinear with full precision weights (as core/superres.js).
@@ -1424,11 +1472,13 @@ void main() {
 }`;
 
 const SR_PHASE = `
+${WARP_GLSL}
 uniform vec2 uMin;
 uniform float uUnit;
 uniform float uScale;
 uniform vec2 uLattice;  // pitch, rowStep
 vec2 phaseAt(vec2 k) {
+  k = warpSource(k + 0.5) - 0.5;
   float ly = uMin.y + (k.y / uScale) * uUnit;
   float lx = uMin.x + (k.x / uScale) * uUnit;
   float fj = ly / uLattice.y;
@@ -3164,6 +3214,7 @@ export class GpuRenderer {
     gl.uniform1f(U.uDetail, p.detail);
     gl.uniform1f(U.uOutScale, p.scale);
     gl.uniform2i(U.uOutSize, W, H);
+    this.setWarp(U, p, W, H);
     gl.uniform1i(U.uReach, p.reach);
     gl.uniform1f(U.uInv2s2, 1 / (2 * p.sigma * p.sigma));
     gl.uniform1i(U.uResidual, estimate ? 1 : 0);
@@ -3176,6 +3227,19 @@ export class GpuRenderer {
     for (let start = 0; start < total; start += chunk) {
       gl.uniform1i(U.uStart, start);
       gl.drawArrays(gl.POINTS, 0, Math.min(chunk, total - start));
+    }
+  }
+
+  // The lens correction position map of a render (WARP_GLSL), for the program
+  // in use: off when the render is not to correct the distortion itself.
+  setWarp(U, p, W, H) {
+    const gl = this.gl;
+    const l = p.lens;
+    const on = !!(l && (l.k || l.k2 || l.edge || (l.zoom && l.zoom !== 1)));
+    gl.uniform1i(U.uWarpOn, on ? 1 : 0);
+    if (on) {
+      gl.uniform4f(U.uWarp, l.k || 0, l.k2 || 0, l.edge || 0, l.zoom || 1);
+      gl.uniform2f(U.uWarpSize, W, H);
     }
   }
 
@@ -3235,6 +3299,7 @@ export class GpuRenderer {
     gl.uniform1f(Q.u.uAlpha, p.alpha);
     gl.uniform1f(Q.u.uTolerance, p.depthTolerance ?? 0.12);
     gl.uniform1f(Q.u.uSpread, p.spreadRadius);
+    this.setWarp(Q.u, p, W, H);
     this.draw();
 
     // Splat, normalize, then back-projection passes.
@@ -3281,6 +3346,7 @@ export class GpuRenderer {
       gl.uniform1f(Q.u.uUnit, p.unit);
       gl.uniform1f(Q.u.uScale, p.scale);
       gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+      this.setWarp(Q.u, p, W, H);
       gl.bindVertexArray(this.emptyVao);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
@@ -3333,6 +3399,7 @@ export class GpuRenderer {
       gl.uniform1f(Q.u.uUnit, p.unit);
       gl.uniform1f(Q.u.uScale, p.scale);
       gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+      this.setWarp(Q.u, p, W, H);
       this.draw();
       [sharp, next] = [next, sharp];
     };

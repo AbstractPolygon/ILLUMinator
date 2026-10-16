@@ -249,7 +249,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
 // unit of `dof`, for this image's size. `keep`: keep the picture as it is
 // before the color pass, so color changes can redraw it (see view()).
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, color = null }, message) {
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, color = null, distortionCorrected = false }, message) {
   const gpu = state.gpu;
   if ((dof > 0 || bokeh.blur > 0) && (await ensureDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
@@ -274,7 +274,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
-  finishGpu(tex, w, h, packed, message, colorState(color));
+  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected);
 }
 
 // Local adjustments resolved for a picture, packed for the GPU, or null.
@@ -284,14 +284,14 @@ function packedMasks(ctx) {
 }
 
 // The color pass: color, defringing, local adjustments and tone mapping.
-function finishGpu(tex, w, h, packed, message, cs = state) {
+function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false) {
   const bitmap = state.gpu.present(tex, w, h, {
     matrix: cs.matrix,
     exposure: cs.baseExposure * Math.pow(2, cs.settings.ev),
     fringe: cs.settings.defringe,
     look: cs.look,
     veilAmount: cs.veil ? cs.veilAmount : 0,
-    lens: cs.lens,
+    lens: distortionCorrected ? withoutDistortion(cs.lens) : cs.lens,
     lutAmount: state.lut ? cs.settings.lutAmount ?? 1 : 0,
     local: packed,
     lytro: cs.lytro,
@@ -644,25 +644,26 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     // The whole render on the GPU: the picture stays there for the color pass.
     progress('Rendering from the full sensor', 0);
     const params = superResParams(sampler, { scale, apertureSigma: allInFocus ? Infinity : opts.sigma });
+    const cs = colorState(color);
     const tex = state.gpu.superRes({
       ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
       vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes,
-      lensOffsets: state.lensOffsets, calibrate: true,
+      lensOffsets: state.lensOffsets, calibrate: true, lens: cs.lens,
     });
     if (tex) {
       state.lensOffsets = state.gpu.lensOffsets;
       if (state.jobs.superres !== job) return { cancelled: true };
-      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
+      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) }, distortionCorrected: true }, { id, type: 'result' });
       return undefined;
     }
   }
-  // Without the GPU the lens distortion is corrected as the rays are combined.
+  // The lens distortion is corrected as the rays are combined.
   const cs = colorState(color);
-  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma, lens: state.gpu ? null : cs.lens }, (p) => progress('Rendering from the full sensor', p));
+  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma, lens: cs.lens }, (p) => progress('Rendering from the full sensor', p));
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
-    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) } }, { id, type: 'result' });
+    await presentGpu(id, tex, sr.width, sr.height, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) }, distortionCorrected: sr.distortionCorrected }, { id, type: 'result' });
     return undefined;
   }
   if (dof > 0) progress('Applying depth of field', 1);
