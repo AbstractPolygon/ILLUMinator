@@ -646,6 +646,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     const probe = estimateFocusOffset(lf.raw, lf.cam, dev, sampler, {
       base: probeBase, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
       vignetting: state.vignetting, lensOffsets: state.lensOffsets, lambdaToAlpha: LAMBDA_TO_ALPHA,
+      gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
     });
     globalThis.__focusMetrics = probe.metrics;
     state.focusOffset = probe.focusOffset;

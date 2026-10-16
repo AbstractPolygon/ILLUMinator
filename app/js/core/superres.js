@@ -283,15 +283,16 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 
   // One splat of every raw pixel; with `estimate`, each sample contributes
   // its difference from the estimate at its position instead (a residual).
+  const gpuParams = (estimate) => ({
+    W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
+    xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate, lensOffsets, lens,
+  });
   const totalSteps = 1 + passes;
   const splat = (estimate, step) => {
     const progress = onProgress ? (p) => onProgress((step + p) / totalSteps) : undefined;
     if (options.gpuSplat) {
       // The same accumulation on the GPU: one point per raw pixel.
-      const r = options.gpuSplat({
-        W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
-        xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate, lensOffsets, lens,
-      });
+      const r = options.gpuSplat(gpuParams(estimate));
       if (progress) progress(1);
       return r;
     }
@@ -333,7 +334,12 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     }
     const metrics = candidates.map((cand) => {
       rayDepth = Float32Array.from(depth, (x) => x + cand * lambdaToAlpha);
-      const dis = rayDisagreement(splatOnCpu(null, null, null, true, win, 1), W, H);
+      const dis = rayDisagreement(
+        options.gpuSplat
+          ? options.gpuSplat({ ...gpuParams(null), rayDepth, squares: true })
+          : splatOnCpu(null, null, null, true, win, 1),
+        W, H,
+      );
       let sum = 0;
       let n = 0;
       for (let y = y0; y < y1; y++) {
@@ -933,8 +939,9 @@ export function vignettingGainAt(vg, u, v) {
 // by an amount that differs from photo to photo, and rays placed with it land
 // slightly out of focus and come out soft. Found from the middle of the
 // sensor at a coarse scale in a few seconds.
-export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, candidates = [-0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
+export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, gpuSplat, candidates = [-0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
   const r = renderSuperRes(raw, cam, dev, sampler, {
+    gpuSplat,
     allInFocus: true, scale: 3, passes: 0, vignetting, base, baseW, baseH, depth, lensOffsets,
     probeFocus: { lambdaToAlpha, candidates },
   });

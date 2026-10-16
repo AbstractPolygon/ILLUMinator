@@ -3264,10 +3264,18 @@ export class GpuRenderer {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RED, gl.FLOAT, p.estimate);
     }
     const lens = p.lensOffsets ? this.lensOffsetsTexture(p.lensOffsets) : null;
-    const acc = this.splatInto(p, { base, vig, estimate, lens });
-    const [accY, wsum] = this.readChannels(acc, W, H, 2);
-    for (const t of [acc, base, vig, estimate, lens && lens.tex]) if (t) gl.deleteTexture(t);
-    return { accY, wsum };
+    // `rayDepth`: the depth the rays are placed with, when it is not the
+    // depth map (the focus probe moves it by candidate offsets).
+    let shifted = null;
+    if (p.rayDepth && p.rayDepth !== p.depth) {
+      shifted = this.texture(p.baseW, p.baseH, gl.R32F);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, p.baseW, p.baseH, gl.RED, gl.FLOAT, p.rayDepth);
+    }
+    const acc = this.splatInto(p, { base, vig, estimate, lens, depthTex: shifted });
+    // `squares`: also the sum of squared samples (how well the rays agree).
+    const [accY, wsum, accY2] = this.readChannels(acc, W, H, p.squares ? 3 : 2);
+    for (const t of [acc, base, vig, estimate, lens && lens.tex, shifted]) if (t) gl.deleteTexture(t);
+    return p.squares ? { accY, wsum, accY2 } : { accY, wsum };
   }
 
   // The whole full resolution render of core/superres.js on the GPU, from
