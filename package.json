@@ -24,7 +24,7 @@
   "build": {
     "appId": "com.illuminator.app",
     "productName": "ILLUMinator",
-    "copyright": "Copyright © AbstractPolygon, LLC",
+    "copyright": "Copyright \u00a9 AbstractPolygon, LLC",
     "files": [
       "app/**/*",
       "electron/**/*",
@@ -82,7 +82,12 @@
       "maintainer": "AbstractPolygon, LLC",
       "synopsis": "Lytro light field photo editor",
       "syncDesktopName": true,
-      "vendor": "AbstractPolygon, LLC"
+      "vendor": "AbstractPolygon, LLC",
+      "desktop": {
+        "Name": "ILLUMinator",
+        "Comment": "Lytro light field photo editor",
+        "Categories": "Graphics;Photography;"
+      }
     },
     "directories": {
       "output": "dist",
@@ -95,7 +100,12 @@
       "oneClick": false,
       "perMachine": true,
       "allowToChangeInstallationDirectory": true,
-      "buildUniversalInstaller": false
+      "buildUniversalInstaller": false,
+      "createStartMenuShortcut": true,
+      "createDesktopShortcut": false,
+      "include": "build/installer.nsh",
+      "shortcutName": "ILLUMinator",
+      "menuCategory": false
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },

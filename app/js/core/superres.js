@@ -347,6 +347,10 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       const px = Math.round(ox);
       const py = Math.round(oy);
       if (px < reach || py < reach || px >= W - reach || py >= H - reach) return;
+      // Visibility: a ray from a surface farther than the one the picture
+      // shows where it lands is hidden behind it, and would only mix far
+      // color into the edge of the near object, lens by lens.
+      if (allInFocus && depth && OCCLUSION.on && rayAlpha - sampleDepth(rayDepth, bw, bh, (ox / scale) * detail, (oy / scale) * detail) > OCCLUSION.tol) return;
       // Brightness estimate from this one color sample and the local color.
       const lp = py * W + px;
       const c = up[3 * lp + ch];
@@ -452,6 +456,10 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // which leaves a dotted pattern with the lens spacing. There the luma is
 // blended toward a blur of half a lens spacing, more the more the rays
 // disagree; the final sharpening comes after, so the pixels stay crisp.
+// Rays hidden behind a nearer surface at the pixel they land on are dropped
+// (see the visibility test in renderSuperRes); `tol` in depth units. Off: on
+// the turntable and fence photos it did not change the dotted edge pattern.
+export const OCCLUSION = { on: false, tol: 0.1 };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
 
 function smoothDisagreeing(y, dis, W, H, scale) {

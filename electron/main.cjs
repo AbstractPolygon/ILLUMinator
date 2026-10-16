@@ -6,6 +6,7 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, session, shell } = require('electron');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
+const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const camera = require('./camera.cjs');
 
@@ -406,6 +407,63 @@ function registerIpc() {
   });
 }
 
+// A Linux AppImage is one file that does not put itself in the applications
+// menu. The first time it runs the user is asked whether to add it (and a
+// desktop shortcut); .deb installs get their menu entry from the package.
+async function offerLinuxMenuEntry() {
+  const appImage = process.env.APPIMAGE;
+  if (process.platform !== 'linux' || !appImage || settings.menuEntry) return;
+  const res = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: 'ILLUMinator',
+    message: 'Add ILLUMinator to your applications menu?',
+    detail: 'This copies a launcher and an icon into your home folder; nothing outside it is changed. You can remove them by deleting illuminator.desktop from ~/.local/share/applications.',
+    buttons: ['Add to menu', 'Not now', 'Don\'t ask again'],
+    defaultId: 0,
+    cancelId: 1,
+    checkboxLabel: 'Also put a shortcut on the desktop',
+    checkboxChecked: false,
+  });
+  if (res.response === 2) {
+    settings.menuEntry = 'never';
+    await saveSettings();
+    return;
+  }
+  if (res.response !== 0) return;
+  try {
+    const home = app.getPath('home');
+    const dataHome = process.env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+    const iconDir = path.join(dataHome, 'icons', 'hicolor', 'scalable', 'apps');
+    await fsp.mkdir(iconDir, { recursive: true });
+    await fsp.writeFile(path.join(iconDir, 'illuminator.svg'), await fsp.readFile(path.join(APP_DIR, 'icon.svg')));
+    const entry = [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=ILLUMinator',
+      'Comment=Lytro light field photo editor',
+      `Exec="${appImage}" %F`,
+      'Icon=illuminator',
+      'Terminal=false',
+      'Categories=Graphics;Photography;',
+      'MimeType=image/x-lytro-lfr;image/x-lytro-lfp;',
+      'StartupWMClass=ILLUMinator',
+      '',
+    ].join('\n');
+    const appsDir = path.join(dataHome, 'applications');
+    await fsp.mkdir(appsDir, { recursive: true });
+    await fsp.writeFile(path.join(appsDir, 'illuminator.desktop'), entry, { mode: 0o755 });
+    if (res.checkboxChecked) {
+      const desktop = app.getPath('desktop');
+      await fsp.mkdir(desktop, { recursive: true });
+      await fsp.writeFile(path.join(desktop, 'ILLUMinator.desktop'), entry, { mode: 0o755 });
+    }
+    settings.menuEntry = 'added';
+    await saveSettings();
+  } catch (err) {
+    dialog.showErrorBox('ILLUMinator', `The menu entry could not be added: ${err.message}`);
+  }
+}
+
 app.whenReady().then(async () => {
   await loadSettings();
   protocol.handle('app', (request) => {
@@ -420,6 +478,7 @@ app.whenReady().then(async () => {
   registerIpc();
   buildMenu();
   createWindow();
+  win.once('ready-to-show', () => offerLinuxMenuEntry().catch(() => {}));
   if (CAMERA_IMPORT) pollCameras();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
