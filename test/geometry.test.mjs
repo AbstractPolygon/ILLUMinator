@@ -89,7 +89,9 @@ test('the camera lens distortion is corrected from the zoom step, more at longer
   assert.deepEqual(autoDistortion(2000), autoDistortion(479));
   assert.equal(autoDistortion(undefined), null);
   const mid = autoDistortion(190);
-  assert.ok(mid.k1 > autoDistortion(11).k1 && mid.k1 < autoDistortion(420).k1);
+  const lo = Math.min(autoDistortion(11).scale, autoDistortion(420).scale);
+  assert.ok(mid.scale > lo && mid.scale < Math.max(autoDistortion(11).scale, autoDistortion(420).scale));
+  assert.ok(tele.scale > wide.scale);
 });
 
 test('automatic lens correction leaves the middle alone and pulls the corners in', () => {

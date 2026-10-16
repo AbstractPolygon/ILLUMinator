@@ -41,20 +41,36 @@ export function edgeEase(zoomStep) {
   return 0.018 + 0.012 * t;
 }
 
-// { k1, k2, edge } for a camera at `zoomStep` (null: unknown camera or zoom).
-export function autoDistortion(zoomStep) {
-  if (!Number.isFinite(zoomStep)) return null;
-  const t = AUTO_DISTORTION;
-  const edge = edgeEase(zoomStep);
-  if (zoomStep <= t[0][0]) return { k1: t[0][1], k2: t[0][2], edge };
+// The picture is also a little smaller than the plain curve gives, and the
+// curve's shape is slightly off (fitted against Lytro Desktop with a scale
+// term, on 10 photos): zoom step, scale, then k1 and k2 to add.
+const DISTORTION_FIT = [
+  [-278, 0.0096, -0.0354, 0.0262],
+  [11, 0.014, -0.0257, 0.0141],
+  [159, 0.0166, -0.0624, 0.0482],
+  [420, 0.0333, -0.1351, 0.1233],
+  [479, 0.0361, -0.1444, 0.1332],
+];
+
+function interpolate(t, zoomStep, cols) {
+  if (zoomStep <= t[0][0]) return cols.map((c) => t[0][c]);
   for (let i = 1; i < t.length; i++) {
     if (zoomStep <= t[i][0]) {
       const a = (zoomStep - t[i - 1][0]) / (t[i][0] - t[i - 1][0]);
-      return { k1: t[i - 1][1] + a * (t[i][1] - t[i - 1][1]), k2: t[i - 1][2] + a * (t[i][2] - t[i - 1][2]), edge };
+      return cols.map((c) => t[i - 1][c] + a * (t[i][c] - t[i - 1][c]));
     }
   }
-  const last = t[t.length - 1];
-  return { k1: last[1], k2: last[2], edge };
+  return cols.map((c) => t[t.length - 1][c]);
+}
+
+// { scale, k1, k2, edge } for a camera at `zoomStep` (null: unknown camera or
+// zoom). The picture is scaled by 1 + scale and the source distance is
+// 1 + k1 r^2 + k2 r^4 + edge ease, as lensSource does.
+export function autoDistortion(zoomStep) {
+  if (!Number.isFinite(zoomStep)) return null;
+  const [k1, k2] = interpolate(AUTO_DISTORTION, zoomStep, [1, 2]);
+  const [scale, dk1, dk2] = interpolate(DISTORTION_FIT, zoomStep, [1, 2, 3]);
+  return { scale, k1: k1 + dk1, k2: k2 + dk2, edge: edgeEase(zoomStep) };
 }
 
 // `cam`: the camera's info (capture.zoomStep picks the automatic correction).
@@ -63,11 +79,12 @@ export function lensParams(s = {}, cam = null) {
   const vig = (s.vignetting || 0) / 100;
   const start = (((s.midpoint ?? 50) / 100)) * 0.9;
   const auto = s.auto !== false && cam && cam.capture ? autoDistortion(cam.capture.zoomStep) : null;
-  const k2 = auto ? auto.k2 : 0;
-  const kk = k + (auto ? auto.k1 : 0);
-  const edge = auto ? auto.edge : 0;
+  const sc = auto ? 1 + auto.scale : 1;
+  const k2 = auto ? auto.k2 / sc : 0;
+  const kk = (k + (auto ? auto.k1 : 0)) / sc;
+  const edge = auto ? auto.edge / sc : 0;
   if (!kk && !k2 && !vig) return null;
-  return { k: kk, k2, edge, zoom: k > 0 ? 1 / (1 + k) : 1, vig, start };
+  return { k: kk, k2, edge, zoom: (k > 0 ? 1 / (1 + k) : 1) * sc, vig, start };
 }
 
 // Source position (pixels) for output pixel center (x, y).
