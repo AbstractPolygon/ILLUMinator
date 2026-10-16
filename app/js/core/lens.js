@@ -37,7 +37,7 @@ const AUTO_DISTORTION = [
 // source distance past r = 0.75 (r in half diagonals), more at long zooms.
 export const EDGE_START = 0.75;
 export function edgeEase(zoomStep) {
-  const t = Math.min(1, Math.max(0, (zoomStep + 100) / 580));
+  const t = Math.min(1, Math.max(0, (Math.min(zoomStep, AUTO_DISTORTION[AUTO_DISTORTION.length - 1][0]) + 100) / 579));
   return 0.018 + 0.012 * t;
 }
 
