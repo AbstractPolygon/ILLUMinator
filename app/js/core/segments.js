@@ -384,9 +384,13 @@ export function flattenHalos(depth, objects, w, h, { minShare = 0.03, band = 45,
   for (const [label, ids] of pixels) {
     if (ids.length < minShare * n) continue;
     // Robust plane d = a x + b y + c (x, y in 0..1 of the picture).
-    let wts = new Float32Array(ids.length).fill(1);
-    let plane = [0, 0, 0];
-    let mad = 0;
+    // Start from the median depth, so the halo cannot tilt the first fit.
+    const start = Float32Array.from(ids, (i) => depth[i]).sort();
+    const median = start[start.length >> 1];
+    const spread = Float32Array.from(ids, (i) => Math.abs(depth[i] - median)).sort()[ids.length >> 1];
+    let wts = Float32Array.from(ids, (i) => (Math.abs(depth[i] - median) < Math.max(0.05, 2.5 * spread) ? 1 : 0.02));
+    let plane = [0, 0, median];
+    let mad = spread;
     for (let it = 0; it < 8; it++) {
       let sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, s1 = 0, sxd = 0, syd = 0, sd = 0;
       ids.forEach((i, k) => {
@@ -407,7 +411,7 @@ export function flattenHalos(depth, objects, w, h, { minShare = 0.03, band = 45,
       const res = ids.map((i) => Math.abs(depth[i] - (plane[0] * ((i % w) / w) + plane[1] * (Math.floor(i / w) / h) + plane[2])));
       const sorted = Float32Array.from(res).sort();
       mad = sorted[sorted.length >> 1];
-      const c = Math.max(1e-3, 2 * mad);
+      const c = Math.max(0.05, 2.5 * mad);
       wts = Float32Array.from(res, (r) => (r < c ? 1 : (c / r) ** 2));
     }
     if (mad > flat) continue;
