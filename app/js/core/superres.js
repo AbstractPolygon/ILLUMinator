@@ -13,6 +13,7 @@
 // by the offset under the lens: estimated from the picture itself, or (more
 // accurately, including main lens vignetting) from a white image.
 
+import { lensWarp } from './lens.js';
 import { lensRange, lensCenter } from './lenslet.js';
 
 const BINS = 17;
@@ -207,7 +208,7 @@ export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, s
 export function renderSuperRes(raw, cam, dev, sampler, options) {
   const {
     alpha = 0, allInFocus = false, u0 = 0, v0 = 0, apertureSigma = Infinity, scale = 3, vignetting: vg, base, depth,
-    depthTolerance = 0.12, onProgress, passes = 0, calibrate = false,
+    depthTolerance = 0.12, onProgress, passes = 0, calibrate = false, lens = null,
   } = options;
   let lensOffsets = options.lensOffsets || null;
   // The depth map the rays follow (edge snapping tries others).
@@ -216,6 +217,12 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   const { W, H, sigma, rUse, spreadRadius, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale, apertureSigma, sigma: options.sigma, aperture: options.aperture });
   const { grid: g } = sampler;
   const { width } = cam;
+  // The lens distortion is corrected where each ray lands, before the rays
+  // are combined (see core/lens.js lensWarp), so the picture comes out
+  // corrected without resampling it.
+  const warp = lensWarp(lens, W, H);
+  // Where a position in the uncorrected picture is in the corrected one.
+  const landing = (x, y) => (warp ? warp.forward(x + 0.5, y + 0.5).map((q) => q - 0.5) : [x, y]);
   const bw = options.baseW;
   const bh = options.baseH;
   // Color comes from the smooth standard render (upsampled), and only
@@ -229,11 +236,13 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   const upY = new Float32Array(W * H);
   const focus = new Float32Array(W * H);
   for (let j = 0; j < H; j++) {
-    const by = Math.min(bh - 1.001, Math.max(0, ((j + 0.5) / scale) * detail - 0.5));
-    const y0 = Math.floor(by);
-    const ay = by - y0;
     for (let k = 0; k < W; k++) {
-      const bx = Math.min(bw - 1.001, Math.max(0, ((k + 0.5) / scale) * detail - 0.5));
+      // The place in the uncorrected picture that this pixel shows.
+      const [sx, sy] = warp ? warp.source(k + 0.5, j + 0.5) : [k + 0.5, j + 0.5];
+      const by = Math.min(bh - 1.001, Math.max(0, (sy / scale) * detail - 0.5));
+      const y0 = Math.floor(by);
+      const ay = by - y0;
+      const bx = Math.min(bw - 1.001, Math.max(0, (sx / scale) * detail - 0.5));
       const x0 = Math.floor(bx);
       const ax = bx - x0;
       const p = j * W + k;
@@ -345,8 +354,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           rayAlpha = Math.abs(at(near) - near) <= RAY_DEPTH_TOLERANCE ? near : Math.max(a1, a2);
         }
       }
-      const ox = (lx - rayAlpha * du) * scale;
-      const oy = (ly - rayAlpha * dv) * scale;
+      let ox = (lx - rayAlpha * du) * scale;
+      let oy = (ly - rayAlpha * dv) * scale;
+      if (warp) [ox, oy] = warp.forward(ox + 0.5, oy + 0.5).map((q) => q - 0.5);
       const px = Math.round(ox);
       const py = Math.round(oy);
       if (px < reach || py < reach || px >= W - reach || py >= H - reach) return;
@@ -365,7 +375,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         if (lens < 0) return;
         const { cand, est, err } = probe;
         for (let k = 0; k < cand.length; k++) {
-          const e = yEst - sampleBilinear(est, W, H, (lx - rayAlpha * (du - cand[k][0])) * scale, (ly - rayAlpha * (dv - cand[k][1])) * scale);
+          const e = yEst - sampleBilinear(est, W, H, ...landing((lx - rayAlpha * (du - cand[k][0])) * scale, (ly - rayAlpha * (dv - cand[k][1])) * scale));
           err[lens * cand.length + k] += conf * e * e;
         }
         return;
@@ -426,7 +436,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   // what the result predicts for it. Damped, so noise is not amplified.
   // The lattice pattern is divided out before each pass too: otherwise the
   // passes, correcting toward samples that carry it, build it up.
-  const lattice = { g, xMin, yMin, unit, scale };
+  const lattice = { g, xMin, yMin, unit, scale, warp };
   for (let pass = 0; pass < passes; pass++) {
     removeLatticePattern(sharpY, upY, focus, wsum, W, H, lattice);
     const r = splat(sharpY, pass + 1);
@@ -436,7 +446,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     sumUp += upY[p];
     sumSharp += sharpY[p];
   }
-  const pattern = removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale });
+  const pattern = removeLatticePattern(sharpY, upY, focus, wsum, W, H, lattice);
   if (bestDis) {
     if (globalThis.__disStats) { const a = Float32Array.from(bestDis).sort(); globalThis.__disStats = [0.5, 0.75, 0.9, 0.95, 0.99].map((q) => a[Math.floor(q * (a.length - 1))]); }
     smoothDisagreeing(sharpY, bestDis, W, H, scale);
@@ -451,7 +461,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     out[3 * p + 1] = up[3 * p + 1] * k;
     out[3 * p + 2] = up[3 * p + 2] * k;
   }
-  return { width: W, height: H, rgb: out, pattern, lensOffsets };
+  return { width: W, height: H, rgb: out, pattern, lensOffsets, distortionCorrected: !!warp };
 }
 
 // Where the rays landing on a pixel disagree (an edge or a surface whose depth
@@ -749,13 +759,19 @@ export function latticeTables(sum, cnt, tx, ty) {
 // out, then divided out (blended between tile centers). Returns the
 // pattern's strength (relative standard deviation, whole picture) before
 // correction.
-function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale }) {
+function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, unit, scale, warp }) {
   const n = PHASE_BINS;
   const nn = n * n;
   const { tx, ty } = latticeTiles(W, H, { g, unit, scale });
   const sum = new Float64Array(tx * ty * nn);
   const cnt = new Float64Array(tx * ty * nn);
   const phase = (k, j) => {
+    // The lens grid's phase is that of the uncorrected position.
+    if (warp) {
+      const [sx, sy] = warp.source(k + 0.5, j + 0.5);
+      k = sx - 0.5;
+      j = sy - 0.5;
+    }
     const ly = yMin + (j / scale) * unit;
     const lx = xMin + (k / scale) * unit;
     const fj = ly / g.rowStep;

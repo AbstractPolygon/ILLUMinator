@@ -158,3 +158,63 @@ export function applyLens(rgb, w, h, p) {
   }
   return out;
 }
+
+// The lens correction as a position map, for correcting where each ray lands
+// before the rays are combined (rather than resampling the combined picture,
+// which blurs it): `source(x, y)` is lensSource; `forward(x, y)` its inverse,
+// from a position in the uncorrected picture to the corrected one.
+// Positions are pixel center coordinates (the first pixel's center is 0.5).
+// null when there is no distortion to correct.
+export function lensWarp(p, w, h) {
+  if (!p || !(p.k || p.k2 || p.edge || (p.zoom && p.zoom !== 1))) return null;
+  const cx = w / 2;
+  const cy = h / 2;
+  const R = Math.hypot(cx, cy);
+  const N = 4096;
+  const rMax = 1.4;
+  // Source radius at each corrected radius (monotonic), then the corrected
+  // radius at evenly spaced source radii.
+  const ratio = (r) => {
+    const r2 = r * r;
+    const e = r > EDGE_START ? (p.edge || 0) * ((r - EDGE_START) / (1 - EDGE_START)) ** 2 / r : 0;
+    return (1 + p.k * r2 + (p.k2 || 0) * r2 * r2 + e) * p.zoom;
+  };
+  const rs = new Float64Array(N + 1);
+  for (let i = 0; i <= N; i++) {
+    const r = (i / N) * rMax;
+    rs[i] = r * (i === 0 ? ratio(1e-6) : ratio(r));
+  }
+  const sMax = rs[N];
+  const inv = new Float64Array(N + 1);
+  let j = 0;
+  for (let i = 0; i <= N; i++) {
+    const target = (i / N) * sMax;
+    while (j < N - 1 && rs[j + 1] < target) j++;
+    const span = rs[j + 1] - rs[j] || 1;
+    inv[i] = ((j + (target - rs[j]) / span) / N) * rMax;
+  }
+  return {
+    source: (x, y) => lensSource(p, x, y, w, h),
+    forward(x, y) {
+      const dx = (x - cx) / R;
+      const dy = (y - cy) / R;
+      const r = Math.hypot(dx, dy);
+      if (r === 0) return [x, y];
+      const t = (r / sMax) * N;
+      let ro;
+      if (t >= N) ro = r * (inv[N] / sMax);
+      else {
+        const i = Math.floor(t);
+        ro = inv[i] + (inv[i + 1] - inv[i]) * (t - i);
+      }
+      const k = ro / r;
+      return [cx + dx * k * R, cy + dy * k * R];
+    },
+  };
+}
+
+// The same lens parameters with the distortion left out (it is already
+// corrected): only vignetting stays.
+export function withoutDistortion(p) {
+  return p ? { ...p, k: 0, k2: 0, edge: 0, zoom: 1 } : p;
+}

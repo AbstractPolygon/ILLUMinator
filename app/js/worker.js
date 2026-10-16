@@ -23,7 +23,7 @@ import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, l
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
-import { lensParams, applyLens } from './core/lens.js';
+import { lensParams, applyLens, withoutDistortion } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -219,10 +219,10 @@ function lensColumns() {
 
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
 // `cs`: the color pass to use (colorState), the photo's by default.
-function toPixels(rgb, w, h, ctx, cs = state) {
+function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
   rgb = applyDetail(rgb, w, h, detailForSize(state.detail, w, lensColumns()));
   rgb = subtractVeil(rgb, w, h, cs.veil, cs.veilAmount);
-  rgb = applyLens(rgb, w, h, cs.lens);
+  rgb = applyLens(rgb, w, h, distortionCorrected ? withoutDistortion(cs.lens) : cs.lens);
   const exposure = cs.baseExposure * Math.pow(2, cs.settings.ev);
   const f = cs.settings.defringe;
   const local = localFor(w, h, ctx);
@@ -656,7 +656,9 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
       return undefined;
     }
   }
-  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma }, (p) => progress('Rendering from the full sensor', p));
+  // Without the GPU the lens distortion is corrected as the rays are combined.
+  const cs = colorState(color);
+  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma, lens: state.gpu ? null : cs.lens }, (p) => progress('Rendering from the full sensor', p));
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);
@@ -665,14 +667,14 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   }
   if (dof > 0) progress('Applying depth of field', 1);
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
-  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) }, colorState(color));
+  const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) }, cs, sr.distortionCorrected);
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
 
 // renderSuperRes on the CPU (with GPU splats where available), measuring the
 // lens centers first if they are not known yet.
-async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma = Infinity }, onProgress) {
+async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma = Infinity, lens = null }, onProgress) {
   const { lf, dev, sampler } = state;
   if (state.gpu && !state.lensOffsets && allInFocus) {
     // The GPU measures them in its own render; drop the picture.
@@ -690,7 +692,7 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: sigma,
     scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
-    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus,
+    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus, lens,
     gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });
   state.lensOffsets = sr.lensOffsets;
