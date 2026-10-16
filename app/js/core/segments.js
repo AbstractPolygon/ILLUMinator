@@ -81,7 +81,7 @@ export function slic(lab, w, h, count = 2500, compactness = 8, iterations = 6) {
 
 // The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
 // picture's color (0..1, 3 per pixel). Returns new depths.
-export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.04 } = {}) {
+export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25 } = {}) {
   const n = w * h;
   const lab = new Float32Array(n * 3);
   for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
@@ -185,5 +185,103 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
   }
   const out = new Float32Array(n);
   for (let p = 0; p < n; p++) out[p] = cur[label[p]];
+  return edge > 0 ? smoothRamps(smoothSteps(out, lab, w, h, edge), lab, w, h, edge) : out;
+}
+
+// Depth edges (steps larger than `edge`) follow the superpixels' borders,
+// which are jagged. Within a few pixels of a step, each pixel takes the value
+// that carries the most weight in its 17 x 17 neighbourhood (nearer and
+// more alike in color counts more), so the step stays hard but its border
+// straightens. Everywhere else the depth is left as it is.
+const R = 8;
+const SIGMA = 4;
+export function smoothSteps(depth, lab, w, h, edge) {
+  const near = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if ((x + 1 < w && Math.abs(depth[p] - depth[p + 1]) > edge) || (y + 1 < h && Math.abs(depth[p] - depth[p + w]) > edge)) {
+        for (let dy = -R; dy <= R + 1; dy++) {
+          for (let dx = -R; dx <= R + 1; dx++) {
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx >= 0 && yy >= 0 && xx < w && yy < h) near[yy * w + xx] = 1;
+          }
+        }
+      }
+    }
+  }
+  const out = Float32Array.from(depth);
+  const vals = new Float32Array((2 * R + 1) ** 2);
+  const wts = new Float32Array((2 * R + 1) ** 2);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (!near[p]) continue;
+      let m = 0;
+      for (let dy = -R; dy <= R; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -R; dx <= R; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const q = yy * w + xx;
+          const dl = lab[3 * q] - lab[3 * p];
+          const da = lab[3 * q + 1] - lab[3 * p + 1];
+          const db = lab[3 * q + 2] - lab[3 * p + 2];
+          const wt = Math.exp(-(dx * dx + dy * dy) / (2 * SIGMA * SIGMA) - (dl * dl + da * da + db * db) / 400);
+          let k = 0;
+          while (k < m && Math.abs(vals[k] - depth[q]) > 1e-4) k++;
+          if (k === m) {
+            vals[m] = depth[q];
+            wts[m++] = 0;
+          }
+          wts[k] += wt;
+        }
+      }
+      let best = 0;
+      for (let k = 1; k < m; k++) if (wts[k] > wts[best]) best = k;
+      out[p] = vals[best];
+    }
+  }
+  return out;
+}
+
+// The superpixels turn a gradual change of depth into small square steps,
+// and square borders where an object's edge is not in the photo. Each depth
+// is averaged with its neighbours, counting those that look like it in the
+// photo (`lab`) and lie nearer, so depth follows the photo's own edges and
+// flows smoothly elsewhere. Neighbours more than `edge` away in depth (another
+// object across a step) do not count, so real hard steps stay hard.
+export function smoothRamps(depth, lab, w, h, edge, radius = 8, sigma = 4, colorSigma = 7) {
+  const out = new Float32Array(w * h);
+  const k = -1 / (2 * sigma * sigma);
+  const kc = -1 / (2 * colorSigma * colorSigma);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const d0 = depth[p];
+      let sum = 0;
+      let wsum = 0;
+      for (let dy = -radius; dy <= radius; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -radius; dx <= radius; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const q = yy * w + xx;
+          const d = depth[q];
+          if (Math.abs(d - d0) > edge) continue;
+          const dl = lab[3 * q] - lab[3 * p];
+          const da = lab[3 * q + 1] - lab[3 * p + 1];
+          const db = lab[3 * q + 2] - lab[3 * p + 2];
+          const wt = Math.exp(k * (dx * dx + dy * dy) + kc * (dl * dl + da * da + db * db));
+          sum += d * wt;
+          wsum += wt;
+        }
+      }
+      out[p] = sum / wsum;
+    }
+  }
   return out;
 }
