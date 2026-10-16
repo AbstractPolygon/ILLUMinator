@@ -70,6 +70,8 @@ function forEachLensPixel(g, cam, radius, fn, onProgress, lensStride = 1, win = 
   }
 }
 
+export const VIGNETTING = { floor: 0.3 };
+
 // Gain table { tilesX, tilesY, bins, rMax, gain } built from per-bin means.
 // From the picture itself use a single tile: the scene averages out over
 // ~200k lenses, but per-tile normalization would also flatten the scene.
@@ -104,8 +106,8 @@ export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1
       for (let ch = 0; ch < 3; ch++) {
         const k = (t * BINS * BINS + b) * 3 + ch;
         const center = mean[(t * BINS * BINS + midBin) * 3 + ch];
-        // Bins darker than 30% of their lens center are lens borders: unusable.
-        gain[k] = mean[k] > center * 0.3 ? ref[ch] / mean[k] : 0;
+        // Bins darker than this share of their lens center are lens borders: unusable.
+        gain[k] = mean[k] > center * VIGNETTING.floor ? ref[ch] / mean[k] : 0;
       }
     }
   }
