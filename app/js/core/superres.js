@@ -430,6 +430,19 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       return splatOnCpu(null, null, null, true);
     });
     rayDepth = depth;
+    if (globalThis.__focus) {
+      // Debug: how well the rays agree with the depth as is (lower: better focus).
+      const dis = rayDisagreement(renders[0], W, H);
+      let sum = 0;
+      let n = 0;
+      for (let y = Math.floor(H / 4); y < Math.floor((3 * H) / 4); y++) {
+        for (let x = Math.floor(W / 4); x < Math.floor((3 * W) / 4); x++) {
+          const q = y * W + x;
+          if (upY[q] > 0.02 && dis[q] < 9) { sum += dis[q]; n++; }
+        }
+      }
+      globalThis.__focus.val = n ? sum / n : NaN;
+    }
     bestDis = snapBlend(renders, upY, lambda, W, H, sharpY);
   }
   // Back-projection: correct the result by how far each raw sample is from
