@@ -336,3 +336,10 @@ test('depth cleanup: a near halo on a flat background is put back on the backgro
   assert.ok(Math.abs(out[10 * w + 24] + 1) < 0.05, 'halo gone');
   assert.equal(out[10 * w + 5], 1, 'the object is untouched');
 });
+
+test('auto white balance adds the blue and red Lytro Desktop adds, keeping brightness', async () => {
+  const { AUTO_WB_GAINS } = await import('../app/js/core/color.js');
+  const y = 0.2126 * AUTO_WB_GAINS[0] + 0.7152 * AUTO_WB_GAINS[1] + 0.0722 * AUTO_WB_GAINS[2];
+  assert.ok(Math.abs(y - 1) < 1e-9);
+  assert.ok(AUTO_WB_GAINS[2] / AUTO_WB_GAINS[1] > 1.05 && AUTO_WB_GAINS[2] / AUTO_WB_GAINS[1] < 1.09);
+});

@@ -17,7 +17,7 @@ import { pickObjects, signatures } from './core/objects.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
-import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance } from './core/color.js';
+import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, AUTO_WB_GAINS, solveWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
@@ -148,7 +148,7 @@ function updateColor() {
   const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
   const asShot = asShotKelvin();
   // Auto white balance replaces the manual temperature and tint.
-  const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const manual = s.autoWb ? AUTO_WB_GAINS : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = auto.map((g, i) => g * manual[i]);
   state.look = makeLook(s);
   state.detail = makeDetail(s);
@@ -190,7 +190,7 @@ function colorState(color) {
   const asShot = asShotKelvin();
   const m = state.centerMeans;
   const auto = s.autoWb ? m.map((v) => m[1] / v) : [1, 1, 1];
-  const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const manual = s.autoWb ? AUTO_WB_GAINS : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   const look = makeLook(s);
   if (state.pp) {
     const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
@@ -1376,7 +1376,7 @@ function updateProcessedColor() {
   state.centerMeans = channelMeans(center);
   const asShot = asShotKelvin();
   const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
-  const manual = s.autoWb ? [1, 1, 1] : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const manual = s.autoWb ? AUTO_WB_GAINS : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
   state.matrix = sat.map((v, i) => v * auto[i % 3] * manual[i % 3]);
   state.baseExposure = 1;

@@ -43,6 +43,15 @@ import { curveTable, curveAt } from './curve.js';
 
 export const DEFAULT_KELVIN = 5500;
 
+// Lytro Desktop's Auto white balance starts from the camera's own balance
+// and adds a little blue: measured on nine library photos set to Auto, its
+// pictures carry 7% more blue (relative to green) than the camera's gains
+// give, 2% more red; the spread between photos is about 4% (one photo, a red
+// shelf, is far off at 42%).
+const AUTO_EXTRA = [1.02, 1, 1.07];
+const AUTO_Y = 0.2126 * AUTO_EXTRA[0] + 0.7152 * AUTO_EXTRA[1] + 0.0722 * AUTO_EXTRA[2];
+export const AUTO_WB_GAINS = AUTO_EXTRA.map((g) => g / AUTO_Y);
+
 // The per-pixel adjustments, or null when they are all at zero.
 export function makeLook(settings = {}) {
   const tone = settings.tone || {};
