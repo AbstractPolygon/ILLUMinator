@@ -101,16 +101,12 @@ export async function decodePngGray(bytes) {
   return { width, height, data: out };
 }
 
-// Lytro's depth places the surfaces a little off where the rays from the
-// lenses meet: sweeping an offset (in lambda) over four photos, the rays
-// agree best at about -0.2 on three of them (-0.18, -0.2 and -0.2; the
-// fourth, a wide-open glass scene, preferred +0.2), and the detail then
-// matches Lytro Desktop's instead of coming out soft.
-export const LAMBDA_OFFSET = -0.2;
-
 // The user depth map as focus depth (alpha) on the sampler's output grid.
 // map: { width, height, data (0..1), min, max } in lambda.
-export function userDepthAlpha(map, sampler, cam) {
+// `offset` (in lambda) moves the whole map: Lytro's depth places surfaces a
+// little off where the rays from the lenses meet, by an amount that differs
+// from photo to photo (see core/superres.js estimateFocusOffset).
+export function userDepthAlpha(map, sampler, cam, offset = 0) {
   const { outW, outH } = sampler;
   const { width: W, height: H, data, min, max } = map;
   // Output position -> sensor position (sensorToOutput is affine).
@@ -133,7 +129,7 @@ export function userDepthAlpha(map, sampler, cam) {
       const fy = Y - y0;
       const q = y0 * W + x0;
       const g = (data[q] * (1 - fx) + data[q + 1] * fx) * (1 - fy) + (data[q + W] * (1 - fx) + data[q + W + 1] * fx) * fy;
-      alpha[y * outW + x] = (min + g * (max - min) + LAMBDA_OFFSET) * LAMBDA_TO_ALPHA;
+      alpha[y * outW + x] = (min + g * (max - min) + offset) * LAMBDA_TO_ALPHA;
     }
   }
   return alpha;

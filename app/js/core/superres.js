@@ -37,9 +37,14 @@ function tileWeights(table, x, y) {
 // fn(index, x, y, u, v, lensX, lensY, lensR, lensC), with (u, v) the offset
 // from the lens center along the grid axes and (lensX, lensY) the grid-local
 // lens position.
-function forEachLensPixel(g, cam, radius, fn, onProgress, lensStride = 1) {
+function forEachLensPixel(g, cam, radius, fn, onProgress, lensStride = 1, win = null) {
   const { width, height } = cam;
-  const { r0, r1, c0, c1 } = lensRange(g, width, height, g.pitch);
+  const range = lensRange(g, width, height, g.pitch);
+  // `win`: only the lenses of this range (rows r0..r1, columns c0..c1).
+  const r0 = win ? Math.max(range.r0, win.r0) : range.r0;
+  const r1 = win ? Math.min(range.r1, win.r1) : range.r1;
+  const c0 = win ? Math.max(range.c0, win.c0) : range.c0;
+  const c1 = win ? Math.min(range.c1, win.c1) : range.c1;
   const cos = Math.cos(g.rotation);
   const sin = Math.sin(g.rotation);
   const r2 = radius * radius;
@@ -292,13 +297,60 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     }
     return splatOnCpu(estimate, progress);
   };
+  if (options.probeFocus) return probeFocusOffset();
+
+  // How far the depth map is from where the rays meet (see
+  // estimateFocusOffset): the rays from the middle of the sensor are splatted
+  // with the depth shifted by each candidate (in lambda), and the offset
+  // where they agree best is taken (a parabola through the best three).
+  function probeFocusOffset() {
+    const { lambdaToAlpha, candidates } = options.probeFocus;
+    const range = lensRange(g, cam.width, cam.height, g.pitch);
+    const rm = (range.r0 + range.r1) / 2;
+    const cm = (range.c0 + range.c1) / 2;
+    const dr = (range.r1 - range.r0) / 4;
+    const dc = (range.c1 - range.c0) / 4;
+    const win = { r0: Math.floor(rm - dr), r1: Math.ceil(rm + dr), c0: Math.floor(cm - dc), c1: Math.ceil(cm + dc) };
+    const metrics = candidates.map((cand) => {
+      rayDepth = Float32Array.from(depth, (x) => x + cand * lambdaToAlpha);
+      const dis = rayDisagreement(splatOnCpu(null, null, null, true, win, 2), W, H);
+      let sum = 0;
+      let n = 0;
+      for (let y = Math.floor(H * 0.35); y < Math.floor(H * 0.65); y++) {
+        for (let x = Math.floor(W * 0.35); x < Math.floor(W * 0.65); x++) {
+          const q = y * W + x;
+          if (upY[q] > 0.02 && dis[q] < 9) {
+            sum += dis[q];
+            n++;
+          }
+        }
+      }
+      return n ? sum / n : Infinity;
+    });
+    rayDepth = depth;
+    let best = 0;
+    metrics.forEach((m, i) => {
+      if (m < metrics[best]) best = i;
+    });
+    let focusOffset = candidates[best];
+    if (best > 0 && best < candidates.length - 1) {
+      const [a, b, c] = [metrics[best - 1], metrics[best], metrics[best + 1]];
+      const denom = a - 2 * b + c;
+      if (denom > 0) {
+        const step = candidates[best] - candidates[best - 1];
+        focusOffset = Math.min(candidates[best + 1], Math.max(candidates[best - 1], candidates[best] - (step * (c - a)) / (2 * denom)));
+      }
+    }
+    return { focusOffset, metrics };
+  }
+
   const { accY, wsum } = splat(null, 0);
 
   // `probe`: instead of splatting, add up for every lens how far its samples
   // land from `probe.est` with its center moved by each candidate offset.
   // `squares`: also add up the squared samples (accY2), for how well the
   // rays landing on each pixel agree.
-  function splatOnCpu(estimate, progress, probe = null, squares = false) {
+  function splatOnCpu(estimate, progress, probe = null, squares = false, win = null, stride = 1) {
     const accY = new Float32Array(W * H);
     const wsum = new Float32Array(W * H);
     const accY2 = squares ? new Float32Array(W * H) : null;
@@ -395,7 +447,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           if (accY2) accY2[o] += yEst * yEst * w;
         }
       }
-    }, progress);
+    }, progress, stride, win);
     return { accY, wsum, accY2 };
   }
 
@@ -846,4 +898,17 @@ export function vignettingGainAt(vg, u, v) {
     const at = (x, y) => vg.gain[(y * n + x) * 3 + ch] || 0;
     return (at(x0, y0) * (1 - ax) + at(x0 + 1, y0) * ax) * (1 - ay) + (at(x0, y0 + 1) * (1 - ax) + at(x0 + 1, y0 + 1) * ax) * ay;
   });
+}
+
+// Where Lytro's depth map is off from where the rays from the lenses meet,
+// in lambda (shift the map by it): Lytro's depth places surfaces a little off,
+// by an amount that differs from photo to photo, and rays placed with it land
+// slightly out of focus and come out soft. Found from the middle of the
+// sensor at a coarse scale in a few seconds.
+export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, candidates = [-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
+  const r = renderSuperRes(raw, cam, dev, sampler, {
+    allInFocus: true, scale: 2, passes: 0, vignetting, base, baseW, baseH, depth, lensOffsets,
+    probeFocus: { lambdaToAlpha, candidates },
+  });
+  return r;
 }

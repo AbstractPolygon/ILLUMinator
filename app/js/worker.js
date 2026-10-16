@@ -10,6 +10,7 @@ import {
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
 import { userDepthAlpha } from './core/userdepth.js';
+import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
@@ -19,7 +20,7 @@ import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
-import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable } from './core/superres.js';
+import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
@@ -326,6 +327,7 @@ function rebuildSampler() {
   state.lensOffsets = lf.raw ? calibratedLensOffsets() : null;
   state.depth = null;
   state.depthRaw = null;
+  state.focusOffset = undefined;
   if (state.gpu) {
     state.vignetting = estimateVignetting(lf.raw, lf.cam, state.dev, lf.grid);
     const vg = state.vignetting;
@@ -631,6 +633,19 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   }
   if (!(await ensureDepth(id))) return { cancelled: true };
   const allInFocus = aperture <= 0;
+  // The depth is a little off from where this photo's rays meet (Lytro's by
+  // an amount that differs from photo to photo): find by how much, once per
+  // photo, and move the depth map by it.
+  if (allInFocus && state.depth && state.focusOffset === undefined) {
+    progress('Finding the focus', 0);
+    const probeBase = await allInFocusBase(id, u, v);
+    state.focusOffset = estimateFocusOffset(lf.raw, lf.cam, dev, sampler, {
+      base: probeBase, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
+      vignetting: state.vignetting, lensOffsets: state.lensOffsets, lambdaToAlpha: LAMBDA_TO_ALPHA,
+    }).focusOffset;
+    globalThis.__focusOffset = state.focusOffset;
+    applyDepthSmoothing();
+  }
   // Each lens's center is measured once per photo from an all-in-focus
   // render (core/superres.js LENS_CAL), then used by every render.
   if (!state.lensOffsets && !allInFocus) {
@@ -1086,7 +1101,10 @@ function applyDepthSmoothing() {
   const { outW, outH } = state.sampler;
   const guide = equalize(Float32Array.from(centerView()));
   const smooth = state.gpu ? state.gpu.smoothDepth.bind(state.gpu) : smoothDepth;
-  state.depth = { ...raw, alpha: smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence }) };
+  const smoothed = smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence });
+  // Moved by the focus offset found for this photo (see superRes).
+  const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA;
+  state.depth = { ...raw, alpha: shift ? Float32Array.from(smoothed, (x) => x + shift) : smoothed };
   state.depthSmoothingApplied = amount;
   state.gen++;
   if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
