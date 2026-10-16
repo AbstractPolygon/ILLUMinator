@@ -1,5 +1,5 @@
 // Object identification with MobileSAM (MIT license), run with ONNX Runtime
-// Web (vendored in app/vendor/ort). The two model files (about 45 MB) are
+// Web (vendored in app/vendor/ort, with WebGPU). The two model files (about 45 MB) are
 // downloaded once, when the setting is first turned on, and kept in the
 // browser's cache. Used for depth edges (core/objects.js, core/segments.js).
 
@@ -8,6 +8,14 @@ export const SEG_FILES = { encoder: 'mobile_sam_image_encoder.onnx', decoder: 's
 const CACHE = 'illuminator-models-v1';
 
 let loading = null;
+
+async function hasWebGpu() {
+  try {
+    return !!(typeof navigator !== 'undefined' && navigator.gpu && (await navigator.gpu.requestAdapter()));
+  } catch {
+    return false;
+  }
+}
 
 async function modelBytes(name, onProgress) {
   const url = MODEL_BASE + name;
@@ -49,14 +57,27 @@ async function modelBytes(name, onProgress) {
 // The model sessions; loaded once. `onProgress(stage, 0..1)`.
 export function loadSegModel(onProgress = () => {}) {
   loading ??= (async () => {
-    const ort = await import('../../vendor/ort/ort.wasm.min.mjs');
+    const ort = await import('../../vendor/ort/ort.webgpu.min.mjs');
     ort.env.wasm.wasmPaths = new URL('../../vendor/ort/', import.meta.url).href;
     ort.env.wasm.numThreads = 1;
     const enc = await modelBytes(SEG_FILES.encoder, (p) => onProgress('Downloading object model', p * 0.65));
     const dec = await modelBytes(SEG_FILES.decoder, (p) => onProgress('Downloading object model', 0.65 + p * 0.35));
     onProgress('Loading object model', 1);
-    const options = { executionProviders: ['wasm'] };
-    return { ort, encoder: await ort.InferenceSession.create(enc, options), decoder: await ort.InferenceSession.create(dec, options) };
+    // The image encoder is the heavy part: on the graphics card when there is
+    // one (WebGPU), else on the CPU. The small mask decoder stays on the CPU.
+    const cpu = { executionProviders: ['wasm'] };
+    let encoder = null;
+    let device = 'cpu';
+    if (await hasWebGpu()) {
+      try {
+        encoder = await ort.InferenceSession.create(enc, { executionProviders: ['webgpu'] });
+        device = 'gpu';
+      } catch {
+        encoder = null;
+      }
+    }
+    encoder ??= await ort.InferenceSession.create(enc, cpu);
+    return { ort, encoder, decoder: await ort.InferenceSession.create(dec, cpu), device };
   })().catch((e) => {
     loading = null;
     throw e;
