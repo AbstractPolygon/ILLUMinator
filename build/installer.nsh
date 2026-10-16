@@ -12,3 +12,12 @@ FunctionEnd
 !macro customUnInstall
   Delete "$DESKTOP\${PRODUCT_FILENAME}.lnk"
 !macroend
+
+; Install under Program Files (all users) by default, not the per-user
+; AppData folder; the user can still pick another folder on the directory page.
+!macro customInit
+  ${If} $INSTDIR == ""
+  ${OrIf} $INSTDIR == "$LOCALAPPDATA\Programs\${PRODUCT_FILENAME}"
+    StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCT_FILENAME}"
+  ${EndIf}
+!macroend
