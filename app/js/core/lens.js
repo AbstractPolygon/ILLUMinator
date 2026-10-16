@@ -112,6 +112,13 @@ export function lensGain(p, x, y, w, h) {
   return Math.max(0, 1 + 1.5 * p.vig * s);
 }
 
+// Catmull-Rom weights for the 4 samples around a point at fraction t.
+function catmullRom(t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return [(-t3 + 2 * t2 - t) / 2, (3 * t3 - 5 * t2 + 2) / 2, (-3 * t3 + 4 * t2 + t) / 2, (t3 - t2) / 2];
+}
+
 // rgb (w x h) through the lens correction, as a new array.
 export function applyLens(rgb, w, h, p) {
   if (!p) return rgb;
@@ -122,18 +129,30 @@ export function applyLens(rgb, w, h, p) {
       let sy = y + 0.5;
       if (p.k || p.k2) [sx, sy] = lensSource(p, sx, sy, w, h);
       const g = lensGain(p, sx, sy, w, h);
-      // Bilinear, between pixel centers.
+      // Catmull-Rom, between pixel centers: a bilinear lookup would blur the
+      // detail the render has just been given, wherever the correction moves
+      // the picture by a fraction of a pixel.
       const fx = Math.min(w - 1.001, Math.max(0, sx - 0.5));
       const fy = Math.min(h - 1.001, Math.max(0, sy - 0.5));
       const x0 = Math.floor(fx);
       const y0 = Math.floor(fy);
       const ax = fx - x0;
       const ay = fy - y0;
+      const wx = catmullRom(ax);
+      const wy = catmullRom(ay);
       const o = (y * w + x) * 3;
       for (let c = 0; c < 3; c++) {
-        const q = (y0 * w + x0) * 3 + c;
-        const v = (rgb[q] * (1 - ax) + rgb[q + 3] * ax) * (1 - ay) + (rgb[q + w * 3] * (1 - ax) + rgb[q + w * 3 + 3] * ax) * ay;
-        out[o + c] = v * g;
+        let v = 0;
+        for (let j = 0; j < 4; j++) {
+          const yy = Math.min(h - 1, Math.max(0, y0 - 1 + j));
+          let row = 0;
+          for (let i = 0; i < 4; i++) {
+            const xx = Math.min(w - 1, Math.max(0, x0 - 1 + i));
+            row += wx[i] * rgb[(yy * w + xx) * 3 + c];
+          }
+          v += wy[j] * row;
+        }
+        out[o + c] = Math.max(0, v) * g;
       }
     }
   }

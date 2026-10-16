@@ -836,17 +836,30 @@ uniform int uCurveOn;
 uniform float uCurve[65];  // tone curve table (core/curve.js)
 out vec4 outColor;
 
-// Bilinear between pixel centers (pos in pixels).
+// Catmull-Rom between pixel centers (pos in pixels): bilinear would blur the
+// detail wherever the lens correction moves the picture by part of a pixel.
+vec4 crWeights(float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return vec4(-t3 + 2.0 * t2 - t, 3.0 * t3 - 5.0 * t2 + 2.0, -3.0 * t3 + 4.0 * t2 + t, t3 - t2) * 0.5;
+}
 vec3 srcAt(vec2 pos) {
   ivec2 size = textureSize(uSrc, 0);
   vec2 f = clamp(pos - 0.5, vec2(0.0), vec2(size) - 1.001);
   ivec2 i = ivec2(floor(f));
   vec2 a = f - vec2(i);
-  vec3 c00 = texelFetch(uSrc, i, 0).rgb;
-  vec3 c10 = texelFetch(uSrc, i + ivec2(1, 0), 0).rgb;
-  vec3 c01 = texelFetch(uSrc, i + ivec2(0, 1), 0).rgb;
-  vec3 c11 = texelFetch(uSrc, i + ivec2(1, 1), 0).rgb;
-  return mix(mix(c00, c10, a.x), mix(c01, c11, a.x), a.y);
+  vec4 wx = crWeights(a.x);
+  vec4 wy = crWeights(a.y);
+  vec3 acc = vec3(0.0);
+  for (int j = 0; j < 4; j++) {
+    vec3 row = vec3(0.0);
+    for (int k = 0; k < 4; k++) {
+      ivec2 q = clamp(i + ivec2(k - 1, j - 1), ivec2(0), size - 1);
+      row += wx[k] * texelFetch(uSrc, q, 0).rgb;
+    }
+    acc += wy[j] * row;
+  }
+  return max(acc, vec3(0.0));
 }
 
 vec3 colorAt(ivec2 q) {
