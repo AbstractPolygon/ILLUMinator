@@ -270,6 +270,7 @@ section[id] { scroll-margin-top: 60px; }
 }
 
 /* Feature grid */
+.section-title { text-align: center; }
 .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 36px; }
 .features div { background: var(--bg); padding: 22px 22px 24px; }
 .features h3 { font-size: 18px; font-weight: 600; }
@@ -309,6 +310,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       <a href="#replace">Why ILLUMinator</a>
       <a href="#results">Results</a>
       <a href="#keyframes">Keyframes</a>
+      <a href="#features">Features</a>
       <a href="#library">Libraries</a>
       <a href="#download">Download</a>
       <a href="#about">About</a>
@@ -425,7 +427,12 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
         </div>
       </div>
       </div>
+  </div>
+</section>
 
+<section class="band" id="features">
+  <div class="wrap">
+    <h2 class="section-title">Features</h2>
     <div class="features">
       <div><h3>Colors &amp; Effects</h3><p>&ldquo;Living Filters&rdquo; from Lytro Desktop are imported as Local Adjustments you can keep editing.</p></div>
       <div><h3>Depth masks</h3><p>Select by distance instead of drawing: an adjustment covers just one slice of the scene, and can follow the focus as it moves.</p></div>
