@@ -191,7 +191,7 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
   if (!objects) return smoothRamps(smoothSteps(out, lab, w, h, edge), lab, w, h, edge);
   // With objects known, an outline (not the size of a step) is what keeps
   // two sides apart, so depth flows freely within each object.
-  return smoothRamps(snapToObjects(out, objects, w, h), lab, w, h, Infinity, objects, 8, 4, 10);
+  return smoothRamps(flattenHalos(snapToObjects(out, objects, w, h), objects, w, h), lab, w, h, Infinity, objects, 8, 4, 10);
 }
 
 // Depth edges (steps larger than `edge`) follow the superpixels' borders,
@@ -360,6 +360,79 @@ export function snapToObjects(depth, objects, w, h, inner = 10, reach = 24) {
           break;
         }
       }
+    }
+  }
+  return out;
+}
+
+// The out-of-focus glow around a near object makes the depth measured on the
+// background next to it come out too near: a halo. A large, flat object
+// (a wall, a floor, a table top) is fitted with a plane, robustly, so the
+// halo does not pull the fit; depth close to the object's outline that is
+// off the plane is put back on it. Objects that are not flat (the fit's
+// scatter is large) and small objects are left alone.
+export function flattenHalos(depth, objects, w, h, { minShare = 0.03, band = 45, off = 0.12, flat = 0.3 } = {}) {
+  const n = w * h;
+  const out = Float32Array.from(depth);
+  const pixels = new Map();
+  for (let i = 0; i < n; i++) {
+    const l = objects[i];
+    if (!l) continue;
+    if (!pixels.has(l)) pixels.set(l, []);
+    pixels.get(l).push(i);
+  }
+  for (const [label, ids] of pixels) {
+    if (ids.length < minShare * n) continue;
+    // Robust plane d = a x + b y + c (x, y in 0..1 of the picture).
+    let wts = new Float32Array(ids.length).fill(1);
+    let plane = [0, 0, 0];
+    let mad = 0;
+    for (let it = 0; it < 8; it++) {
+      let sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, s1 = 0, sxd = 0, syd = 0, sd = 0;
+      ids.forEach((i, k) => {
+        if (k % 3) return;
+        const x = (i % w) / w;
+        const y = Math.floor(i / w) / h;
+        const wt = wts[k];
+        sxx += wt * x * x; sxy += wt * x * y; sx += wt * x; syy += wt * y * y; sy += wt * y; s1 += wt;
+        sxd += wt * x * depth[i]; syd += wt * y * depth[i]; sd += wt * depth[i];
+      });
+      const det = (m) => m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+      const A = [sxx, sxy, sx, sxy, syy, sy, sx, sy, s1];
+      const D = det(A);
+      if (Math.abs(D) < 1e-9) break;
+      const col = (c, v) => { const m = A.slice(); m[c] = v[0]; m[c + 3] = v[1]; m[c + 6] = v[2]; return det(m) / D; };
+      const rhs = [sxd, syd, sd];
+      plane = [col(0, rhs), col(1, rhs), col(2, rhs)];
+      const res = ids.map((i) => Math.abs(depth[i] - (plane[0] * ((i % w) / w) + plane[1] * (Math.floor(i / w) / h) + plane[2])));
+      const sorted = Float32Array.from(res).sort();
+      mad = sorted[sorted.length >> 1];
+      const c = Math.max(1e-3, 2 * mad);
+      wts = Float32Array.from(res, (r) => (r < c ? 1 : (c / r) ** 2));
+    }
+    if (mad > flat) continue;
+    // Distance to the outline (to the nearest pixel of another object), roughly.
+    const near = new Uint8Array(n);
+    for (const i of ids) {
+      const x = i % w;
+      const y = (i - x) / w;
+      if ((x > 0 && objects[i - 1] !== label) || (x < w - 1 && objects[i + 1] !== label) || (y > 0 && objects[i - w] !== label) || (y < h - 1 && objects[i + w] !== label)) near[i] = 1;
+    }
+    const dist = new Float32Array(n).fill(Infinity);
+    const queue = [];
+    for (const i of ids) if (near[i]) { dist[i] = 0; queue.push(i); }
+    for (let head = 0; head < queue.length; head++) {
+      const i = queue[head];
+      if (dist[i] >= band) continue;
+      const x = i % w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < n - w ? i + w : -1]) {
+        if (j >= 0 && objects[j] === label && dist[j] === Infinity) { dist[j] = dist[i] + 1; queue.push(j); }
+      }
+    }
+    for (const i of ids) {
+      if (dist[i] > band) continue;
+      const p = plane[0] * ((i % w) / w) + plane[1] * (Math.floor(i / w) / h) + plane[2];
+      if (Math.abs(depth[i] - p) > off) out[i] = p;
     }
   }
   return out;

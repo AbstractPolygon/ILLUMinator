@@ -321,3 +321,18 @@ test('depth cleanup: depth reaches each object up to its outline', async () => {
   assert.ok(out[10 * w + 31] > 0.9, 'right object, right up to the outline');
   assert.ok(out[10 * w + 29] < -0.9, 'left object, right up to the outline');
 });
+
+test('depth cleanup: a near halo on a flat background is put back on the background plane', async () => {
+  const { flattenHalos } = await import('../app/js/core/segments.js');
+  const w = 80;
+  const h = 40;
+  const objects = new Uint32Array(w * h);
+  const depth = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    objects[y * w + x] = x < 20 ? 1 : 2; // 1: a near object on the left; 2: the wall
+    depth[y * w + x] = x < 20 ? 1 : x < 30 ? 0.6 : -1; // the wall has a glow of near depth next to the object
+  }
+  const out = flattenHalos(depth, objects, w, h, { minShare: 0.2 });
+  assert.ok(Math.abs(out[10 * w + 24] + 1) < 0.05, 'halo gone');
+  assert.equal(out[10 * w + 5], 1, 'the object is untouched');
+});
