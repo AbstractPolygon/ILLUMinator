@@ -31,19 +31,30 @@ const AUTO_DISTORTION = [
   [479, 0.072, -0.206],
 ];
 
-// { k1, k2 } for a camera at `zoomStep` (null: unknown camera or zoom).
+// The polynomial overshoots in the outermost fifth of the picture (measured
+// against Lytro Desktop on 9 photos: 8 to 20 pixels at the corners), so the
+// correction is eased off there: EDGE_EASE * ((r - 0.75) / 0.25)^2 / r more
+// source distance past r = 0.75 (r in half diagonals), more at long zooms.
+export const EDGE_START = 0.75;
+export function edgeEase(zoomStep) {
+  const t = Math.min(1, Math.max(0, (zoomStep + 100) / 580));
+  return 0.018 + 0.012 * t;
+}
+
+// { k1, k2, edge } for a camera at `zoomStep` (null: unknown camera or zoom).
 export function autoDistortion(zoomStep) {
   if (!Number.isFinite(zoomStep)) return null;
   const t = AUTO_DISTORTION;
-  if (zoomStep <= t[0][0]) return { k1: t[0][1], k2: t[0][2] };
+  const edge = edgeEase(zoomStep);
+  if (zoomStep <= t[0][0]) return { k1: t[0][1], k2: t[0][2], edge };
   for (let i = 1; i < t.length; i++) {
     if (zoomStep <= t[i][0]) {
       const a = (zoomStep - t[i - 1][0]) / (t[i][0] - t[i - 1][0]);
-      return { k1: t[i - 1][1] + a * (t[i][1] - t[i - 1][1]), k2: t[i - 1][2] + a * (t[i][2] - t[i - 1][2]) };
+      return { k1: t[i - 1][1] + a * (t[i][1] - t[i - 1][1]), k2: t[i - 1][2] + a * (t[i][2] - t[i - 1][2]), edge };
     }
   }
   const last = t[t.length - 1];
-  return { k1: last[1], k2: last[2] };
+  return { k1: last[1], k2: last[2], edge };
 }
 
 // `cam`: the camera's info (capture.zoomStep picks the automatic correction).
@@ -54,8 +65,9 @@ export function lensParams(s = {}, cam = null) {
   const auto = s.auto !== false && cam && cam.capture ? autoDistortion(cam.capture.zoomStep) : null;
   const k2 = auto ? auto.k2 : 0;
   const kk = k + (auto ? auto.k1 : 0);
+  const edge = auto ? auto.edge : 0;
   if (!kk && !k2 && !vig) return null;
-  return { k: kk, k2, zoom: k > 0 ? 1 / (1 + k) : 1, vig, start };
+  return { k: kk, k2, edge, zoom: k > 0 ? 1 / (1 + k) : 1, vig, start };
 }
 
 // Source position (pixels) for output pixel center (x, y).
@@ -66,7 +78,9 @@ export function lensSource(p, x, y, w, h) {
   const dx = (x - cx) / R;
   const dy = (y - cy) / R;
   const r2 = dx * dx + dy * dy;
-  const f = (1 + p.k * r2 + (p.k2 || 0) * r2 * r2) * p.zoom;
+  const r = Math.sqrt(r2);
+  const e = r > EDGE_START ? (p.edge || 0) * ((r - EDGE_START) / (1 - EDGE_START)) ** 2 / r : 0;
+  const f = (1 + p.k * r2 + (p.k2 || 0) * r2 * r2 + e) * p.zoom;
   return [cx + dx * f * R, cy + dy * f * R];
 }
 
