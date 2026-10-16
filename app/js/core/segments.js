@@ -156,10 +156,23 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
       while (parent[c] !== c) c = parent[c] = parent[parent[c]];
       return c;
     };
-    for (let i = 0; i < pairs.length; i += 3) {
-      const a = pairs[i];
-      const b = pairs[i + 1];
-      if (Math.abs(cur[a] - cur[b]) < plateau) parent[root(a)] = root(b);
+    // A plateau never spans more than `plateau` in depth, so a gradual ramp
+    // stays a ramp (in small steps) instead of chaining into one flat area.
+    const lo = Float64Array.from(cur);
+    const hi = Float64Array.from(cur);
+    const order = [];
+    for (let i = 0; i < pairs.length; i += 3) order.push(i);
+    order.sort((x, y) => Math.abs(cur[pairs[x]] - cur[pairs[x + 1]]) - Math.abs(cur[pairs[y]] - cur[pairs[y + 1]]));
+    for (const i of order) {
+      const a = root(pairs[i]);
+      const b = root(pairs[i + 1]);
+      if (a === b) continue;
+      const l = Math.min(lo[a], lo[b]);
+      const h = Math.max(hi[a], hi[b]);
+      if (h - l >= plateau) continue;
+      parent[a] = b;
+      lo[b] = l;
+      hi[b] = h;
     }
     const num = new Float64Array(k);
     const den = new Float64Array(k);

@@ -55,6 +55,7 @@ const state = {
   jobs: {},
   scratch: null,
 };
+if (globalThis.__fs) globalThis.__state = state; // test harnesses
 
 const VIEW_SCALE = 8192;
 
