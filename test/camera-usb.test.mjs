@@ -133,3 +133,25 @@ test('first generation parts become an LFP file the app can read', async () => {
   assert.equal(c.json.get(frame.metadataRef).image.width, 3280);
   assert.equal((await c.readSection(frame.imageRef)).length, raw.length);
 });
+
+test('a camera drive: firmware, serial and calibration folder', async () => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { driveInfo, pullDriveCalibration, scanVolume } = require('../electron/camera.cjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'illum-drive-'));
+  await fs.mkdir(path.join(root, 'MISC'));
+  await fs.mkdir(path.join(root, 'unitdata'));
+  await fs.mkdir(path.join(root, 'DCIM', '100PHOTO'), { recursive: true });
+  await fs.writeFile(path.join(root, 'DCIM', '100PHOTO', 'IMG_0001.LFR'), 'x');
+  await fs.writeFile(path.join(root, 'MISC', '.LYT_VER.inf'), JSON.stringify({ 'fw-version': '2.0.1' }));
+  await fs.writeFile(path.join(root, 'unitdata', 'unit_info.json'), JSON.stringify({ camera: { serialNumber: ' B5123 ' } }));
+  await fs.writeFile(path.join(root, 'unitdata', 'cal_file_manifest.json'), '{"calibrationFiles":[]}');
+  assert.deepEqual(await driveInfo(root), { firmware: '2.0.1', serial: 'B5123' });
+  const cam = await scanVolume(root);
+  assert.equal(cam.hasCalibration, true);
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'illum-cal-'));
+  const dest = await pullDriveCalibration(root, out);
+  assert.ok(dest.endsWith(path.join('cameras', 'B5123')));
+  assert.equal((await fs.readdir(dest)).sort().join(), 'cal_file_manifest.json,unit_info.json');
+});

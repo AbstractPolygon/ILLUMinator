@@ -86,7 +86,39 @@ async function scanVolume(root) {
     }
   }
   if (!files.length) return null;
-  return { id: `drive:${root}`, kind: 'drive', label: `Camera drive ${root}`, root, files };
+  const info = await driveInfo(root);
+  return { id: `drive:${root}`, kind: 'drive', label: `Camera drive ${root}`, root, files, info, hasCalibration: await isDir(path.join(root, CALIBRATION_FOLDER)) };
+}
+
+// An ILLUM shown as a drive keeps its factory calibration in <drive>/unitdata
+// (listed in cal_file_manifest.json) and its firmware in MISC/.LYT_VER.inf.
+const CALIBRATION_FOLDER = 'unitdata';
+
+async function readJson(file) {
+  try {
+    return JSON.parse(await fsp.readFile(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function driveInfo(root) {
+  const version = await readJson(path.join(root, 'MISC', '.LYT_VER.inf'));
+  const unit = await readJson(path.join(root, CALIBRATION_FOLDER, 'unit_info.json'));
+  return {
+    firmware: (version && (version['fw-version'] || version.fwVersion)) || null,
+    serial: (unit && unit.camera && String(unit.camera.serialNumber || '').trim()) || null,
+  };
+}
+
+// Copies the calibration folder of a camera drive to <destDir>/cameras/<serial>.
+async function pullDriveCalibration(root, destDir) {
+  const source = path.join(root, CALIBRATION_FOLDER);
+  if (!(await isDir(source))) throw new Error('This camera drive has no unitdata folder.');
+  const { serial } = await driveInfo(root);
+  const dest = path.join(destDir, 'cameras', serial || path.basename(root.replace(/[\\/]+$/, '')) || 'camera');
+  await fsp.cp(source, dest, { recursive: true });
+  return dest;
 }
 
 function run(cmd, args, timeout = 5000) {
@@ -370,4 +402,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
