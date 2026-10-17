@@ -324,6 +324,159 @@ export const DEPTH_FILL = { reach: 0.2, edge: 0.12, trust: 2 };
 // Region cleanup of high quality depth maps (core/segments.js).
 export const DEPTH_REGIONS = { on: true, count: 2500, compactness: 8, strength: 1, colorSigma: 8 };
 
+// View visibility (off unless `on`). Given a first depth, each view is asked
+// where it cannot see a pixel because a nearer surface is in the way. The
+// first depth is warped into the view (the nearest depth wins where several
+// land on one pixel, as in a z-buffer); a pixel is probably hidden when a
+// nearer one landed on its spot there. Each pixel then chooses between
+// "visible" (cost: how badly the view's color at the warped spot differs
+// from the center view's, plus a penalty when something nearer landed there)
+// and "hidden" (a fixed cost, higher when nothing nearer landed), and the
+// choices are smoothed in a few directions across the picture, less across
+// photo edges. The second measurement leaves hidden views out of each
+// pixel's match.
+export const DEPTH_VIS = { on: false, raw: false, color: 6, clip: 0.35, landed: 0.6, hidden: 0.25, margin: 0.06, smooth: 0.35, sigma: 0.04, rounds: 1 };
+
+export function viewVisibility(raw, views, alpha, guide, w, h, floor, { color, clip, landed, hidden, margin, smooth, sigma }) {
+  const n = w * h;
+  const centre = Math.floor(raw.length / 2);
+  const ref = raw[centre];
+  const masks = views.map(() => null);
+  views.forEach((view, k) => {
+    if (k === centre) return;
+    const lum = raw[k];
+    const zb = new Float32Array(n).fill(Infinity);
+    const target = new Int32Array(n).fill(-1);
+    const fx = new Float32Array(n);
+    const fy = new Float32Array(n);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const sx = x + alpha[i] * view.u * view.detail;
+        const sy = y + alpha[i] * view.v * view.detail;
+        fx[i] = sx;
+        fy[i] = sy;
+        const qx = Math.round(sx);
+        const qy = Math.round(sy);
+        if (qx < 0 || qy < 0 || qx >= w || qy >= h) continue;
+        const q = qy * w + qx;
+        target[i] = q;
+        if (alpha[i] < zb[q]) zb[q] = alpha[i];
+      }
+    }
+    const c0 = new Float32Array(n);
+    const c1 = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const q = target[i];
+      let diff = clip;
+      let o = 1;
+      if (q >= 0) {
+        o = zb[q] < alpha[i] - margin ? 1 : 0;
+        const sx = fx[i];
+        const sy = fy[i];
+        const x0 = Math.floor(sx);
+        const y0 = Math.floor(sy);
+        if (x0 >= 0 && y0 >= 0 && x0 + 1 < w && y0 + 1 < h) {
+          const ax = sx - x0;
+          const ay = sy - y0;
+          const b = y0 * w + x0;
+          const v = (lum[b] * (1 - ax) + lum[b + 1] * ax) * (1 - ay) + (lum[b + w] * (1 - ax) + lum[b + w + 1] * ax) * ay;
+          diff = Math.min(clip, Math.abs(v - ref[i]) / (0.5 * (v + ref[i]) + Math.sqrt(floor)));
+        }
+      }
+      c0[i] = color * diff + landed * o;
+      c1[i] = (1 - o) * landed + hidden;
+    }
+    masks[k] = smoothBinary(c0, c1, guide, w, h, smooth, sigma);
+  });
+  return masks;
+}
+
+// Two-label smoothing: sums along four directions of the cheapest way to
+// reach each label with a cost `smooth` for a change (less across edges).
+// Returns 1 where label 0 ("visible") is cheaper.
+function smoothBinary(c0, c1, guide, w, h, smooth, sigma) {
+  const n = w * h;
+  const t0 = new Float32Array(n);
+  const t1 = new Float32Array(n);
+  for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+    const L0 = new Float32Array(n);
+    const L1 = new Float32Array(n);
+    for (let yy = 0; yy < h; yy++) {
+      const y = dy < 0 ? h - 1 - yy : yy;
+      for (let xx = 0; xx < w; xx++) {
+        const x = dx < 0 ? w - 1 - xx : xx;
+        const i = y * w + x;
+        const px = x - dx;
+        const py = y - dy;
+        if (px < 0 || py < 0 || px >= w || py >= h) {
+          L0[i] = c0[i];
+          L1[i] = c1[i];
+          continue;
+        }
+        const j = py * w + px;
+        const edge = Math.abs(guide[i] - guide[j]);
+        const pen = smooth / (1 + (edge / sigma) ** 2);
+        const m = Math.min(L0[j], L1[j]);
+        L0[i] = c0[i] + Math.min(L0[j], L1[j] + pen) - m;
+        L1[i] = c1[i] + Math.min(L1[j], L0[j] + pen) - m;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      t0[i] += L0[i];
+      t1[i] += L1[i];
+    }
+  }
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) out[i] = t0[i] <= t1[i] ? 1 : 0;
+  return out;
+}
+
+// Like angularVarianceOf, but a view only counts at the pixels its mask
+// marks visible.
+function maskedVariance(lums, views, masks, w, h, alpha, floor, level) {
+  const sum = new Float32Array(w * h);
+  const sq = new Float32Array(w * h);
+  const cnt = new Float32Array(w * h);
+  views.forEach((view, k) => {
+    const lum = lums[k];
+    const mask = masks[k];
+    const sx = alpha * view.u * view.detail;
+    const sy = alpha * view.v * view.detail;
+    const ix = Math.floor(sx);
+    const iy = Math.floor(sy);
+    const ax = sx - ix;
+    const ay = sy - iy;
+    const x0 = Math.max(0, -ix);
+    const x1 = Math.min(w, w - ix - 1);
+    const y0 = Math.max(0, -iy);
+    const y1 = Math.min(h, h - iy - 1);
+    for (let y = y0; y < y1; y++) {
+      const src = (y + iy) * w + ix;
+      for (let x = x0; x < x1; x++) {
+        const d = y * w + x;
+        if (mask && !mask[d]) continue;
+        const s = src + x;
+        const v = (lum[s] * (1 - ax) + lum[s + 1] * ax) * (1 - ay) + (lum[s + w] * (1 - ax) + lum[s + w + 1] * ax) * ay;
+        sum[d] += v;
+        sq[d] += v * v;
+        cnt[d]++;
+      }
+    }
+  });
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < out.length; i++) {
+    const n = cnt[i];
+    if (n < 3) {
+      out[i] = 1e3;
+      continue;
+    }
+    const m = sum[i] / n;
+    out[i] = Math.max(0, sq[i] / n - m * m) / (level[i] * level[i] + floor);
+  }
+  return out;
+}
+
 // High quality: a second, coarse match on blurred views (local detail over
 // `detail` pixels after a `blur` box), used where the fine match is flat.
 // Far out-of-focus texture keeps no fine detail, so the fine match finds no
@@ -399,18 +552,30 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
   const guide = depthGuide(center);
   const coarse = refine && DEPTH_COARSE.on;
   // Best trial depth per pixel for one set of detail images.
-  const match = (lums, level, occl, win, from, span) => {
+  const match = (lums, level, occl, win, from, span, masks = null) => {
     // Higher score = better agreement.
     const scores = alphas.map((a, k) => {
       if (onProgress) onProgress(from + (span * k) / steps);
-      const variance = angularVariance(lums, views, width, height, a, minLevel, level, occl);
+      const variance = masks ? maskedVariance(lums, views, masks, width, height, a, minLevel, level) : angularVariance(lums, views, width, height, a, minLevel, level, occl);
       const cost = guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
       for (let i = 0; i < n; i++) cost[i] = -cost[i];
       return cost;
     });
     return bestDepth(scores, alphas, n);
   };
-  let measured = match(raw.map((l) => detailOf(l, width, height).detail), detailOf(center, width, height).local, occlusion, window, 0, coarse ? 0.6 : 1);
+  // With `raw`, views are compared as they are (flat, textureless objects
+  // then still tell a right depth from a wrong one) instead of by their
+  // local detail.
+  const detailImages = DEPTH_VIS.raw ? raw : raw.map((l) => detailOf(l, width, height).detail);
+  const centerLocal = DEPTH_VIS.raw ? Float32Array.from(center, (x) => Math.max(x, 0) ** 0.5) : detailOf(center, width, height).local;
+  let measured = match(detailImages, centerLocal, occlusion, window, 0, coarse ? 0.6 : 1);
+  if (DEPTH_VIS.on) {
+    for (let round = 0; round < DEPTH_VIS.rounds; round++) {
+      const first = finishDepth(measured, width, height, guide, { refine: true, min, max, color: depthColorGuide(Float32Array.from(views[Math.floor(views.length / 2)].rgb, (x) => x * views[Math.floor(views.length / 2)].gain)) }).alpha;
+      const masks = viewVisibility(raw, views, first, guide, width, height, minLevel, DEPTH_VIS);
+      measured = match(detailImages, centerLocal, occlusion, window, 0, coarse ? 0.6 : 1, masks);
+    }
+  }
   if (coarse) {
     const blurred = raw.map((l) => boxSum(l, width, height, DEPTH_COARSE.blur));
     const mid = blurred[Math.floor(blurred.length / 2)];
