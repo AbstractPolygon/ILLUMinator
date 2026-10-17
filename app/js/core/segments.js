@@ -380,17 +380,20 @@ export function snapToObjects(depth, objects, w, h, inner = 10, reach = 24) {
 // a thin near object (wires, rails, branches) dilutes its measured depth
 // towards the background, so the object's own pixels come out too far.
 // Pixels of the object further than that depth are put at it.
-export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3, thin: 0 };
+export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3, thin: 0, nearShare: 1, unify: false };
 
-export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3, thin = 0 } = {}) {
+export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3, thin = 0, nearShare = 1, unify = false } = {}) {
   const n = w * h;
   const out = Float32Array.from(depth);
+  // Only objects in the nearest `nearShare` of the picture are touched.
+  const cut = nearShare < 1 ? Float32Array.from(depth).sort()[Math.floor(nearShare * (n - 1))] : Infinity;
   const groups = new Map();
   for (let i = 0; i < n; i++) {
     const l = objects[i];
     if (!groups.has(l)) groups.set(l, []);
     groups.get(l).push(i);
   }
+  const picked = [];
   for (const idx of groups.values()) {
     const share = idx.length / n;
     if (share < min || share > max) continue;
@@ -408,7 +411,15 @@ export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, q
     }
     const sorted = idx.map((i) => depth[i]).sort((a, b) => a - b);
     const target = sorted[Math.floor(quantile * (sorted.length - 1))];
-    for (const i of idx) if (out[i] > target) out[i] = target;
+    if (target > cut) continue;
+    picked.push({ idx, target });
+  }
+  // Objects of one surface (a fence's wires) share a depth: the median of
+  // their own.
+  const common = unify && picked.length ? picked.map((o) => o.target).sort((a, b) => a - b)[Math.floor((picked.length - 1) / 2)] : null;
+  for (const { idx, target } of picked) {
+    const t = common === null ? target : Math.min(target, common);
+    for (const i of idx) if (out[i] > t) out[i] = t;
   }
   return out;
 }
