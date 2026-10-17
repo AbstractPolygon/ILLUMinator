@@ -372,7 +372,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
 <div class="tr"><span class="tb">├─</span><span class="tl">detail recovery</span><i>2 or 4 passes</i></div>
 <div class="tr"><span class="tb">├─</span><span class="tl">output size</span><i>2×, 3× or 4× the lens grid</i></div>
 <div class="tr"><span class="tb">├─</span><span class="tl">upscaling</span><i>AMD FSR 1, Lanczos or smooth, up to 4× more</i></div>
-<div class="tr"><span class="tb">├─</span><span class="tl">depth map</span><i>sharper, foreground edges kept clean</i></div>
+<div class="tr"><span class="tb">├─</span><span class="tl">depth map</span><i>sharper, foreground edges kept clean, optional object edges</i></div>
 <div class="tr"><span class="tb">├─</span><span class="tl">multi-view denoise</span><i>every view merged, weighted by depth</i></div>
 <div class="tr"><span class="tb">├─</span><span class="tl">spot removal</span><i>dust on the sensor or lens, hot and dead pixels</i></div>
 <div class="tr"><span class="tb">├─</span><span class="tl">lens correction</span><i>chromatic aberration, distortion, vignetting, flare</i></div>
@@ -447,6 +447,8 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       <div><h3>Export your way</h3><p>Video as WebM or MP4 with VP9, AV1, H.264 or H.265 at up to 40 Mbit/s; photos as lossless PNG or JPEG at the quality you choose. Both in 3D too: anaglyph, side by side, or for VR headsets like the Meta Quest 3.</p></div>
       <div><h3>Look under the lenses</h3><p>Zoom from the whole sensor down to single pixels under the microlenses, and see which pixels a full sensor render uses and how evenly they cover the picture at the current focus.</p></div>
       <div><h3>Dust &amp; speckle removal</h3><p>Fill in the faint dark spots dust leaves on the sensor or lens, despeckle small bright or dark specks, and fix hot, warm and dead pixels automatically, alongside luminance, color and multi-view noise reduction.</p></div>
+      <div><h3>Clean depth edges</h3><p>Depth maps with flat surfaces and hard steps where objects end, like Lytro Desktop&rsquo;s, instead of smeared ramps. An optional object finder puts the steps on the objects&rsquo; real outlines.</p></div>
+      <div><h3>Focus tuned per photo</h3><p>Each photo is checked for where its rays really meet, and the depth map is nudged to match, so full sensor renders come out sharper.</p></div>
       <div><h3>Lens corrections</h3><p>Remove chromatic aberration, distortion, vignetting and flare, automatically or by hand.</p></div>
       <div><h3>Camera calibration</h3><p>Import the calibration files from your camera in the desktop app.</p></div>
       <div><h3>Free to use</h3><p>For any purpose under the PolyForm Shield license.</p></div>
