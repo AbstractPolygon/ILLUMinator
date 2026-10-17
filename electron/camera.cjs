@@ -6,7 +6,8 @@
 //   - a USB mass storage drive holding DCIM/<nnn>PHOTO/IMG_xxxx.LFR (the
 //     ILLUM's card in a card reader); kind 'drive'.
 //   - Android debugging (hold AEL + Lytro while switching on), the route
-//     Lytro's own power tools used; needs adb installed; kind 'adb'.
+//     Lytro's own power tools used (the ILLUM runs Android; USB vendor
+//     0x24CF is in its adb_usb.ini); needs adb installed; kind 'adb'.
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -133,6 +134,28 @@ async function scanAdb() {
     if (files.length) cameras.push({ id: `adb:${serial}`, kind: 'adb', label: `Lytro camera (USB debugging, ${serial})`, serial, files });
   }
   return cameras;
+}
+
+// The ILLUM keeps its factory calibration in the `unitdata` folder (the
+// serial number is in unit_info.json); Lytro's power tools pulled it with
+// `adb pull unitdata`, after `adb root`. Returns the folder written.
+async function pullAdbCalibration(serial, destDir) {
+  const run1 = (args) => run(adbCommand(), ['-s', serial, ...args], 30000);
+  const info = await run1(['shell', 'cat', 'unitdata/unit_info.json']);
+  let camera = serial;
+  try {
+    camera = JSON.parse(info).camera.serialNumber.trim() || serial;
+  } catch {
+    // No readable unit info: file the data under the adb serial.
+  }
+  const dest = path.join(destDir, 'cameras', camera);
+  await fsp.mkdir(dest, { recursive: true });
+  await new Promise((resolve, reject) => {
+    const p = spawn(adbCommand(), ['-s', serial, 'pull', 'unitdata', dest]);
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`adb pull failed (${code}); the camera may need adb root`))));
+  });
+  return dest;
 }
 
 // Cameras reached over the camera's own USB protocol, kept open between
@@ -347,4 +370,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
