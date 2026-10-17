@@ -24,7 +24,7 @@
   "build": {
     "appId": "com.illuminator.app",
     "productName": "ILLUMinator",
-    "copyright": "Copyright \u00a9 AbstractPolygon, LLC",
+    "copyright": "Copyright © AbstractPolygon, LLC",
     "files": [
       "app/**/*",
       "electron/**/*",
@@ -112,5 +112,8 @@
   "devDependencies": {
     "electron": "44.4.5",
     "electron-builder": "26.16.1"
+  },
+  "optionalDependencies": {
+    "usb": "^2.16.0"
   }
 }

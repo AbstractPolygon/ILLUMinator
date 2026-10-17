@@ -1,0 +1,3 @@
+# Lets ILLUMinator talk to a Lytro camera over USB without root (Lytro, Inc.
+# is USB vendor 24cf). Copy to /etc/udev/rules.d/ and replug the camera.
+SUBSYSTEM=="usb", ATTR{idVendor}=="24cf", MODE="0666"

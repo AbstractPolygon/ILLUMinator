@@ -20,8 +20,9 @@ const POLL_MS = 3000;
 const FAST_POLL_MS = 1000;
 const FAST_POLL_FOR_MS = 20000;
 // Importing straight from a connected camera (as CAMERA_IMPORT in
-// app/js/platform.js): off until it works with real cameras.
-const CAMERA_IMPORT = false;
+// app/js/platform.js): over the camera's own USB protocol (first generation
+// cameras, see camera.cjs), from a camera drive, or with adb.
+const CAMERA_IMPORT = true;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },

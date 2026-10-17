@@ -4,15 +4,16 @@
 
 const LF_FILE = /\.(lfr|lfp|raw)$/i;
 
-// Importing straight from a connected camera (Import from camera…, USB
-// plug-in detection, the Camera section). Off until it works with real
-// cameras; photos are imported from a card reader or a copy of the card.
-export const CAMERA_IMPORT = false;
 
 // Lytro, Inc.'s USB vendor ID (as electron/camera.cjs).
 export const LYTRO_USB_VENDOR = 0x24cf;
 
 export const native = typeof window !== 'undefined' ? window.lytroNative || null : null;
+
+// Importing straight from a connected camera (Import from camera…, the
+// Camera section): in the desktop app, over USB (electron/camera.cjs). A
+// browser reads a card or a copy of it through a folder the user chooses.
+export const CAMERA_IMPORT = native !== null;
 
 function toArrayBuffer(u8) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);

@@ -1,15 +1,21 @@
-// Finds Lytro cameras connected over USB and imports their photos.
-//
-// The ILLUM appears as a USB mass storage drive holding DCIM/<nnn>PHOTO/
-// IMG_xxxx.LFR. Cameras with Android debugging enabled (hold AEL + Lytro
-// while switching on) can also be reached with adb, the route Lytro's own
-// power tools used; that needs adb installed.
+// Finds Lytro cameras connected over USB and imports their photos, three
+// ways:
+//   - the camera's own USB protocol (lytro-usb.cjs, lytro-protocol.cjs), the
+//     way the first generation camera is reached by Lytro Desktop; kind
+//     'lytro'. Not checked on the ILLUM, which may answer it too.
+//   - a USB mass storage drive holding DCIM/<nnn>PHOTO/IMG_xxxx.LFR (the
+//     ILLUM's card in a card reader); kind 'drive'.
+//   - Android debugging (hold AEL + Lytro while switching on), the route
+//     Lytro's own power tools used; needs adb installed; kind 'adb'.
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
+const { pathToFileURL } = require('node:url');
+const lytroUsb = require('./lytro-usb.cjs');
+const { LytroCamera } = require('./lytro-protocol.cjs');
 
 const LIGHT_FIELD = /\.(lfr|lfp)$/i;
 // Lytro, Inc.'s USB vendor ID (usb.ids), shared by its cameras.
@@ -129,15 +135,134 @@ async function scanAdb() {
   return cameras;
 }
 
+// Cameras reached over the camera's own USB protocol, kept open between
+// scans (asking a camera for its picture list over and over upsets it):
+// device key -> { entry, close } or { failed } when it could not be used.
+const usbCameras = new Map();
+const usbLog = [];
+const log = (line) => {
+  usbLog.push(`${new Date().toISOString()} ${line}`);
+  if (usbLog.length > 400) usbLog.shift();
+};
+
+async function openUsbCamera(found) {
+  try {
+    const { camera, close, product } = await lytroUsb.connect(found, log);
+    const info = await camera.hardwareInfo();
+    log(`hardware info: ${JSON.stringify(info)}`);
+    const pictures = await camera.pictureList();
+    log(`${pictures.length} pictures`);
+    const label = `Lytro camera${info.serial ? ` ${info.serial}` : ''} (USB)`;
+    const entry = {
+      id: `lytro:${found.key}`,
+      kind: 'lytro',
+      label,
+      info,
+      product,
+      camera,
+      pictures,
+      files: pictures.map((p) => ({ id: p.id, name: p.name, folder: p.folder, size: 0 })),
+    };
+    return { entry, close };
+  } catch (err) {
+    log(`failed: ${err.message}`);
+    return { failed: err.message, at: Date.now() };
+  }
+}
+
+const USB_RETRY_MS = 30000;
+
+async function scanLytroUsb() {
+  const present = lytroUsb.listDevices();
+  const keys = new Set(present.map((d) => d.key));
+  for (const [key, c] of usbCameras) {
+    if (!keys.has(key)) {
+      if (c.close) await c.close();
+      usbCameras.delete(key);
+    }
+  }
+  const out = [];
+  for (const found of present) {
+    let c = usbCameras.get(found.key);
+    if (!c || (c.failed && Date.now() - c.at > USB_RETRY_MS)) {
+      c = await openUsbCamera(found);
+      usbCameras.set(found.key, c);
+    }
+    if (c.entry) out.push(c.entry);
+  }
+  return out;
+}
+
+// What went wrong the last time a Lytro on USB could not be used, if it is
+// plugged in, and the protocol log (for sending in).
+function usbProblems() {
+  return [...usbCameras.values()].filter((c) => c.failed).map((c) => c.failed);
+}
+
+function usbDiagnostics() {
+  return usbLog.join('\n');
+}
+
 // All connected cameras: [{ id, kind, label, files: [{ id, name, size }] }].
 // `roots` overrides the drive locations (tests).
-async function listCameras({ roots, adb = true } = {}) {
+async function listCameras({ roots, adb = true, lytro = true } = {}) {
   const drives = [];
   for (const root of roots || (await volumeRoots())) {
     const cam = await scanVolume(root);
     if (cam) drives.push(cam);
   }
-  return drives.concat(adb ? await scanAdb() : []);
+  const usbFound = lytro ? await scanLytroUsb() : [];
+  return usbFound.concat(drives, adb ? await scanAdb() : []);
+}
+
+// An LFP file from the three parts a first generation camera hands out for
+// a picture: RAW (sensor data), TXT (metadata, JSON) and 128 (thumbnail).
+async function assembleLfp({ raw, txt }) {
+  const lfp = await import(pathToFileURL(path.join(__dirname, '..', 'app', 'js', 'core', 'lfp.js')).href);
+  const parsed = JSON.parse(txt.toString('utf8').replace(/\0+$/, ''));
+  const metadata = parsed.metadata || parsed;
+  const privateMetadata = parsed.privateMetadata || parsed.private || {};
+  const metaBytes = lfp.encodeJson(metadata);
+  const privBytes = lfp.encodeJson(privateMetadata);
+  const rawBytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.length);
+  const toc = {
+    picture: {
+      frameArray: [{
+        frame: {
+          metadataRef: await lfp.refFor(metaBytes),
+          privateMetadataRef: await lfp.refFor(privBytes),
+          imageRef: await lfp.refFor(rawBytes),
+        },
+      }],
+    },
+  };
+  const { bytes } = await lfp.writeContainer([
+    { type: 'LFC', data: metaBytes },
+    { type: 'LFC', data: privBytes },
+    { type: 'LFC', data: rawBytes },
+    { type: 'LFM', data: lfp.encodeJson(toc) },
+  ]);
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+}
+
+// A picture off a camera on its own USB protocol: the ILLUM's single
+// .LFR file where the camera has one (tried first when it is not the first
+// generation), else the first generation's parts, put together as a .LFP.
+async function downloadLytroPicture(entry, file) {
+  const pic = entry.pictures.find((p) => p.id === file.id);
+  if (!pic) throw new Error('That picture is no longer on the camera.');
+  const cam = entry.camera;
+  const firstGeneration = entry.product === lytroUsb.FIRST_GENERATION_PRODUCT;
+  if (!firstGeneration) {
+    try {
+      return { name: `${pic.folder}_${pic.name}.LFR`, data: await cam.download('file', LytroCamera.pathOf(pic, 'LFR')) };
+    } catch (err) {
+      log(`no .LFR file for ${pic.name}: ${err.message}`);
+    }
+  }
+  const raw = await cam.download('file', LytroCamera.pathOf(pic, 'RAW'));
+  const txt = await cam.download('file', LytroCamera.pathOf(pic, 'TXT'));
+  return { name: `${pic.folder}_${pic.name}.lfp`, data: await assembleLfp({ raw, txt }) };
 }
 
 function copyWithProgress(src, dest, onBytes) {
@@ -181,6 +306,15 @@ async function importFiles(camera, fileIds, destDir, onProgress = () => {}) {
     }
     if (existing && existing.size === f.size) {
       done += f.size;
+    } else if (camera.kind === 'lytro') {
+      onProgress({ file: f.name, index: i, count: files.length, bytes: done, total });
+      const got = await downloadLytroPicture(camera, f);
+      const out = path.join(destDir, got.name);
+      await fsp.writeFile(`${out}.part`, got.data);
+      await fsp.rename(`${out}.part`, out);
+      imported.push(out);
+      onProgress({ file: f.name, index: i + 1, count: files.length, bytes: done, total });
+      continue;
     } else if (camera.kind === 'adb') {
       onProgress({ file: f.name, index: i, count: files.length, bytes: done, total });
       await adbPull(camera.serial, f.id, dest);
@@ -213,4 +347,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
