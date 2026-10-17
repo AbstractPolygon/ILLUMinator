@@ -477,6 +477,82 @@ function maskedVariance(lums, views, masks, w, h, alpha, floor, level) {
   return out;
 }
 
+// Cross-based cost aggregation (off unless `on`): every pixel gets a
+// horizontal and vertical "arm" in each direction that runs along pixels of
+// a similar color (at most `arm` long, and past `long` only while the color
+// stays within the tighter `tau2`); its support region is every pixel
+// reached by a vertical arm from a pixel on its horizontal arms. A cost is
+// averaged over that region, so a flat object's interior takes its depth from
+// the object's textured edges, and never from the other side of the edge.
+export const DEPTH_CBCA = { on: false, arm: 24, long: 8, tau: 0.1, tau2: 0.05 };
+
+export function crossArms(color, w, h, { arm = 24, long = 8, tau = 0.1, tau2 = 0.05 } = {}) {
+  const n = w * h;
+  const left = new Uint8Array(n);
+  const right = new Uint8Array(n);
+  const up = new Uint8Array(n);
+  const down = new Uint8Array(n);
+  const diff = (i, j) => Math.max(Math.abs(color[3 * i] - color[3 * j]), Math.abs(color[3 * i + 1] - color[3 * j + 1]), Math.abs(color[3 * i + 2] - color[3 * j + 2]));
+  const reach = (i, step, room) => {
+    let k = 0;
+    while (k < Math.min(arm, room)) {
+      const j = i + step * (k + 1);
+      const d = diff(i, j);
+      const prev = diff(j, i + step * k);
+      if (d >= (k + 1 > long ? tau2 : tau) || prev >= tau) break;
+      k++;
+    }
+    return k;
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      left[i] = reach(i, -1, x);
+      right[i] = reach(i, 1, w - 1 - x);
+      up[i] = reach(i, -w, y);
+      down[i] = reach(i, w, h - 1 - y);
+    }
+  }
+  return { left, right, up, down, w, h };
+}
+
+// Mean of `cost` over each pixel's support region.
+export function crossAggregate(cost, arms) {
+  const { left, right, up, down, w, h } = arms;
+  const n = w * h;
+  // Vertical sums over each pixel's own vertical arm (column prefix sums).
+  const col = new Float64Array((h + 1) * w);
+  for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) col[(y + 1) * w + x] = col[y * w + x] + cost[y * w + x];
+  const vs = new Float32Array(n);
+  const vc = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const a = y - up[i];
+      const b = y + down[i] + 1;
+      vs[i] = col[b * w + x] - col[a * w + x];
+      vc[i] = b - a;
+    }
+  }
+  // Then along each pixel's horizontal arm.
+  const out = new Float32Array(n);
+  const rowS = new Float64Array(w + 1);
+  const rowC = new Float64Array(w + 1);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      rowS[x + 1] = rowS[x] + vs[y * w + x];
+      rowC[x + 1] = rowC[x] + vc[y * w + x];
+    }
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const a = x - left[i];
+      const b = x + right[i] + 1;
+      out[i] = (rowS[b] - rowS[a]) / Math.max(1, rowC[b] - rowC[a]);
+    }
+  }
+  return out;
+}
+
 // High quality: a second, coarse match on blurred views (local detail over
 // `detail` pixels after a `blur` box), used where the fine match is flat.
 // Far out-of-focus texture keeps no fine detail, so the fine match finds no
@@ -551,13 +627,14 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
   const minLevel = brightnessFloor(center);
   const guide = depthGuide(center);
   const coarse = refine && DEPTH_COARSE.on;
+  const arms = DEPTH_CBCA.on ? crossArms(depthColorGuide(Float32Array.from(views[Math.floor(views.length / 2)].rgb, (x) => x * views[Math.floor(views.length / 2)].gain)), width, height, DEPTH_CBCA) : null;
   // Best trial depth per pixel for one set of detail images.
   const match = (lums, level, occl, win, from, span, masks = null) => {
     // Higher score = better agreement.
     const scores = alphas.map((a, k) => {
       if (onProgress) onProgress(from + (span * k) / steps);
       const variance = masks ? maskedVariance(lums, views, masks, width, height, a, minLevel, level) : angularVariance(lums, views, width, height, a, minLevel, level, occl);
-      const cost = guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
+      const cost = arms ? crossAggregate(variance, arms) : guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
       for (let i = 0; i < n; i++) cost[i] = -cost[i];
       return cost;
     });
