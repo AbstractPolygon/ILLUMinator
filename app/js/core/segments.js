@@ -380,9 +380,9 @@ export function snapToObjects(depth, objects, w, h, inner = 10, reach = 24) {
 // a thin near object (wires, rails, branches) dilutes its measured depth
 // towards the background, so the object's own pixels come out too far.
 // Pixels of the object further than that depth are put at it.
-export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3 };
+export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3, thin: 0 };
 
-export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3 } = {}) {
+export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3, thin = 0 } = {}) {
   const n = w * h;
   const out = Float32Array.from(depth);
   const groups = new Map();
@@ -394,6 +394,18 @@ export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, q
   for (const idx of groups.values()) {
     const share = idx.length / n;
     if (share < min || share > max) continue;
+    if (thin > 0) {
+      // Only long thin objects: area over outline length is their average
+      // half width, in pixels.
+      let outline = 0;
+      for (const i of idx) {
+        const x = i % w;
+        const y = (i - x) / w;
+        const l = objects[i];
+        if ((x > 0 && objects[i - 1] !== l) || (x < w - 1 && objects[i + 1] !== l) || (y > 0 && objects[i - w] !== l) || (y < h - 1 && objects[i + w] !== l)) outline++;
+      }
+      if (idx.length / Math.max(1, outline) > thin) continue;
+    }
     const sorted = idx.map((i) => depth[i]).sort((a, b) => a - b);
     const target = sorted[Math.floor(quantile * (sorted.length - 1))];
     for (const i of idx) if (out[i] > target) out[i] = target;
