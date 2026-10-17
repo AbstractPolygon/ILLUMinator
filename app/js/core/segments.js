@@ -380,9 +380,9 @@ export function snapToObjects(depth, objects, w, h, inner = 10, reach = 24) {
 // a thin near object (wires, rails, branches) dilutes its measured depth
 // towards the background, so the object's own pixels come out too far.
 // Pixels of the object further than that depth are put at it.
-export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3, thin: 0, nearShare: 1, unify: false };
+export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3, thin: 0, nearShare: 1, unify: false, reach: 0 };
 
-export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3, thin = 0, nearShare = 1, unify = false } = {}) {
+export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3, thin = 0, nearShare = 1, unify = false, reach = 0 } = {}) {
   const n = w * h;
   const out = Float32Array.from(depth);
   // Only objects in the nearest `nearShare` of the picture are touched.
@@ -417,9 +417,29 @@ export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, q
   // Objects of one surface (a fence's wires) share a depth: the median of
   // their own.
   const common = unify && picked.length ? picked.map((o) => o.target).sort((a, b) => a - b)[Math.floor((picked.length - 1) / 2)] : null;
+  // With `reach`, only pixels within that many pixels of a measured near
+  // pixel (the nearest `nearShare` of the picture) are changed: the blur of a
+  // near object reaches that far, further out nothing was seen of it.
+  let close = null;
+  if (reach > 0 && Number.isFinite(cut)) {
+    const near = new Uint8Array(n);
+    for (let i = 0; i < n; i++) near[i] = depth[i] <= cut ? 1 : 0;
+    const spread = (src, step, len) => {
+      const dst = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        if (!src[i]) continue;
+        const pos = step === 1 ? i % w : Math.floor(i / w);
+        const lo = Math.max(0, pos - reach);
+        const hi = Math.min(len - 1, pos + reach);
+        for (let k = lo; k <= hi; k++) dst[i + (k - pos) * step] = 1;
+      }
+      return dst;
+    };
+    close = spread(spread(near, 1, w), w, h);
+  }
   for (const { idx, target } of picked) {
     const t = common === null ? target : Math.min(target, common);
-    for (const i of idx) if (out[i] > t) out[i] = t;
+    for (const i of idx) if (out[i] > t && (!close || close[i])) out[i] = t;
   }
   return out;
 }
