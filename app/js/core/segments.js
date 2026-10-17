@@ -83,7 +83,7 @@ export function slic(lab, w, h, count = 2500, compactness = 8, iterations = 6) {
 
 // The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
 // picture's color (0..1, 3 per pixel). Returns new depths.
-export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, objects = null } = {}) {
+export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, snap = 0.05, snapPasses = 2, guide = { radius: 5, eps: 0.003 }, objects = null } = {}) {
   const n = w * h;
   const lab = new Float32Array(n * 3);
   for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
@@ -188,7 +188,16 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
   const out = new Float32Array(n);
   for (let p = 0; p < n; p++) out[p] = cur[label[p]];
   if (!(edge > 0)) return out;
-  if (!objects) return smoothRamps(smoothSteps(out, lab, w, h, edge), lab, w, h, edge);
+  if (!objects) {
+    // Steps (any visible one) are put on the photo's edges by a vote among
+    // like colored neighbours, twice so the border straightens, then
+    // gradual changes are smoothed.
+    let d = out;
+    d = layerSnap(d, lab, w, h);
+    for (let i = 0; i < snapPasses; i++) d = colorMedian(d, lab, w, h);
+    d = smoothRamps(d, lab, w, h, edge);
+    return guide ? guidedFilter(d, lab, w, h, guide.radius, guide.eps) : d;
+  }
   // With objects known, an outline (not the size of a step) is what keeps
   // two sides apart, so depth flows freely within each object.
   return smoothRamps(flattenHalos(snapToObjects(out, objects, w, h), objects, w, h), lab, w, h, Infinity, objects, 8, 4, 10);
@@ -238,7 +247,7 @@ export function smoothSteps(depth, lab, w, h, edge, objects = null) {
           const dl = lab[3 * q] - lab[3 * p];
           const da = lab[3 * q + 1] - lab[3 * p + 1];
           const db = lab[3 * q + 2] - lab[3 * p + 2];
-          const wt = Math.exp(-(dx * dx + dy * dy) / (2 * SIGMA * SIGMA) - (dl * dl + da * da + db * db) / 400 - (objects ? OBJECT_COST * signatureDistance(objects[p], objects[q]) : 0));
+          const wt = Math.exp(-(dx * dx + dy * dy) / (2 * SIGMA * SIGMA) - (dl * dl + da * da + db * db) / 150 - (objects ? OBJECT_COST * signatureDistance(objects[p], objects[q]) : 0));
           let k = 0;
           while (k < m && Math.abs(vals[k] - depth[q]) > 1e-4) k++;
           if (k === m) {
@@ -437,6 +446,194 @@ export function flattenHalos(depth, objects, w, h, { minShare = 0.03, band = 45,
       if (dist[i] > band) continue;
       const p = plane[0] * ((i % w) / w) + plane[1] * (Math.floor(i / w) / h) + plane[2];
       if (Math.abs(depth[i] - p) > off) out[i] = p;
+    }
+  }
+  return out;
+}
+
+// Box mean over a (2r + 1) square, edges clamped (summed area table).
+function boxMean(a, w, h, r) {
+  const sat = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += a[y * w + x];
+      sat[(y + 1) * (w + 1) + x + 1] = sat[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r);
+    const y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r);
+      const x1 = Math.min(w, x + r + 1);
+      out[y * w + x] = (sat[y1 * (w + 1) + x1] - sat[y0 * (w + 1) + x1] - sat[y1 * (w + 1) + x0] + sat[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+    }
+  }
+  return out;
+}
+
+// Guided filter (He et al.): each depth becomes a local linear function of
+// the photo's brightness (the Lab L channel in `lab`, 0..1 here), so depth
+// edges lie on the photo's edges and follow them smoothly, instead of
+// following the staircase of the regions.
+export function guidedFilter(depth, lab, w, h, r = 6, eps = 0.004) {
+  const n = w * h;
+  const I = new Float32Array(n);
+  for (let i = 0; i < n; i++) I[i] = lab[3 * i] / 100;
+  const II = new Float32Array(n);
+  const Ip = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    II[i] = I[i] * I[i];
+    Ip[i] = I[i] * depth[i];
+  }
+  const mI = boxMean(I, w, h, r);
+  const mp = boxMean(depth, w, h, r);
+  const mII = boxMean(II, w, h, r);
+  const mIp = boxMean(Ip, w, h, r);
+  const a = new Float32Array(n);
+  const b = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const varI = mII[i] - mI[i] * mI[i];
+    a[i] = (mIp[i] - mI[i] * mp[i]) / (varI + eps);
+    b[i] = mp[i] - a[i] * mI[i];
+  }
+  const ma = boxMean(a, w, h, r);
+  const mb = boxMean(b, w, h, r);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = ma[i] * I[i] + mb[i];
+  return out;
+}
+
+// The guided filter for a depth map without region cleanup (normal
+// quality): the guide is the picture's brightness (`rgb`, 0..1, 3 per pixel).
+export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
+  const lab = new Float32Array(w * h * 3);
+  for (let p = 0; p < w * h; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
+  return guidedFilter(depth, lab, w, h, r, eps);
+}
+
+// Halos: depth measured next to a near thin object (a wire) comes out in
+// between the object's and the background's. Each depth becomes the median
+// of its neighbours' depths, counting those of the same color as the pixel
+// (in Lab) most, so a pixel with the wire's color takes the wire's depth and
+// one with the background's takes the background's: depth edges lie on the
+// picture's color edges, at full sharpness.
+export function colorMedian(depth, lab, w, h, r = 7, sigma = 9, levels = 128) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const d of depth) {
+    if (d < lo) lo = d;
+    if (d > hi) hi = d;
+  }
+  if (!(hi > lo)) return depth;
+  const n = w * h;
+  const q = new Uint8Array(n);
+  for (let i = 0; i < n; i++) q[i] = Math.min(levels - 1, Math.floor(((depth[i] - lo) / (hi - lo)) * levels));
+  // Weight by squared color distance, tabulated.
+  const STEP = 4;
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = Math.exp(-(i * STEP) / (2 * sigma * sigma));
+  const side = 2 * r + 1;
+  const spatial = new Float32Array(side * side);
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) spatial[(dy + r) * side + dx + r] = Math.exp(-(dx * dx + dy * dy) / (2 * (r * 0.7) ** 2));
+  const hist = new Float32Array(levels);
+  const out = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      hist.fill(0);
+      let total = 0;
+      const l0 = lab[3 * p];
+      const a0 = lab[3 * p + 1];
+      const b0 = lab[3 * p + 2];
+      for (let dy = -r; dy <= r; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -r; dx <= r; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const j = yy * w + xx;
+          const dl = lab[3 * j] - l0;
+          const da = lab[3 * j + 1] - a0;
+          const db = lab[3 * j + 2] - b0;
+          const wt = spatial[(dy + r) * side + dx + r] * lut[Math.min(255, ((dl * dl + da * da + db * db) / STEP) | 0)];
+          hist[q[j]] += wt;
+          total += wt;
+        }
+      }
+      let acc = 0;
+      let k = 0;
+      while (k < levels - 1 && acc + hist[k] < total / 2) acc += hist[k++];
+      out[p] = q[p] === k ? depth[p] : lo + ((k + 0.5) / levels) * (hi - lo);
+    }
+  }
+  return out;
+}
+
+// Two layers at a depth edge. Where the depth within `radius` pixels spans
+// a lot (a near wire against a far wall), each pixel whose depth lies between
+// the two ends is given the depth of the layer whose color it is closer to:
+// the near layer's mean color is that of the nearest quarter of the depths
+// around, the far layer's that of the farthest quarter. Halos next to thin
+// near objects, where the measured depth is in between, are put on one
+// layer or the other by the picture, with a hard edge.
+export function layerSnap(depth, lab, w, h, { radius = 12, stride = 2, minRange = 0.25, band = 0.3, margin = 1.4 } = {}) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const d of depth) {
+    if (d < lo) lo = d;
+    if (d > hi) hi = d;
+  }
+  const total = hi - lo;
+  if (!(total > 0)) return depth;
+  const out = Float32Array.from(depth);
+  const near = [];
+  const far = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      let wlo = Infinity;
+      let whi = -Infinity;
+      for (let dy = -radius; dy <= radius; dy += stride) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -radius; dx <= radius; dx += stride) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const d = depth[yy * w + xx];
+          if (d < wlo) wlo = d;
+          if (d > whi) whi = d;
+        }
+      }
+      const range = whi - wlo;
+      if (range < minRange * total) continue;
+      const d0 = depth[p];
+      const t = (d0 - wlo) / range;
+      if (t < band || t > 1 - band) continue;
+      // Mean colors of the two ends.
+      let nL = 0, nA = 0, nB = 0, nC = 0, nD = 0, fL = 0, fA = 0, fB = 0, fC = 0, nVal = 0, fVal = 0;
+      for (let dy = -radius; dy <= radius; dy += stride) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -radius; dx <= radius; dx += stride) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const j = yy * w + xx;
+          const u = (depth[j] - wlo) / range;
+          if (u > 1 - band * 0.6) {
+            nL += lab[3 * j]; nA += lab[3 * j + 1]; nB += lab[3 * j + 2]; nC++; nVal += depth[j];
+          } else if (u < band * 0.6) {
+            fL += lab[3 * j]; fA += lab[3 * j + 1]; fB += lab[3 * j + 2]; fC++; fVal += depth[j];
+          }
+        }
+      }
+      if (!nC || !fC) continue;
+      const dn = (lab[3 * p] - nL / nC) ** 2 + (lab[3 * p + 1] - nA / nC) ** 2 + (lab[3 * p + 2] - nB / nC) ** 2;
+      const df = (lab[3 * p] - fL / fC) ** 2 + (lab[3 * p + 1] - fA / fC) ** 2 + (lab[3 * p + 2] - fB / fC) ** 2;
+      if (dn * margin < df) out[p] = nVal / nC;
+      else if (df * margin < dn) out[p] = fVal / fC;
     }
   }
   return out;

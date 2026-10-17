@@ -1,4 +1,4 @@
-import { segmentDepth } from './segments.js';
+import { segmentDepth, guidedFilterColor } from './segments.js';
 
 // Depth from the light field: for a range of refocus depths (alpha), shift
 // every view as refocusing would and measure how well they agree. At the
@@ -483,6 +483,8 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   // High quality: region cleanup (core/segments.js).
   const flat = !!(refine && color && DEPTH_REGIONS.on);
   if (flat) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
+  // Normal quality: no region cleanup, but the edges still follow the picture's.
+  else if (color && DEPTH_REGIONS.guide !== false) result = guidedFilterColor(result, color, width, height);
   return { alpha: result, confidence, range: [min, max], flat };
 }
 
