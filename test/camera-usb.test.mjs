@@ -155,3 +155,13 @@ test('a camera drive: firmware, serial and calibration folder', async () => {
   assert.ok(dest.endsWith(path.join('cameras', 'B5123')));
   assert.equal((await fs.readdir(dest)).sort().join(), 'cal_file_manifest.json,unit_info.json');
 });
+
+test('the calibration item is requested as load type 6', async () => {
+  const log = [];
+  const cam = new LytroCamera({
+    async read(cdb, size) { log.push(cdb[0].toString(16) + ':' + cdb[2]); return cdb[0] === 0xc6 ? Buffer.from([3, 0, 0, 0]) : Buffer.from([1, 2, 3]).subarray(0, size); },
+    async write() {},
+  });
+  assert.deepEqual([...await cam.calibration()], [1, 2, 3]);
+  assert.equal(log[0], 'c2:6');
+});

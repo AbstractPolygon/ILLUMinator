@@ -72,6 +72,12 @@ class LytroCamera {
     return data.subarray(0, size);
   }
 
+  // The camera's calibration data as it hands it out (a batch of named
+  // files; unpacking it is not done yet), saved as it is.
+  async calibration() {
+    return this.download('calibration');
+  }
+
   async hardwareInfo() {
     const d = await this.download('hardware_info');
     return {
