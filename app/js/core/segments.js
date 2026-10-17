@@ -200,7 +200,8 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
   }
   // With objects known, an outline (not the size of a step) is what keeps
   // two sides apart, so depth flows freely within each object.
-  return smoothRamps(flattenHalos(snapToObjects(out, objects, w, h), objects, w, h), lab, w, h, Infinity, objects, 8, 4, 10);
+  const snapped = flattenHalos(snapToObjects(out, objects, w, h), objects, w, h);
+  return smoothRamps(OBJECT_FLAT.on ? flattenObjects(snapped, objects, w, h, OBJECT_FLAT) : snapped, lab, w, h, Infinity, objects, 8, 4, 10);
 }
 
 // Depth edges (steps larger than `edge`) follow the superpixels' borders,
@@ -370,6 +371,32 @@ export function snapToObjects(depth, objects, w, h, inner = 10, reach = 24) {
         }
       }
     }
+  }
+  return out;
+}
+
+// Each mid-sized object is taken as one surface at the depth most of its
+// nearer half has (`quantile` of its depths, from the near end): the blur of
+// a thin near object (wires, rails, branches) dilutes its measured depth
+// towards the background, so the object's own pixels come out too far.
+// Pixels of the object further than that depth are put at it.
+export const OBJECT_FLAT = { on: false, min: 0.004, max: 0.2, quantile: 0.3 };
+
+export function flattenObjects(depth, objects, w, h, { min = 0.004, max = 0.2, quantile = 0.3 } = {}) {
+  const n = w * h;
+  const out = Float32Array.from(depth);
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const l = objects[i];
+    if (!groups.has(l)) groups.set(l, []);
+    groups.get(l).push(i);
+  }
+  for (const idx of groups.values()) {
+    const share = idx.length / n;
+    if (share < min || share > max) continue;
+    const sorted = idx.map((i) => depth[i]).sort((a, b) => a - b);
+    const target = sorted[Math.floor(quantile * (sorted.length - 1))];
+    for (const i of idx) if (out[i] > target) out[i] = target;
   }
   return out;
 }
