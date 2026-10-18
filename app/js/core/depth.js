@@ -493,16 +493,18 @@ export function crossArms(color, w, h, { arm = 24, long = 8, tau = 0.1, tau2 = 0
   const up = new Uint8Array(n);
   const down = new Uint8Array(n);
   const diff = (i, j) => Math.max(Math.abs(color[3 * i] - color[3 * j]), Math.abs(color[3 * i + 1] - color[3 * j + 1]), Math.abs(color[3 * i + 2] - color[3 * j + 2]));
+  // Steps outward while the pixel is within `tau` of the anchor and of its
+  // own neighbor (within `tau2` of the anchor once past `long` steps), for
+  // at most `arm - 1` pixels.
   const reach = (i, step, room) => {
-    let k = 0;
-    while (k < Math.min(arm, room)) {
-      const j = i + step * (k + 1);
+    let k = 1;
+    while (k < arm && k <= room) {
+      const j = i + step * k;
       const d = diff(i, j);
-      const prev = diff(j, i + step * k);
-      if (d >= (k + 1 > long ? tau2 : tau) || prev >= tau) break;
+      if (d >= tau || diff(j, j - step) >= tau || (k > long && d >= tau2)) break;
       k++;
     }
-    return k;
+    return k - 1;
   };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -516,18 +518,94 @@ export function crossArms(color, w, h, { arm = 24, long = 8, tau = 0.1, tau2 = 0
   return { left, right, up, down, w, h };
 }
 
-// Repeated aggregation (the maker's tool runs four rounds).
+// The maker's tool lets the aggregated cost in only where the picture is
+// flat: a Sobel strength (R + 2G + B) of the center view, 1 below `lo` and
+// falling to 0 at `hi`, smoothed by a Gaussian of `sigma`.
+export const DEPTH_EDGE = { on: false, lo: 1, hi: 1.5, sigma: 1 };
+
+const blendFlat = (before, after, e) => {
+  if (!e) return after;
+  const out = new Float32Array(after.length);
+  for (let i = 0; i < out.length; i++) out[i] = (1 - e[i]) * before[i] + e[i] * after[i];
+  return out;
+};
+
+export function flatness(color, w, h, { lo, hi, sigma }) {
+  const n = w * h;
+  const e = new Float32Array(n).fill(1);
+  const wc = [1, 2, 1];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let v = 0;
+      for (let c = 0; c < 3; c++) {
+        const p = (dx, dy) => color[3 * ((y + dy) * w + x + dx) + c];
+        const sx = p(1, -1) + 2 * p(1, 0) + p(1, 1) - p(-1, -1) - 2 * p(-1, 0) - p(-1, 1);
+        const sy = p(-1, 1) + 2 * p(0, 1) + p(1, 1) - p(-1, -1) - 2 * p(0, -1) - p(1, -1);
+        v += wc[c] * (Math.abs(sx) + Math.abs(sy));
+      }
+      if (v > lo) e[y * w + x] = Math.max(0, 1 - (v - lo) / (hi - lo));
+    }
+  }
+  const r = Math.max(1, Math.ceil(2.6 * sigma));
+  const k = Float32Array.from({ length: 2 * r + 1 }, (_, i) => Math.exp(-((i - r) ** 2) / (2 * sigma * sigma)));
+  const ks = k.reduce((a, b) => a + b, 0);
+  const tmp = new Float32Array(n);
+  const out = new Float32Array(n);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let a = 0;
+    for (let t = -r; t <= r; t++) a += k[t + r] * e[y * w + Math.min(w - 1, Math.max(0, x + t))];
+    tmp[y * w + x] = a / ks;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let a = 0;
+    for (let t = -r; t <= r; t++) a += k[t + r] * tmp[Math.min(h - 1, Math.max(0, y + t)) * w + x];
+    out[y * w + x] = a / ks;
+  }
+  return out;
+}
+
+// Repeated aggregation (the maker's tool runs four rounds, taking the two
+// orders in turn: along each pixel's vertical arm of horizontal segments,
+// then along its horizontal arm of vertical segments).
 export function aggregateCross(cost, arms, iterations = 1) {
   let out = cost;
-  for (let r = 0; r < iterations; r++) out = crossAggregate(out, arms);
+  for (let r = 0; r < iterations; r++) out = crossAggregate(out, arms, r % 2 === 0);
   return out;
 }
 
 // Mean of `cost` over each pixel's support region.
-export function crossAggregate(cost, arms) {
+export function crossAggregate(cost, arms, verticalFirst = false) {
   const { left, right, up, down, w, h } = arms;
   const n = w * h;
-  // Vertical sums over each pixel's own vertical arm (column prefix sums).
+  const out = new Float32Array(n);
+  if (verticalFirst) {
+    // Horizontal segment sums of every pixel, then summed down its vertical arm.
+    const hs = new Float64Array(n);
+    const hc = new Float32Array(n);
+    const rowS = new Float64Array(w + 1);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) rowS[x + 1] = rowS[x] + cost[y * w + x];
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        hs[i] = rowS[x + right[i] + 1] - rowS[x - left[i]];
+        hc[i] = left[i] + right[i] + 1;
+      }
+    }
+    const colS = new Float64Array((h + 1) * w);
+    const colC = new Float64Array((h + 1) * w);
+    for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
+      colS[(y + 1) * w + x] = colS[y * w + x] + hs[y * w + x];
+      colC[(y + 1) * w + x] = colC[y * w + x] + hc[y * w + x];
+    }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const a = y - up[i];
+      const b = y + down[i] + 1;
+      out[i] = (colS[b * w + x] - colS[a * w + x]) / Math.max(1, colC[b * w + x] - colC[a * w + x]);
+    }
+    return out;
+  }
+  // Vertical segment sums of every pixel, then summed along its horizontal arm.
   const col = new Float64Array((h + 1) * w);
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) col[(y + 1) * w + x] = col[y * w + x] + cost[y * w + x];
   const vs = new Float32Array(n);
@@ -541,8 +619,6 @@ export function crossAggregate(cost, arms) {
       vc[i] = b - a;
     }
   }
-  // Then along each pixel's horizontal arm.
-  const out = new Float32Array(n);
   const rowS = new Float64Array(w + 1);
   const rowC = new Float64Array(w + 1);
   for (let y = 0; y < h; y++) {
@@ -567,7 +643,7 @@ export function crossAggregate(cost, arms) {
 // view's at the shifted spot, each capped (`tc`, `tg`) so a view that sees
 // something else (a near object's edge) cannot spoil the match; the mix is
 // `weight` color to 1 - `weight` gradient; the cost is the mean over views.
-export const DEPTH_LCOST = { on: false, tc: 0.12, tg: 0.06, weight: 0.7, discrete: false };
+export const DEPTH_LCOST = { on: false, tc: 0.12, tg: 0.06, weight: 0.7, discrete: false, gamma: 0.5, normQ: 1 };
 
 export function lytroCostPrepare(views, width, height) {
   const n = width * height;
@@ -575,11 +651,16 @@ export function lytroCostPrepare(views, width, height) {
   let top = 1e-9;
   const gammaOf = (view) => {
     const out = new Float32Array(n * 3);
-    for (let i = 0; i < n * 3; i++) out[i] = Math.sqrt(Math.max(0, view.rgb[i] * view.gain));
+    for (let i = 0; i < n * 3; i++) out[i] = Math.max(0, view.rgb[i] * view.gain) ** DEPTH_LCOST.gamma;
     return out;
   };
   const colors = views.map(gammaOf);
-  for (const c of colors[mid]) if (c > top) top = c;
+  if (DEPTH_LCOST.normQ >= 1) {
+    for (const c of colors[mid]) if (c > top) top = c;
+  } else {
+    const every = Float32Array.from({ length: Math.min(colors[mid].length, 200000) }, (_, i) => colors[mid][Math.floor((i * colors[mid].length) / Math.min(colors[mid].length, 200000))]).sort();
+    top = Math.max(1e-9, every[Math.floor(DEPTH_LCOST.normQ * (every.length - 1))]);
+  }
   const norm = 1 / top;
   const grads = colors.map((c) => {
     for (let i = 0; i < c.length; i++) c[i] *= norm;
@@ -737,12 +818,18 @@ export function trwsVolume(scores, color, width, height, { iterations, slope, tr
   const mR = new Float32Array(n * K);
   const mU = new Float32Array(n * K);
   const mD = new Float32Array(n * K);
-  const diff = (i, j) => Math.abs(color[3 * i] - color[3 * j]) + Math.abs(color[3 * i + 1] - color[3 * j + 1]) + Math.abs(color[3 * i + 2] - color[3 * j + 2]);
+  // Color jump between neighbors: R + 2 G + B differences.
+  const diff = (i, j) => Math.abs(color[3 * i] - color[3 * j]) + 2 * Math.abs(color[3 * i + 1] - color[3 * j + 1]) + Math.abs(color[3 * i + 2] - color[3 * j + 2]);
   const wR = new Float32Array(n);
   const wD = new Float32Array(n);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
+      if (!color) {
+        wR[i] = 1;
+        wD[i] = 1;
+        continue;
+      }
       if (x < width - 1) wR[i] = diff(i, i + 1) <= edge ? 1 : low;
       if (y < height - 1) wD[i] = diff(i, i + width) <= edge ? 1 : low;
     }
@@ -768,12 +855,22 @@ export function trwsVolume(scores, color, width, height, { iterations, slope, tr
     for (let k = 0; k < K; k++) belief[k] = U[o + k] + mL[o + k] + mR[o + k] + mU[o + k] + mD[o + k];
   };
   const out = new Float32Array(K);
+  // Sweeps alternate between the corner orders each iteration, so no
+  // direction is favored: even rounds go right and down, then left and up;
+  // odd rounds go left and down, then right and up.
   for (let it = 0; it < iterations; it++) {
+    const odd = it % 2 === 1;
     for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
+      for (let xx = 0; xx < width; xx++) {
+        const x = odd ? width - 1 - xx : xx;
         const i = y * width + x;
         gather(i);
-        if (x < width - 1) {
+        if (odd) {
+          if (x > 0) {
+            send(i, out, mL, wR[i - 1]);
+            mR.set(out, (i - 1) * K);
+          }
+        } else if (x < width - 1) {
           send(i, out, mR, wR[i]);
           mL.set(out, (i + 1) * K);
         }
@@ -783,11 +880,18 @@ export function trwsVolume(scores, color, width, height, { iterations, slope, tr
         }
       }
     }
-    for (let y = height - 1; y >= 0; y--) {
-      for (let x = width - 1; x >= 0; x--) {
+    for (let yy = 0; yy < height; yy++) {
+      const y = height - 1 - yy;
+      for (let xx = 0; xx < width; xx++) {
+        const x = odd ? xx : width - 1 - xx;
         const i = y * width + x;
         gather(i);
-        if (x > 0) {
+        if (odd) {
+          if (x < width - 1) {
+            send(i, out, mR, wR[i]);
+            mL.set(out, (i + 1) * K);
+          }
+        } else if (x > 0) {
           send(i, out, mL, wR[i - 1]);
           mR.set(out, (i - 1) * K);
         }
@@ -876,7 +980,7 @@ export function depthColorGuide(rgb) {
 export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, steps = DEPTH_SEARCH.steps, window = DEPTH_SEARCH.window, onProgress, ...opts } = {}) {
   const { occlusion = true, guided = true, refine = true } = opts;
   const n = width * height;
-  const alphas = Array.from({ length: steps }, (_, i) => min + ((max - min) * i) / (steps - 1));
+  let alphas = Array.from({ length: steps }, (_, i) => min + ((max - min) * i) / (steps - 1));
   const raw = views.map((v) => luminance(v.rgb, n).map((x) => x * v.gain));
   const center = raw[Math.floor(raw.length / 2)];
   const minLevel = brightnessFloor(center);
@@ -884,13 +988,14 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
   const coarse = refine && DEPTH_COARSE.on;
   const arms = DEPTH_CBCA.on ? crossArms(depthColorGuide(Float32Array.from(views[Math.floor(views.length / 2)].rgb, (x) => x * views[Math.floor(views.length / 2)].gain)), width, height, DEPTH_CBCA) : null;
   // Best trial depth per pixel for one set of detail images.
+  const flat = arms && DEPTH_EDGE.on ? flatness(depthColorGuide(Float32Array.from(views[Math.floor(views.length / 2)].rgb, (x) => x * views[Math.floor(views.length / 2)].gain)), width, height, DEPTH_EDGE) : null;
   const lprep = DEPTH_LCOST.on ? lytroCostPrepare(views, width, height) : null;
   const match = (lums, level, occl, win, from, span, masks = null) => {
     // Higher score = better agreement.
     const scores = alphas.map((a, k) => {
       if (onProgress) onProgress(from + (span * k) / steps);
       const variance = lprep ? lytroCost(lprep, views, width, height, a, DEPTH_LCOST, masks) : masks ? maskedVariance(lums, views, masks, width, height, a, minLevel, level) : angularVariance(lums, views, width, height, a, minLevel, level, occl);
-      const cost = arms ? aggregateCross(variance, arms, DEPTH_CBCA.iterations) : guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
+      const cost = arms ? blendFlat(variance, aggregateCross(variance, arms, DEPTH_CBCA.iterations), flat) : guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
       for (let i = 0; i < n; i++) cost[i] = -cost[i];
       return cost;
     });
@@ -911,6 +1016,16 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
   const detailImages = DEPTH_VIS.raw ? raw : raw.map((l) => detailOf(l, width, height).detail);
   const centerLocal = DEPTH_VIS.raw ? Float32Array.from(center, (x) => Math.max(x, 0) ** 0.5) : detailOf(center, width, height).local;
   let measured = match(detailImages, centerLocal, occlusion, window, 0, coarse ? 0.6 : 1);
+  if (DEPTH_DIRECT.on && DEPTH_MATCH.adapt.on) {
+    // Second, fine pass over the depth range this picture really uses.
+    const sorted = Float32Array.from(measured.alpha).sort();
+    const { fine, lowQ, highQ, pad } = DEPTH_MATCH.adapt;
+    const step = alphas[1] - alphas[0];
+    const lo = Math.max(min, sorted[Math.floor(lowQ * (n - 1))] - pad * step);
+    const hi = Math.min(max, sorted[Math.floor(highQ * (n - 1))] + pad * step);
+    alphas = Array.from({ length: fine }, (_, i) => lo + ((hi - lo) * i) / (fine - 1));
+    measured = match(detailImages, centerLocal, occlusion, window, 0, coarse ? 0.6 : 1);
+  }
   if (DEPTH_VIS.on) {
     for (let round = 0; round < DEPTH_VIS.rounds; round++) {
       const first = finishDepth(measured, width, height, guide, { refine: true, min, max, color: depthColorGuide(Float32Array.from(views[Math.floor(views.length / 2)].rgb, (x) => x * views[Math.floor(views.length / 2)].gain)) }).alpha;
@@ -932,7 +1047,7 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
 
 // From the scores (higher = better) of each trial depth: the best depth per
 // pixel (sub-step by a parabola through the peak), its cost and the mean cost.
-function bestDepth(scores, alphas, n) {
+export function bestDepth(scores, alphas, n) {
   const steps = alphas.length;
   const alpha = new Float32Array(n);
   const cost = new Float32Array(n);
@@ -1146,18 +1261,27 @@ export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confide
 // tool does it: capped colour cost, cross-based aggregation, message-passing
 // smoothing, whole labels, result taken as measured) or "classic" (the
 // default clean-up chain).
+// The match style's depth labels: whole steps of one lambda unit
+// (LAMBDA_ALPHA alpha each) from -35 up to `top` lambda.
+export const DEPTH_MATCH = { subLabel: false, first: -35, top: 8, lambda: 0.0814, adapt: { on: true, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 } };
+const SEARCH_CLASSIC = { ...DEPTH_SEARCH };
 const STYLE_CLASSIC = { lcost: { on: false }, cbca: { on: false }, trws: { on: false }, direct: { on: false }, coarse: null };
 export function setDepthStyle(style) {
   if (style === 'match') {
-    Object.assign(DEPTH_LCOST, { on: true, weight: 1, tc: 0.2, discrete: true });
+    Object.assign(DEPTH_LCOST, { on: true, weight: 1, tc: 0.2, discrete: !DEPTH_MATCH.subLabel });
     Object.assign(DEPTH_CBCA, { on: true, arm: 34, long: 17, tau: 0.04, tau2: 0.025, iterations: 4 });
     Object.assign(DEPTH_TRWS, { on: true });
+    DEPTH_EDGE.on = true;
     Object.assign(DEPTH_DIRECT, { on: true });
     DEPTH_COARSE.on = false;
+    const { first, top, lambda } = DEPTH_MATCH;
+    Object.assign(DEPTH_SEARCH, { min: first * lambda, max: top * lambda, steps: top - first + 1 });
   } else {
+    Object.assign(DEPTH_SEARCH, SEARCH_CLASSIC);
     Object.assign(DEPTH_LCOST, STYLE_CLASSIC.lcost, { discrete: false });
     Object.assign(DEPTH_CBCA, STYLE_CLASSIC.cbca);
     Object.assign(DEPTH_TRWS, STYLE_CLASSIC.trws);
+    DEPTH_EDGE.on = false;
     Object.assign(DEPTH_DIRECT, STYLE_CLASSIC.direct);
     DEPTH_COARSE.on = true;
   }

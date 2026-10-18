@@ -14,6 +14,7 @@ import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
 import { pickObjects, signatures } from './core/objects.js';
+import { DEPTH_PASSES, measureMatch } from './core/depthmatch.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -1099,6 +1100,7 @@ async function ensureDepth(id) {
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
     setDepthStyle(state.settings.depthStyle ?? 'classic');
+    DEPTH_PASSES.on = (state.settings.depthStyle ?? 'classic') === 'match' && !state.gpu;
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = !fast && state.settings.depthObjects ? await findObjects(id) : null;
     try {
@@ -1115,6 +1117,9 @@ async function ensureDepth(id) {
         measured = combineCoarse(measured, coarse);
       }
       state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu), fill: state.gpu.edgeAwareFill.bind(state.gpu) });
+    } else if (DEPTH_PASSES.on) {
+      const measured = measureMatch(state.refocusViews, outW, outH, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
+      state.depthRaw = finishDepth(measured, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
     } else {
       state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
         ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
