@@ -484,7 +484,7 @@ function maskedVariance(lums, views, masks, w, h, alpha, floor, level) {
 // reached by a vertical arm from a pixel on its horizontal arms. A cost is
 // averaged over that region, so a flat object's interior takes its depth from
 // the object's textured edges, and never from the other side of the edge.
-export const DEPTH_CBCA = { on: false, arm: 24, long: 8, tau: 0.1, tau2: 0.05 };
+export const DEPTH_CBCA = { on: false, arm: 24, long: 8, tau: 0.1, tau2: 0.05, iterations: 1 };
 
 export function crossArms(color, w, h, { arm = 24, long = 8, tau = 0.1, tau2 = 0.05 } = {}) {
   const n = w * h;
@@ -514,6 +514,13 @@ export function crossArms(color, w, h, { arm = 24, long = 8, tau = 0.1, tau2 = 0
     }
   }
   return { left, right, up, down, w, h };
+}
+
+// Repeated aggregation (the maker's tool runs four rounds).
+export function aggregateCross(cost, arms, iterations = 1) {
+  let out = cost;
+  for (let r = 0; r < iterations; r++) out = crossAggregate(out, arms);
+  return out;
 }
 
 // Mean of `cost` over each pixel's support region.
@@ -560,7 +567,7 @@ export function crossAggregate(cost, arms) {
 // view's at the shifted spot, each capped (`tc`, `tg`) so a view that sees
 // something else (a near object's edge) cannot spoil the match; the mix is
 // `weight` color to 1 - `weight` gradient; the cost is the mean over views.
-export const DEPTH_LCOST = { on: false, tc: 0.12, tg: 0.06, weight: 0.7 };
+export const DEPTH_LCOST = { on: false, tc: 0.12, tg: 0.06, weight: 0.7, discrete: false };
 
 export function lytroCostPrepare(views, width, height) {
   const n = width * height;
@@ -651,15 +658,16 @@ export function lytroCost(prep, views, width, height, alpha, { tc, tg, weight },
 // scaled by `edgeWeight` (1 when the two pixels' colors differ by at most
 // `edge`, else `low`) times the capped cost. `scores` (higher = better) in,
 // the same shape out.
-export const DEPTH_MRF = { on: false, p1: 0.1, p2: 0.6, edge: 0.08, low: 0.15 };
+export const DEPTH_MRF = { on: false, p1: 0.1, p2: 0.6, edge: 0.08, low: 0.15, trunc: 0 };
 
-export function smoothVolume(scores, color, width, height, cap, { p1, p2, edge, low }) {
+export function smoothVolume(scores, color, width, height, cap, { p1, p2, edge, low, trunc = 0 }) {
   const K = scores.length;
   const n = width * height;
   const cost = new Float32Array(n * K);
   for (let k = 0; k < K; k++) for (let i = 0; i < n; i++) cost[i * K + k] = -scores[k][i];
   const total = new Float32Array(n * K);
   const L = new Float32Array(n * K);
+  const tmp = new Float32Array(K);
   const diff = (i, j) => Math.max(Math.abs(color[3 * i] - color[3 * j]), Math.abs(color[3 * i + 1] - color[3 * j + 1]), Math.abs(color[3 * i + 2] - color[3 * j + 2]));
   for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
     for (let yy = 0; yy < height; yy++) {
@@ -681,6 +689,14 @@ export function smoothVolume(scores, color, width, height, cap, { p1, p2, edge, 
         const wgt = diff(i, j) <= edge ? 1 : low;
         const a = p1 * cap * wgt;
         const b = Math.max(p2 * cap * wgt, a);
+        if (trunc > 0) {
+          // truncated linear: a per label step, up to `trunc` steps
+          for (let k = 0; k < K; k++) tmp[k] = L[q + k];
+          for (let k = 1; k < K; k++) if (tmp[k - 1] + a < tmp[k]) tmp[k] = tmp[k - 1] + a;
+          for (let k = K - 2; k >= 0; k--) if (tmp[k + 1] + a < tmp[k]) tmp[k] = tmp[k + 1] + a;
+          for (let k = 0; k < K; k++) L[o + k] = cost[o + k] + Math.min(tmp[k], lo + a * trunc) - lo;
+          continue;
+        }
         for (let k = 0; k < K; k++) {
           let best = L[q + k];
           if (k > 0 && L[q + k - 1] + a < best) best = L[q + k - 1] + a;
@@ -781,7 +797,7 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
     const scores = alphas.map((a, k) => {
       if (onProgress) onProgress(from + (span * k) / steps);
       const variance = lprep ? lytroCost(lprep, views, width, height, a, DEPTH_LCOST, masks) : masks ? maskedVariance(lums, views, masks, width, height, a, minLevel, level) : angularVariance(lums, views, width, height, a, minLevel, level, occl);
-      const cost = arms ? crossAggregate(variance, arms) : guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
+      const cost = arms ? aggregateCross(variance, arms, DEPTH_CBCA.iterations) : guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
       for (let i = 0; i < n; i++) cost[i] = -cost[i];
       return cost;
     });
@@ -834,7 +850,7 @@ function bestDepth(scores, alphas, n) {
     }
     meanCost[i] = sum / steps;
     let offset = 0;
-    if (best > 0 && best < steps - 1) {
+    if (!DEPTH_LCOST.discrete && best > 0 && best < steps - 1) {
       const a = scores[best - 1][i];
       const b = scores[best][i];
       const c = scores[best + 1][i];
