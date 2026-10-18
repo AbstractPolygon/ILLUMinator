@@ -14,7 +14,7 @@ import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
 import { pickObjects, signatures } from './core/objects.js';
-import { estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
+import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, AUTO_WB_GAINS, solveWhiteBalance } from './core/color.js';
@@ -834,10 +834,11 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
+  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? 'classic');
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
-  if ((qualityChanged || sourceChanged || objectsChanged) && state.depthRaw && !detailChanged) {
+  if ((qualityChanged || sourceChanged || objectsChanged || styleChanged) && state.depthRaw && !detailChanged) {
     // Measure the depth again, the new way.
     state.depth = null;
     state.depthRaw = null;
@@ -1097,6 +1098,7 @@ async function ensureDepth(id) {
     // Normal quality: the plain cost volume, about twice as fast; high adds
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
+    setDepthStyle(state.settings.depthStyle ?? 'classic');
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = !fast && state.settings.depthObjects ? await findObjects(id) : null;
     try {

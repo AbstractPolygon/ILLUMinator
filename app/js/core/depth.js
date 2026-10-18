@@ -967,7 +967,22 @@ function bestDepth(scores, alphas, n) {
 // GPU's, if given; they need `color`).
 // With `direct`, the measured depth is the result: no clean-up after the
 // match (the maker's tool takes the solver's labels as they come).
-export const DEPTH_DIRECT = { on: false };
+export const DEPTH_DIRECT = { on: false, median: true };
+
+// 3 x 3 median of the depth (borders kept).
+export function median3(src, w, h) {
+  const out = Float32Array.from(src);
+  const v = new Float32Array(9);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let k = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) v[k++] = src[(y + dy) * w + x + dx];
+      v.sort();
+      out[y * w + x] = v[4];
+    }
+  }
+  return out;
+}
 
 export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null, fill = null } = {}) {
   const fillOf = fill && color ? (v, c, g, w, h, sigmaS, sigmaR, it, col) => fill(v, c, col, w, h, sigmaS, sigmaR, it) : edgeAwareFill;
@@ -976,7 +991,7 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   if (DEPTH_DIRECT.on) {
     const floor0 = Float32Array.from(meanCost).sort()[n >> 1];
     for (let i = 0; i < n; i++) confidence[i] = (Math.max(0, meanCost[i] - confidence[i]) / (meanCost[i] + floor0)) ** 2;
-    return { alpha: Float32Array.from(alpha), confidence, range: [min, max], flat: false };
+    return { alpha: DEPTH_DIRECT.median ? median3(alpha, width, height) : Float32Array.from(alpha), confidence, range: [min, max], flat: false };
   }
   // A pronounced minimum is trustworthy; in blank regions every depth looks
   // alike apart from sensor noise. The median cost stands in for the noise
@@ -1125,4 +1140,25 @@ export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confide
     [src, dst] = [dst, src];
   }
   return src;
+}
+
+// One switch for the measured-depth style: "match" (each step as the maker's
+// tool does it: capped colour cost, cross-based aggregation, message-passing
+// smoothing, whole labels, result taken as measured) or "classic" (the
+// default clean-up chain).
+const STYLE_CLASSIC = { lcost: { on: false }, cbca: { on: false }, trws: { on: false }, direct: { on: false }, coarse: null };
+export function setDepthStyle(style) {
+  if (style === 'match') {
+    Object.assign(DEPTH_LCOST, { on: true, weight: 1, tc: 0.2, discrete: true });
+    Object.assign(DEPTH_CBCA, { on: true, arm: 34, long: 17, tau: 0.04, tau2: 0.025, iterations: 4 });
+    Object.assign(DEPTH_TRWS, { on: true });
+    Object.assign(DEPTH_DIRECT, { on: true });
+    DEPTH_COARSE.on = false;
+  } else {
+    Object.assign(DEPTH_LCOST, STYLE_CLASSIC.lcost, { discrete: false });
+    Object.assign(DEPTH_CBCA, STYLE_CLASSIC.cbca);
+    Object.assign(DEPTH_TRWS, STYLE_CLASSIC.trws);
+    Object.assign(DEPTH_DIRECT, STYLE_CLASSIC.direct);
+    DEPTH_COARSE.on = true;
+  }
 }
