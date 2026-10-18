@@ -965,10 +965,19 @@ function bestDepth(scores, alphas, n) {
 // (measured here or on the GPU): confidence, filling in, outlier removal.
 // `median` and `fill`: the edge-aware weighted median and fill to use (the
 // GPU's, if given; they need `color`).
+// With `direct`, the measured depth is the result: no clean-up after the
+// match (the maker's tool takes the solver's labels as they come).
+export const DEPTH_DIRECT = { on: false };
+
 export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null, fill = null } = {}) {
   const fillOf = fill && color ? (v, c, g, w, h, sigmaS, sigmaR, it, col) => fill(v, c, col, w, h, sigmaS, sigmaR, it) : edgeAwareFill;
   const n = width * height;
   const confidence = Float32Array.from(cost);
+  if (DEPTH_DIRECT.on) {
+    const floor0 = Float32Array.from(meanCost).sort()[n >> 1];
+    for (let i = 0; i < n; i++) confidence[i] = (Math.max(0, meanCost[i] - confidence[i]) / (meanCost[i] + floor0)) ** 2;
+    return { alpha: Float32Array.from(alpha), confidence, range: [min, max], flat: false };
+  }
   // A pronounced minimum is trustworthy; in blank regions every depth looks
   // alike apart from sensor noise. The median cost stands in for the noise
   // floor, so only differences well above it count.
