@@ -715,6 +715,99 @@ export function smoothVolume(scores, color, width, height, cap, { p1, p2, edge, 
   });
 }
 
+
+// Tree-reweighted message passing on the cost volume, as the maker's tool
+// runs it (off unless `on`): `iterations` sweeps, each a raster pass sending
+// messages right and down and a reverse pass sending left and up. A pixel's
+// belief is its cost plus the four messages in; the message to a neighbor is
+// the truncated-linear transform (slope `slope` x weight, capped at `trunc`
+// steps) of `gamma` x belief minus the message back, less its minimum, then
+// capped. The weight is 1 across flat color and `low` across a color jump
+// over `edge`. `scale` puts our costs on the tool's scale (its cost is 10x
+// the capped mean).
+export const DEPTH_TRWS = { on: false, iterations: 10, slope: 0.1, trunc: 6, gamma: 0.5, edge: 0.2, low: 0.5, scale: 10 };
+
+export function trwsVolume(scores, color, width, height, { iterations, slope, trunc, gamma, edge, low, scale }) {
+  const K = scores.length;
+  const n = width * height;
+  const U = new Float32Array(n * K);
+  for (let k = 0; k < K; k++) for (let i = 0; i < n; i++) U[i * K + k] = -scores[k][i] * scale;
+  // incoming messages at each pixel, from its left, right, up and down neighbor
+  const mL = new Float32Array(n * K);
+  const mR = new Float32Array(n * K);
+  const mU = new Float32Array(n * K);
+  const mD = new Float32Array(n * K);
+  const diff = (i, j) => Math.abs(color[3 * i] - color[3 * j]) + Math.abs(color[3 * i + 1] - color[3 * j + 1]) + Math.abs(color[3 * i + 2] - color[3 * j + 2]);
+  const wR = new Float32Array(n);
+  const wD = new Float32Array(n);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (x < width - 1) wR[i] = diff(i, i + 1) <= edge ? 1 : low;
+      if (y < height - 1) wD[i] = diff(i, i + width) <= edge ? 1 : low;
+    }
+  }
+  const t = new Float32Array(K);
+  const belief = new Float32Array(K);
+  // message from belief at s to t, given the message back (old) from t to s
+  const send = (s, dst, old, w) => {
+    const a = slope * w;
+    const cap = a * trunc;
+    const so = s * K;
+    let lo = Infinity;
+    for (let k = 0; k < K; k++) {
+      t[k] = belief[k] * gamma - old[so + k];
+      if (t[k] < lo) lo = t[k];
+    }
+    for (let k = 1; k < K; k++) if (t[k - 1] + a < t[k]) t[k] = t[k - 1] + a;
+    for (let k = K - 2; k >= 0; k--) if (t[k + 1] + a < t[k]) t[k] = t[k + 1] + a;
+    for (let k = 0; k < K; k++) dst[k] = Math.min(cap, t[k] - lo);
+  };
+  const gather = (i) => {
+    const o = i * K;
+    for (let k = 0; k < K; k++) belief[k] = U[o + k] + mL[o + k] + mR[o + k] + mU[o + k] + mD[o + k];
+  };
+  const out = new Float32Array(K);
+  for (let it = 0; it < iterations; it++) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        gather(i);
+        if (x < width - 1) {
+          send(i, out, mR, wR[i]);
+          mL.set(out, (i + 1) * K);
+        }
+        if (y < height - 1) {
+          send(i, out, mD, wD[i]);
+          mU.set(out, (i + width) * K);
+        }
+      }
+    }
+    for (let y = height - 1; y >= 0; y--) {
+      for (let x = width - 1; x >= 0; x--) {
+        const i = y * width + x;
+        gather(i);
+        if (x > 0) {
+          send(i, out, mL, wR[i - 1]);
+          mR.set(out, (i - 1) * K);
+        }
+        if (y > 0) {
+          send(i, out, mU, wD[i - width]);
+          mD.set(out, (i - width) * K);
+        }
+      }
+    }
+  }
+  return scores.map((_, k) => {
+    const r = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const o = i * K + k;
+      r[i] = -(U[o] + mL[o] + mR[o] + mU[o] + mD[o]) / scale;
+    }
+    return r;
+  });
+}
+
 // High quality: a second, coarse match on blurred views (local detail over
 // `detail` pixels after a `blur` box), used where the fine match is flat.
 // Far out-of-focus texture keeps no fine detail, so the fine match finds no
@@ -801,6 +894,10 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
       for (let i = 0; i < n; i++) cost[i] = -cost[i];
       return cost;
     });
+    if (DEPTH_TRWS.on) {
+      const cv = views[Math.floor(views.length / 2)];
+      return bestDepth(trwsVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_TRWS), alphas, n);
+    }
     if (DEPTH_MRF.on) {
       const cv = views[Math.floor(views.length / 2)];
       const volume = smoothVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_LCOST.weight * DEPTH_LCOST.tc + (1 - DEPTH_LCOST.weight) * DEPTH_LCOST.tg, DEPTH_MRF);
