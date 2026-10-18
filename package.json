@@ -84,9 +84,11 @@
       "syncDesktopName": true,
       "vendor": "AbstractPolygon, LLC",
       "desktop": {
-        "Name": "ILLUMinator",
-        "Comment": "Lytro light field photo editor",
-        "Categories": "Graphics;Photography;"
+        "entry": {
+          "Name": "ILLUMinator",
+          "Comment": "Lytro light field photo editor",
+          "Categories": "Graphics;Photography;"
+        }
       }
     },
     "directories": {
