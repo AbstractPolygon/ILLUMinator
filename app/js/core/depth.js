@@ -553,6 +553,152 @@ export function crossAggregate(cost, arms) {
   return out;
 }
 
+// The cost of a trial depth as the camera maker's tool scores it (off unless
+// `on`): each view is compared with the center view itself, not with the
+// views' own mean. Per view the cost is a mix of how far its color (all
+// three channels, in a gamma space) and its gradient are from the center
+// view's at the shifted spot, each capped (`tc`, `tg`) so a view that sees
+// something else (a near object's edge) cannot spoil the match; the mix is
+// `weight` color to 1 - `weight` gradient; the cost is the mean over views.
+export const DEPTH_LCOST = { on: false, tc: 0.12, tg: 0.06, weight: 0.7 };
+
+export function lytroCostPrepare(views, width, height) {
+  const n = width * height;
+  const mid = Math.floor(views.length / 2);
+  let top = 1e-9;
+  const gammaOf = (view) => {
+    const out = new Float32Array(n * 3);
+    for (let i = 0; i < n * 3; i++) out[i] = Math.sqrt(Math.max(0, view.rgb[i] * view.gain));
+    return out;
+  };
+  const colors = views.map(gammaOf);
+  for (const c of colors[mid]) if (c > top) top = c;
+  const norm = 1 / top;
+  const grads = colors.map((c) => {
+    for (let i = 0; i < c.length; i++) c[i] *= norm;
+    const g = new Float32Array(n * 2);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        const xl = x > 0 ? i - 1 : i;
+        const xr = x < width - 1 ? i + 1 : i;
+        const yu = y > 0 ? i - width : i;
+        const yd = y < height - 1 ? i + width : i;
+        const lum = (j) => 0.3 * c[3 * j] + 0.59 * c[3 * j + 1] + 0.11 * c[3 * j + 2];
+        g[2 * i] = 0.5 * (lum(xr) - lum(xl));
+        g[2 * i + 1] = 0.5 * (lum(yd) - lum(yu));
+      }
+    }
+    return g;
+  });
+  return { colors, grads, mid };
+}
+
+// Cost image (lower = better) of one trial depth `alpha`.
+export function lytroCost(prep, views, width, height, alpha, { tc, tg, weight }, masks = null) {
+  const n = width * height;
+  const { colors, grads, mid } = prep;
+  const rc = colors[mid];
+  const rg = grads[mid];
+  const sum = new Float32Array(n);
+  const cnt = new Float32Array(n);
+  views.forEach((view, k) => {
+    if (k === mid) return;
+    const col = colors[k];
+    const grad = grads[k];
+    const mask = masks ? masks[k] : null;
+    const sx = alpha * view.u * view.detail;
+    const sy = alpha * view.v * view.detail;
+    const ix = Math.floor(sx);
+    const iy = Math.floor(sy);
+    const ax = sx - ix;
+    const ay = sy - iy;
+    const x0 = Math.max(0, -ix);
+    const x1 = Math.min(width, width - ix - 1);
+    const y0 = Math.max(0, -iy);
+    const y1 = Math.min(height, height - iy - 1);
+    const w00 = (1 - ax) * (1 - ay);
+    const w10 = ax * (1 - ay);
+    const w01 = (1 - ax) * ay;
+    const w11 = ax * ay;
+    for (let y = y0; y < y1; y++) {
+      let s = (y + iy) * width + ix + x0;
+      let d = y * width + x0;
+      for (let x = x0; x < x1; x++, s++, d++) {
+        if (mask && !mask[d]) continue;
+        const a = 3 * s;
+        const b = a + 3;
+        const c = a + 3 * width;
+        const e = c + 3;
+        const dr = Math.abs(col[a] * w00 + col[b] * w10 + col[c] * w01 + col[e] * w11 - rc[3 * d]);
+        const dg = Math.abs(col[a + 1] * w00 + col[b + 1] * w10 + col[c + 1] * w01 + col[e + 1] * w11 - rc[3 * d + 1]);
+        const db = Math.abs(col[a + 2] * w00 + col[b + 2] * w10 + col[c + 2] * w01 + col[e + 2] * w11 - rc[3 * d + 2]);
+        const cd = dr + dg + db;
+        const gd = Math.abs(grad[2 * s] - rg[2 * d]) + Math.abs(grad[2 * s + 1] - rg[2 * d + 1]);
+        sum[d] += weight * (cd < tc ? cd : tc) + (1 - weight) * (gd < tg ? gd : tg);
+        cnt[d]++;
+      }
+    }
+  });
+  for (let i = 0; i < n; i++) sum[i] = cnt[i] > 2 ? sum[i] / cnt[i] : weight * tc + (1 - weight) * tg;
+  return sum;
+}
+
+// Smoothing of a cost volume along four directions (off unless `on`), as in
+// a random field solved by passing messages along scan lines: a path's cost to
+// each depth step is its own cost plus the cheapest way from the previous
+// pixel, where a change of one step costs `p1` and a larger change `p2`, both
+// scaled by `edgeWeight` (1 when the two pixels' colors differ by at most
+// `edge`, else `low`) times the capped cost. `scores` (higher = better) in,
+// the same shape out.
+export const DEPTH_MRF = { on: false, p1: 0.1, p2: 0.6, edge: 0.08, low: 0.15 };
+
+export function smoothVolume(scores, color, width, height, cap, { p1, p2, edge, low }) {
+  const K = scores.length;
+  const n = width * height;
+  const cost = new Float32Array(n * K);
+  for (let k = 0; k < K; k++) for (let i = 0; i < n; i++) cost[i * K + k] = -scores[k][i];
+  const total = new Float32Array(n * K);
+  const L = new Float32Array(n * K);
+  const diff = (i, j) => Math.max(Math.abs(color[3 * i] - color[3 * j]), Math.abs(color[3 * i + 1] - color[3 * j + 1]), Math.abs(color[3 * i + 2] - color[3 * j + 2]));
+  for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+    for (let yy = 0; yy < height; yy++) {
+      const y = dy < 0 ? height - 1 - yy : yy;
+      for (let xx = 0; xx < width; xx++) {
+        const x = dx < 0 ? width - 1 - xx : xx;
+        const i = y * width + x;
+        const px = x - dx;
+        const py = y - dy;
+        const o = i * K;
+        if (px < 0 || py < 0 || px >= width || py >= height) {
+          for (let k = 0; k < K; k++) L[o + k] = cost[o + k];
+          continue;
+        }
+        const j = py * width + px;
+        const q = j * K;
+        let lo = Infinity;
+        for (let k = 0; k < K; k++) if (L[q + k] < lo) lo = L[q + k];
+        const wgt = diff(i, j) <= edge ? 1 : low;
+        const a = p1 * cap * wgt;
+        const b = Math.max(p2 * cap * wgt, a);
+        for (let k = 0; k < K; k++) {
+          let best = L[q + k];
+          if (k > 0 && L[q + k - 1] + a < best) best = L[q + k - 1] + a;
+          if (k < K - 1 && L[q + k + 1] + a < best) best = L[q + k + 1] + a;
+          if (lo + b < best) best = lo + b;
+          L[o + k] = cost[o + k] + best - lo;
+        }
+      }
+    }
+    for (let i = 0; i < n * K; i++) total[i] += L[i];
+  }
+  return scores.map((_, k) => {
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = -total[i * K + k] / 4;
+    return out;
+  });
+}
+
 // High quality: a second, coarse match on blurred views (local detail over
 // `detail` pixels after a `blur` box), used where the fine match is flat.
 // Far out-of-focus texture keeps no fine detail, so the fine match finds no
@@ -629,15 +775,21 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
   const coarse = refine && DEPTH_COARSE.on;
   const arms = DEPTH_CBCA.on ? crossArms(depthColorGuide(Float32Array.from(views[Math.floor(views.length / 2)].rgb, (x) => x * views[Math.floor(views.length / 2)].gain)), width, height, DEPTH_CBCA) : null;
   // Best trial depth per pixel for one set of detail images.
+  const lprep = DEPTH_LCOST.on ? lytroCostPrepare(views, width, height) : null;
   const match = (lums, level, occl, win, from, span, masks = null) => {
     // Higher score = better agreement.
     const scores = alphas.map((a, k) => {
       if (onProgress) onProgress(from + (span * k) / steps);
-      const variance = masks ? maskedVariance(lums, views, masks, width, height, a, minLevel, level) : angularVariance(lums, views, width, height, a, minLevel, level, occl);
+      const variance = lprep ? lytroCost(lprep, views, width, height, a, DEPTH_LCOST, masks) : masks ? maskedVariance(lums, views, masks, width, height, a, minLevel, level) : angularVariance(lums, views, width, height, a, minLevel, level, occl);
       const cost = arms ? crossAggregate(variance, arms) : guided ? guidedFilter(guide, variance, width, height, win + 1, 1e-3) : boxSum(variance, width, height, win);
       for (let i = 0; i < n; i++) cost[i] = -cost[i];
       return cost;
     });
+    if (DEPTH_MRF.on) {
+      const cv = views[Math.floor(views.length / 2)];
+      const volume = smoothVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_LCOST.weight * DEPTH_LCOST.tc + (1 - DEPTH_LCOST.weight) * DEPTH_LCOST.tg, DEPTH_MRF);
+      return bestDepth(volume, alphas, n);
+    }
     return bestDepth(scores, alphas, n);
   };
   // With `raw`, views are compared as they are (flat, textureless objects
