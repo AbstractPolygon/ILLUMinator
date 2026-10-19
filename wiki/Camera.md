@@ -8,11 +8,10 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 - *Depth:* how quickly things blur away from the focus.
 - *Smoothing:* smooths the depth map, following the picture's edges.
 - *Lytro Desktop depth map:* shown for photos imported from a Lytro Desktop library. On, the depth map Lytro Desktop computed (or the one edited there) is used for blur and depth masks; off, depth is measured from the light field as for any other photo. Lytro's map is usually the better one where the picture is blank or out of focus, such as a plain wall behind the subject.
-- *Object edges:* finds the objects in the photo and puts the depth map's edges on their outlines, so depth steps are clean instead of blocky. It works with *High quality depth map* (in [[Render]]). The first time it is turned on, it downloads an object model (about 45 MB, kept afterwards); finding the objects takes several seconds per photo.
+- *Object edges:* finds the objects in the photo and puts the depth map's edges on their outlines, so depth steps are clean instead of blocky. It works with or without *High quality depth map*. The first time it is turned on, it downloads an object model (about 45 MB, kept afterwards); finding the objects takes several seconds per photo.
+- *High quality depth map:* sharper depth edges that match the photo, and depth found even on far, very out-of-focus surfaces (a textured wall behind the subject), about two to three times as slow to measure. On by default; off, the faster, blockier depth map is used.
 - *Show depth map:* warm colors are near, cool colors are far.
-- *Greyscale depth map:* shows the depth map in grey instead of in color, light for near and dark for far.
-
-How carefully the depth map is measured is set in [[Render]] (*High quality depth map*).
+- *Greyscale:* (next to Show depth map) shows the depth map in grey instead of in color, light for near and dark for far.
 
 ## Focus Spread
 

@@ -685,7 +685,7 @@ input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer
 .ccm-grid .num { width: 100%; }
 
 /* Rendering: room between a checkbox and the field below it. */
-#depth-hq-row, #stereo-on-row { margin-bottom: 10px; }
+#stereo-on-row { margin-bottom: 10px; }
 
 /* A disabled mask shows only its Enabled checkbox and Delete button. */
 #mask-editor.off > :not(.check-row):not(.mask-delete) { display: none; }

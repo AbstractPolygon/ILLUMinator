@@ -91,7 +91,7 @@ function boxBlur3(img, w, h, r) {
 }
 
 // Color images the cost compares: gamma, scaled by the center view's top value.
-function viewColors(views, n, w, h) {
+export function viewColors(views, n, w, h) {
   const mid = Math.floor(views.length / 2);
   const linear = views.map((v) => {
     const out = new Float32Array(n * 3);

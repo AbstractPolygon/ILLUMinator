@@ -1040,7 +1040,17 @@ async function renderCamera() {
       if (img && showsCamera()) draw(img);
     } else {
       const draft = drag.on;
-      const msg = await engine.request('view', { ...cameraParams(), draft }, { onProgress: showProgress });
+      // Detail recovery also rebuilds the picture itself (not just the full
+      // sensor still): from every sensor pixel, at the picture's own size.
+      // While dragging, the quick draft is shown; the rebuilt picture follows.
+      const passes = +$('still-passes').value;
+      let msg = null;
+      if (passes > 0 && !draft && state.info.hasRaw) {
+        const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: +$('detail').value, passes }, { onProgress: showProgress });
+        msg = await promise;
+        if (!(msg && (msg.pixels || msg.bitmap))) msg = null;
+      }
+      if (!msg) msg = await engine.request('view', { ...cameraParams(), draft }, { onProgress: showProgress });
       hideProgress();
       if (msg && (msg.pixels || msg.bitmap) && showsCamera()) {
         draw(toImageData(msg));
@@ -2029,16 +2039,9 @@ $('depth-smooth').oninput = () => {
 };
 $('depth-smooth').onchange = () => {};
 // Normal or high quality depth: the depth map is measured again.
-// Object edges work on the high quality depth map: turning them on turns that
-// on too, and turning it off turns them off.
-$('depth-hq').onchange = () => {
-  if (!$('depth-hq').checked) $('depth-objects').checked = false;
-  applySettingsSoon();
-};
-$('depth-objects').onchange = () => {
-  if ($('depth-objects').checked) $('depth-hq').checked = true;
-  applySettingsSoon();
-};
+$('depth-hq').onchange = () => applySettingsSoon();
+// Object edges work on their own: with or without the high quality depth map.
+$('depth-objects').onchange = () => applySettingsSoon();
 $('lytro-depth').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {
@@ -5792,7 +5795,10 @@ $('render-btn').onclick = renderFullRes;
 $('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
 $('still-scale').onchange = () => setFullRes(false);
 $('still-scale').addEventListener('change', showPhotoSizes);
-$('still-passes').onchange = () => setFullRes(false);
+$('still-passes').onchange = () => {
+  setFullRes(false);
+  if (!state.fullRes) refresh();
+};
 $('grid-auto').onclick = () => updateGrid({ mode: 'auto' });
 $('grid-meta').onclick = () => updateGrid({ mode: 'metadata' });
 $('lens-circles').onchange = () => renderLenslets();

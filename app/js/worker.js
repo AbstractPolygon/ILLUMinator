@@ -15,6 +15,7 @@ import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
 import { pickObjects, signatures } from './core/objects.js';
 import { DEPTH_PASSES, measureMatch } from './core/depthmatch.js';
+import { measureMatchGpu } from './gpu/depthmatch.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -1100,11 +1101,23 @@ async function ensureDepth(id) {
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
     setDepthStyle(state.settings.depthStyle ?? 'classic');
-    DEPTH_PASSES.on = (state.settings.depthStyle ?? 'classic') === 'match' && !state.gpu;
+    DEPTH_PASSES.on = (state.settings.depthStyle ?? 'classic') === 'match';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
-    DEPTH_REGIONS.objects = !fast && state.settings.depthObjects ? await findObjects(id) : null;
+    DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     try {
-    if (state.gpu) {
+    let matched = null;
+    if (state.gpu && DEPTH_PASSES.on) {
+      // The Lytro-style depth on the GPU; the CPU measures it if the GPU cannot.
+      try {
+        const { outW: gw, outH: gh } = state.sampler;
+        matched = measureMatchGpu(state.gpu, state.gpu.readViewsRect(0, 0, gw, gh), gw, gh, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
+      } catch (e) {
+        console.warn('GPU depth match failed; using the CPU', e);
+      }
+    }
+    if (matched) {
+      state.depthRaw = finishDepth(matched, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
+    } else if (state.gpu && !DEPTH_PASSES.on) {
       post({ id, type: 'progress', stage: 'Measuring depth', progress: 0 });
       // The cost volume on the GPU takes most of the time; the two (fine and
       // coarse) measurements share the bar, then the clean-up steps follow.
@@ -1122,7 +1135,7 @@ async function ensureDepth(id) {
       }
       state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu), fill: state.gpu.edgeAwareFill.bind(state.gpu), onProgress: share(0.8, 1) });
     } else if (DEPTH_PASSES.on) {
-      const measured = measureMatch(state.refocusViews, outW, outH, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
+      const measured = measureMatch(state.gpu ? state.gpu.readViewsRect(0, 0, outW, outH) : state.refocusViews, outW, outH, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
       state.depthRaw = finishDepth(measured, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
     } else {
       state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {

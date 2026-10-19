@@ -1132,7 +1132,8 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   let result = refine ? (median && color ? median(cleaned, color, width, height, 4, 0.06, 96) : weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color)) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
   step(0.65);
   // High quality: region cleanup (core/segments.js).
-  const flat = !!(refine && color && DEPTH_REGIONS.on);
+  // (also with normal quality when Object edges are on)
+  const flat = !!(color && DEPTH_REGIONS.on && (refine || DEPTH_REGIONS.objects));
   if (flat) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
   // Normal quality: no region cleanup, but the edges still follow the picture's.
   else if (color && DEPTH_REGIONS.guide !== false) result = guidedFilterColor(result, color, width, height);

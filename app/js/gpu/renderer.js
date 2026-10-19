@@ -1983,7 +1983,7 @@ function compile(gl, type, src) {
 // status is checked the first time the program is used, so the driver can
 // compile every program at once (KHR_parallel_shader_compile) while the
 // photo opens.
-function program(gl, fragment, vertex = VERTEX) {
+export function program(gl, fragment, vertex = VERTEX) {
   const p = gl.createProgram();
   const vs = compile(gl, gl.VERTEX_SHADER, vertex);
   const fs = compile(gl, gl.FRAGMENT_SHADER, fragment);
