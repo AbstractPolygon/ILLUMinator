@@ -622,13 +622,30 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
   const strip = root.querySelector('.gal-thumbs');
   const prev = root.querySelector('.gal-arrow.prev');
   const next = root.querySelector('.gal-arrow.next');
-  // The arrows loop: past the last photo they return to the first, and back.
+  // The arrows loop for good: the thumbnails that slide out one side come
+  // round the other, so the strip never runs out.
   const updateArrows = () => {};
   const page = (dir) => {
-    const max = strip.scrollWidth - strip.clientWidth;
-    if (dir > 0 && strip.scrollLeft >= max - 2) strip.scrollTo({ left: 0, behavior: 'smooth' });
-    else if (dir < 0 && strip.scrollLeft <= 4) strip.scrollTo({ left: max, behavior: 'smooth' });
-    else strip.scrollBy({ left: dir * strip.clientWidth * 0.8, behavior: 'smooth' });
+    const all = [...strip.children];
+    if (all.length < 2) return;
+    const step = all[1].offsetLeft - all[0].offsetLeft;
+    const n = Math.min(all.length - 1, Math.max(1, Math.floor((strip.clientWidth / step) * 0.8)));
+    const from = all.map((b) => b.getBoundingClientRect().left);
+    strip.scrollLeft = 0;
+    for (let k = 0; k < n; k++) {
+      if (dir > 0) strip.appendChild(strip.firstElementChild);
+      else strip.insertBefore(strip.lastElementChild, strip.firstElementChild);
+    }
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    all.forEach((b, i) => {
+      b.style.transition = 'none';
+      b.style.transform = `translateX(${from[i] - b.getBoundingClientRect().left}px)`;
+    });
+    strip.getBoundingClientRect();
+    all.forEach((b) => {
+      b.style.transition = 'transform .35s ease';
+      b.style.transform = '';
+    });
   };
   prev.addEventListener('click', () => page(-1));
   next.addEventListener('click', () => page(1));
