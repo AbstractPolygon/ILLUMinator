@@ -520,6 +520,9 @@
             <label class="check" title="Shows the depth map in grey, light for near and dark for far, instead of in color"><input id="depth-grey" type="checkbox"> Greyscale</label>
           </div>
           <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
+          <label title="Stretches the depth map's colors over a narrower range of depth, so differences show more, as Lytro Desktop's depth maps do. Only changes how the depth map is shown">Depth map contrast <output for="depth-contrast" data-for="depth-contrast">0</output>
+            <input id="depth-contrast" type="range" min="0" max="100" step="5" value="0" data-default="0">
+          </label>
         </details>
         <details class="subpanel">
           <summary><h3>Focus Spread</h3></summary>

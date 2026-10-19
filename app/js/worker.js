@@ -1224,19 +1224,23 @@ async function depthSource(id) {
   return { alpha: state.depth.alpha, w: state.sampler.outW, h: state.sampler.outH };
 }
 
-async function depthMap({ id, grey = false }) {
+async function depthMap({ id, grey = false, contrast = 0 }) {
   const src = await depthSource(id);
   if (!src) return { cancelled: true };
   const { alpha } = src;
   const sorted = Float32Array.from(alpha).sort();
-  const lo = sorted[Math.floor(sorted.length * 0.02)];
-  const hi = sorted[Math.floor(sorted.length * 0.98)];
+  // Contrast pulls the ends of the range in (2% and 98% of the picture, up to
+  // 30% and 70%) and adds an S curve, so a narrow span of depth fills the colors.
+  const cut = 0.02 + 0.28 * Math.max(0, Math.min(1, contrast));
+  const lo = sorted[Math.floor((sorted.length - 1) * cut)];
+  const hi = sorted[Math.floor((sorted.length - 1) * (1 - cut))];
   const pixels = new Uint8ClampedArray(alpha.length * 4);
   for (let i = 0; i < alpha.length; i++) {
     // alpha < 0 is nearer than the camera's focus plane.
     // 1 is nearest. The colors are the ones the depth maps on the Lytro
     // comparison page use: warm near, cool far.
-    const t = 1 - Math.max(0, Math.min(1, (alpha[i] - lo) / Math.max(1e-6, hi - lo)));
+    let t = 1 - Math.max(0, Math.min(1, (alpha[i] - lo) / Math.max(1e-6, hi - lo)));
+    t += contrast * (t * t * (3 - 2 * t) - t);
     if (grey) {
       const v = Math.round(255 * t);
       pixels[4 * i] = v;

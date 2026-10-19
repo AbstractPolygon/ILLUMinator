@@ -12,6 +12,7 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 - *High quality depth map:* sharper depth edges that match the photo, and depth found even on far, very out-of-focus surfaces (a textured wall behind the subject), about two to three times as slow to measure. On by default; off, the faster, blockier depth map is used.
 - *Show depth map:* warm colors are near, cool colors are far.
 - *Greyscale:* (next to Show depth map) shows the depth map in grey instead of in color, light for near and dark for far.
+- *Depth map contrast:* stretches the depth map's colors over a narrower range of depth, so small differences show more (Lytro Desktop's depth maps look this way). It only changes how the depth map is shown, not the depth.
 
 ## Focus Spread
 

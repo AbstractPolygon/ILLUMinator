@@ -1390,7 +1390,7 @@ function setFullRes(on, { restore = true } = {}) {
 
 async function renderDepth() {
   try {
-    const msg = await engine.request('depthMap', { grey: $('depth-grey').checked }, { onProgress: showProgress });
+    const msg = await engine.request('depthMap', { grey: $('depth-grey').checked, contrast: $('depth-contrast').value / 100 }, { onProgress: showProgress });
     hideProgress();
     if (msg && msg.pixels && state.depthShown) draw(toImageData(msg));
   } catch (err) {
@@ -1402,6 +1402,14 @@ function showDepthLegend() {
   $('depth-legend').textContent = $('depth-grey').checked ? 'Light is near, dark is far.' : 'Warm colors are near, cool colors are far.';
 }
 
+// Depth map contrast: only the preview's colors change, so it redraws at once.
+let depthContrastTimer = 0;
+$('depth-contrast').oninput = () => {
+  showSliderValue($('depth-contrast'));
+  if (!state.depthShown) return;
+  clearTimeout(depthContrastTimer);
+  depthContrastTimer = setTimeout(renderDepth, 60);
+};
 $('depth-grey').addEventListener('change', () => {
   showDepthLegend();
   if (state.depthShown) renderDepth();
@@ -1634,7 +1642,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'depth-grey', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-objects', 'lytro-depth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-objects', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', 'tilt-show', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
