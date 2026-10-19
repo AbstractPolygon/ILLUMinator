@@ -1106,17 +1106,21 @@ async function ensureDepth(id) {
     try {
     if (state.gpu) {
       post({ id, type: 'progress', stage: 'Measuring depth', progress: 0 });
+      // The cost volume on the GPU takes most of the time; the two (fine and
+      // coarse) measurements share the bar, then the clean-up steps follow.
+      const coarseOn = !fast && DEPTH_COARSE.on;
+      const share = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
       const rgb = centerView();
       const center = luminance(rgb);
       const guide = depthGuide(center);
       const floor = brightnessFloor(center);
-      let measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor, guide });
+      let measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor, guide, onProgress: share(0, coarseOn ? 0.45 : 0.8) });
       if (!fast && DEPTH_COARSE.on) {
         // The coarse match for far out-of-focus texture (core/depth.js).
-        const coarse = state.gpu.measureDepth({ ...DEPTH_SEARCH, window: DEPTH_SEARCH.window + 1, detail: DEPTH_COARSE.detail, blur: DEPTH_COARSE.blur, occlusion: false, guided: true, floor, guide });
+        const coarse = state.gpu.measureDepth({ ...DEPTH_SEARCH, window: DEPTH_SEARCH.window + 1, detail: DEPTH_COARSE.detail, blur: DEPTH_COARSE.blur, occlusion: false, guided: true, floor, guide, onProgress: share(0.45, 0.8) });
         measured = combineCoarse(measured, coarse);
       }
-      state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu), fill: state.gpu.edgeAwareFill.bind(state.gpu) });
+      state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu), fill: state.gpu.edgeAwareFill.bind(state.gpu), onProgress: share(0.8, 1) });
     } else if (DEPTH_PASSES.on) {
       const measured = measureMatch(state.refocusViews, outW, outH, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
       state.depthRaw = finishDepth(measured, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });

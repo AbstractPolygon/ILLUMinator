@@ -1099,7 +1099,8 @@ export function median3(src, w, h) {
   return out;
 }
 
-export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null, fill = null } = {}) {
+export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null, fill = null, onProgress = null } = {}) {
+  const step = (p) => onProgress && onProgress(p);
   const fillOf = fill && color ? (v, c, g, w, h, sigmaS, sigmaR, it, col) => fill(v, c, col, w, h, sigmaS, sigmaR, it) : edgeAwareFill;
   const n = width * height;
   const confidence = Float32Array.from(cost);
@@ -1119,18 +1120,23 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   // Keep confident estimates; fill the rest from confident parts of the
   // same surface (as far as it reaches, but not across the photo's edges).
   const reach = Math.max(width, height) * DEPTH_FILL.reach;
+  step(0);
   const smooth = fillOf(alpha, confidence, guide, width, height, reach, DEPTH_FILL.edge, 3, color);
+  step(0.25);
   for (let i = 0; i < n; i++) {
     const c = Math.min(1, confidence[i] * DEPTH_FILL.trust);
     alpha[i] = c * alpha[i] + (1 - c) * smooth[i];
   }
   const cleaned = removeOutliers(median5(alpha, width, height), confidence, width, height, 0.45, guide, color, fillOf);
+  step(0.45);
   let result = refine ? (median && color ? median(cleaned, color, width, height, 4, 0.06, 96) : weightedMedian(cleaned, guide, width, height, 4, 0.06, 96, color)) : fillSmooth(cleaned, new Float32Array(n).fill(1), width, height, 1);
+  step(0.65);
   // High quality: region cleanup (core/segments.js).
   const flat = !!(refine && color && DEPTH_REGIONS.on);
   if (flat) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
   // Normal quality: no region cleanup, but the edges still follow the picture's.
   else if (color && DEPTH_REGIONS.guide !== false) result = guidedFilterColor(result, color, width, height);
+  step(1);
   return { alpha: result, confidence, range: [min, max], flat };
 }
 

@@ -2648,7 +2648,7 @@ export class GpuRenderer {
   // brightnessFloor).
   // `blur`: box radius applied to each view first (the coarse match of
   // core/depth.js DEPTH_COARSE).
-  measureDepth({ min, max, steps, window, detail: detailRadius = 4, occlusion, guided, floor, guide, blur = 0 }) {
+  measureDepth({ min, max, steps, window, detail: detailRadius = 4, occlusion, guided, floor, guide, blur = 0, onProgress = null }) {
     const gl = this.gl;
     const P = this.programs;
     const { outW: w, outH: h } = this.sampler;
@@ -2707,6 +2707,12 @@ export class GpuRenderer {
     const ab = this.scratch32(w, h, 'depthAB');
     const abMeans = this.scratch32(w, h, 'depthABMeans');
     for (let k = 0; k < steps; k++) {
+      // Let the GPU catch up now and then, so progress is real and one huge
+      // command queue cannot stall the whole machine.
+      if (onProgress && k % 3 === 0) {
+        gl.finish();
+        onProgress(0.05 + (0.9 * k) / steps);
+      }
       const alpha = min + ((max - min) * k) / (steps - 1);
       let Q = P.depthVariance;
       this.target(variance, w, h);
