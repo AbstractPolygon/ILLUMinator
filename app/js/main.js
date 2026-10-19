@@ -1276,7 +1276,9 @@ async function renderStill() {
   const scale = +$('still-scale').value;
   try {
     const passes = +$('still-passes').value;
-    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale, passes }, { onProgress: showProgress });
+    // The animation frame on show renders as it is (its camera and local
+    // adjustment settings), not the live camera's.
+    const { promise } = engine.job('superRes', 'superres', { ...(state.stillFrame || cameraParams()), scale, passes }, { onProgress: showProgress });
     const msg = await promise;
     // Ignore a result that arrives after full resolution was switched off.
     if (msg && (msg.pixels || msg.bitmap) && state.fullRes) {
@@ -1351,6 +1353,9 @@ function setFullRes(on, { restore = true } = {}) {
   state.fullRes = on;
   showPhotoSizes();
   if (on) {
+    // Rendering from an animation frame keeps that frame's settings.
+    state.stillFrame = state.showingFrames ? frameList()[state.index] || null : null;
+    state.stillIndex = state.index;
     setPlaying(false);
     state.showingFrames = false;
     setDepthShown(false, { restore: false });
@@ -1360,6 +1365,7 @@ function setFullRes(on, { restore = true } = {}) {
   engine.cancel('superres');
   hideProgress();
   state.still = null;
+  state.stillFrame = null;
   $('frame-label').textContent = '';
   if (restore) refresh();
   scheduleAutoRender();
@@ -2291,6 +2297,8 @@ function withPivotZoom(pivots) {
 
 function currentPivot() {
   if (state.showingFrames && state.framePivots) return state.framePivots[state.drawFrame ?? state.index] || null;
+  // A still rendered from an animation frame keeps that frame's framing.
+  if (state.fullRes && state.stillFrame && state.framePivots) return state.framePivots[state.stillIndex] || null;
   const p = cameraParams();
   const pivot = withPivotZoom([pivotFor(p.u, p.v, p.alpha, p.aperture)])[0];
   return keyframesOn() ? combineMotion(pivot, liveFraming()) : pivot;
