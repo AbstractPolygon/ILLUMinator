@@ -120,7 +120,7 @@ jobs:
 
           The installers are not code signed. On Windows, choose *More info → Run anyway* if SmartScreen warns. On macOS, right-click the app and choose *Open* the first time. On Linux, make the AppImage executable (\`chmod +x\`) before running it.
           NOTES
-          files=(dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb dist/*.zip)
+          files=(dist/*.exe dist/*.msi dist/*.dmg dist/*.AppImage dist/*.deb dist/*.zip)
           # Run again for a version already released: replace its files and notes.
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
