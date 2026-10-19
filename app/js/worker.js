@@ -837,7 +837,7 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
-  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? 'combined');
+  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? 'match');
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
@@ -1101,11 +1101,12 @@ async function ensureDepth(id) {
     // Normal quality: the plain cost volume, about twice as fast; high adds
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
-    // Combined (the default): the classic and the Lytro-style depth, blended
-    // (core/depthcombine.js). Without a real GPU the Lytro-style half would take
-    // minutes, so classic alone is measured there.
-    let style = state.settings.depthStyle ?? 'combined';
-    if (style === 'combined' && !hardwareGpu()) style = 'classic';
+    // The Lytro-style depth is the default: against Lytro Desktop's maps on the
+    // library photos it is off by 21% of the picture on average, classic 24%
+    // and the classic / Lytro-style blend ('combined', core/depthcombine.js)
+    // 22%. Without a real GPU it would take minutes, so classic is measured there.
+    let style = state.settings.depthStyle ?? 'match';
+    if ((style === 'combined' || style === 'match') && !hardwareGpu()) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
