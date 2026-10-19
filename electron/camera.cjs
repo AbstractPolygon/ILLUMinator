@@ -107,7 +107,9 @@ async function driveInfo(root) {
   const unit = await readJson(path.join(root, CALIBRATION_FOLDER, 'unit_info.json'));
   return {
     firmware: (version && (version['fw-version'] || version.fwVersion)) || null,
-    serial: (unit && unit.camera && String(unit.camera.serialNumber || '').trim()) || null,
+    model: (version && version.model) || null,
+    // The version file names the serial too; unit_info.json is the fallback.
+    serial: (version && version.serial && String(version.serial).trim()) || (unit && unit.camera && String(unit.camera.serialNumber || '').trim()) || null,
   };
 }
 

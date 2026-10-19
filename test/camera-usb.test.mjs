@@ -147,7 +147,11 @@ test('a camera drive: firmware, serial and calibration folder', async () => {
   await fs.writeFile(path.join(root, 'MISC', '.LYT_VER.inf'), JSON.stringify({ 'fw-version': '2.0.1' }));
   await fs.writeFile(path.join(root, 'unitdata', 'unit_info.json'), JSON.stringify({ camera: { serialNumber: ' B5123 ' } }));
   await fs.writeFile(path.join(root, 'unitdata', 'cal_file_manifest.json'), '{"calibrationFiles":[]}');
-  assert.deepEqual(await driveInfo(root), { firmware: '2.0.1', serial: 'B5123' });
+  assert.deepEqual(await driveInfo(root), { firmware: '2.0.1', model: null, serial: 'B5123' });
+  // The version file's own serial and model win when it has them.
+  await fs.writeFile(path.join(root, 'MISC', '.LYT_VER.inf'), JSON.stringify({ 'fw-version': '2.0.1', model: 'F01', serial: 'A9' }));
+  assert.deepEqual(await driveInfo(root), { firmware: '2.0.1', model: 'F01', serial: 'A9' });
+  await fs.writeFile(path.join(root, 'MISC', '.LYT_VER.inf'), JSON.stringify({ 'fw-version': '2.0.1' }));
   const cam = await scanVolume(root);
   assert.equal(cam.hasCalibration, true);
   const out = await fs.mkdtemp(path.join(os.tmpdir(), 'illum-cal-'));
