@@ -293,6 +293,30 @@ p.section-title { max-width: none; }
 .dl span { color: var(--muted); font-size: 14px; }
 footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
 
+/* Gallery: Lytro Desktop against ILLUMinator, photo and depth, with a draggable divider. */
+.gallery { margin-top: 56px; max-width: 920px; }
+.gal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.gal-head h3 { font-family: var(--display); font-size: 20px; font-weight: 800; margin: 0; }
+.gal-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.gal-mode button { background: var(--panel); color: var(--muted); border: 0; padding: 7px 16px; font: 600 13px var(--display); cursor: pointer; }
+.gal-mode button[aria-pressed="true"] { background: var(--raised); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.gal-mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gal-stage { position: relative; line-height: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #000; touch-action: pan-y; user-select: none; cursor: ew-resize; aspect-ratio: 1100 / 764; }
+.gal-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; border: 0; border-radius: 0; }
+.gal-stage img.gal-top { clip-path: inset(0 calc(100% - var(--pos, 50%)) 0 0); }
+.gal-handle { position: absolute; top: 0; bottom: 0; left: var(--pos, 50%); width: 2px; margin-left: -1px; background: var(--accent); box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; }
+.gal-handle::after { content: ""; position: absolute; top: 50%; left: 50%; width: 34px; height: 34px; margin: -17px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+.gal-tag { position: absolute; top: 10px; font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 6px 9px; border-radius: 6px; background: rgba(10,12,15,.72); color: #fff; pointer-events: none; }
+.gal-tag.l { left: 10px; } .gal-tag.r { right: 10px; }
+.gal-stage input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: ew-resize; margin: 0; }
+.gal-stage input[type=range]:focus-visible ~ .gal-handle::after { outline: 2px solid #fff; outline-offset: 2px; }
+.gal-caption { margin: 10px 2px 0; color: var(--muted); font-size: 15px; }
+.gal-thumbs { display: flex; gap: 10px; margin-top: 14px; overflow-x: auto; padding-bottom: 4px; }
+.gal-thumbs button { flex: 0 0 auto; width: clamp(96px, 17%, 168px); padding: 0; border: 2px solid transparent; border-radius: 9px; background: none; cursor: pointer; line-height: 0; opacity: .72; }
+.gal-thumbs button img { width: 100%; aspect-ratio: 1100 / 764; object-fit: cover; border-radius: 7px; display: block; }
+.gal-thumbs button[aria-pressed="true"] { border-color: var(--accent); opacity: 1; }
+.gal-thumbs button:hover { opacity: 1; }
+.gal-thumbs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 860px) {
   .band-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .band { padding-block: 36px; }
@@ -344,7 +368,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
     <div>
       <p class="eyebrow">A modern replacement</p>
       <h2>Lytro is gone. Your camera is not.</h2>
-      <p><a class="inline-link" href="https://www.theverge.com/2018/3/27/17166038/lytro-light-field-camera-company-shuts-down-google-hiring" target="_blank" rel="noopener">Lytro shut down in 2018</a>, and Lytro Desktop was abandoned. ILLUMinator picks up where it stopped: a full-featured modern app for <a class="inline-link" href="#download">Windows</a>, <a class="inline-link" href="#download">macOS</a>, and <a class="inline-link" href="#download">Linux</a>, plus a version that runs in <a class="inline-link" href="https://abstractpolygon.github.io/ILLUMinator/app/" target="_blank" rel="noopener">any modern web browser</a>.</p>
+      <p><a class="inline-link" href="https://www.theverge.com/2018/3/27/17166038/lytro-light-field-camera-company-shuts-down-google-hiring" target="_blank" rel="noopener">Lytro shut down in 2018</a>, and Lytro Desktop was abandoned. ILLUMinator picks up where it stopped: a full-featured, modern app for <a class="inline-link" href="#download">Windows</a>, <a class="inline-link" href="#download">macOS</a>, and <a class="inline-link" href="#download">Linux</a>, plus a version that runs in <a class="inline-link" href="https://abstractpolygon.github.io/ILLUMinator/app/" target="_blank" rel="noopener">any modern web browser</a>.</p>
       <p>ILLUMinator renders on the GPU, so the application responds quickly as you interact with your photos.</p>
     </div>
     <div class="compare-wrap">
@@ -440,7 +464,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
     <div class="features">
       <div><h3>Colors &amp; Effects</h3><p>&ldquo;Living Filters&rdquo; from Lytro Desktop are imported as Local Adjustments you can keep editing.</p></div>
       <div><h3>Depth masks</h3><p>Select by distance instead of drawing: an adjustment covers just one slice of the scene, and can follow the focus as it moves.</p></div>
-      <div><h3>Object edges</h3><p>A small segmentation model (MobileSAM) runs right on your computer and finds the outline of each object, so focus and blur stop cleanly at edges instead of bleeding across them.</p></div>
+      <div><h3>Object edges</h3><p>A small segmentation model (MobileSAM) runs right on your computer and finds the outline of each object, so focus and blur stop cleanly at edges.</p></div>
       <div><h3>Film looks</h3><p>296 film emulation LUTs included, from color negative and slide to black and white and instant film, or import your own .cube LUTs.</p></div>
       <div><h3>Upscaling to 4K and beyond</h3><p>Photos enlarged up to 4× and video up to 4K on the GPU, with your choice of AMD FSR 1, Lanczos or smooth upscaling and adjustable sharpening.</p></div>
       <div><h3>Social media sizes</h3><p>Export video ready for Reels, TikTok, Shorts and Stories at 9:16, feed posts at 4:5 or 1:1, and YouTube at 16:9, up to 4K.</p></div>
@@ -449,7 +473,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       <div><h3>Dust &amp; speckle removal</h3><p>Fill in the faint dark spots dust leaves on the sensor or lens, despeckle small bright or dark specks, and fix hot, warm and dead pixels automatically, alongside luminance, color and multi-view noise reduction.</p></div>
       <div><h3>Lens corrections</h3><p>Remove chromatic aberration, distortion, vignetting and flare, automatically or by hand.</p></div>
       <div><h3>Camera calibration</h3><p>Import the calibration files from your camera in the desktop app.</p></div>
-      <div><h3>Free to use</h3><p>For any purpose under the PolyForm Shield license.</p></div>
+      <div><h3>Free to use</h3><p>Free for (almost) any purpose under the PolyForm Shield license.</p></div>
     </div>
   </div>
 </section>
@@ -482,6 +506,22 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
         </div>
       </div>
     </div>
+  </div>
+  <div class="wrap gallery" id="gallery">
+    <div class="gal-head">
+      <h3>Lytro Desktop and ILLUMinator, side by side</h3>
+      <div class="gal-mode" role="group" aria-label="What to compare"><button type="button" data-mode="photo" aria-pressed="true">Photo</button><button type="button" data-mode="depth" aria-pressed="false">Depth</button></div>
+    </div>
+    <div class="gal-stage">
+      <img class="gal-under" src="gallery/a1-photo-ours.jpg" alt="" decoding="async">
+      <img class="gal-top" src="gallery/a1-photo-lytro.jpg" alt="" decoding="async">
+      <span class="gal-tag l">Lytro Desktop</span><span class="gal-tag r">ILLUMinator</span>
+      <input type="range" min="0" max="100" value="50" aria-label="Move the divider between Lytro Desktop and ILLUMinator">
+      <div class="gal-handle"></div>
+    </div>
+    <p class="gal-caption"></p>
+    <div class="gal-thumbs"><button type="button" aria-label="Workshop" aria-pressed="false"><img src="gallery/a1-thumb.jpg" alt="" loading="lazy" decoding="async"></button><button type="button" aria-label="Glass jars" aria-pressed="false"><img src="gallery/a2-thumb.jpg" alt="" loading="lazy" decoding="async"></button><button type="button" aria-label="Old camera" aria-pressed="false"><img src="gallery/a3-thumb.jpg" alt="" loading="lazy" decoding="async"></button><button type="button" aria-label="Chain-link fence" aria-pressed="false"><img src="gallery/a4-thumb.jpg" alt="" loading="lazy" decoding="async"></button><button type="button" aria-label="Peeling wall" aria-pressed="false"><img src="gallery/a5-thumb.jpg" alt="" loading="lazy" decoding="async"></button></div>
+    <script type="application/json">[{"title": "Workshop", "photo": {"lytro": "gallery/a1-photo-lytro.jpg", "ours": "gallery/a1-photo-ours.jpg"}, "depth": {"lytro": "gallery/a1-depth-lytro.jpg", "ours": "gallery/a1-depth-ours.jpg"}}, {"title": "Glass jars", "photo": {"lytro": "gallery/a2-photo-lytro.jpg", "ours": "gallery/a2-photo-ours.jpg"}, "depth": {"lytro": "gallery/a2-depth-lytro.jpg", "ours": "gallery/a2-depth-ours.jpg"}}, {"title": "Old camera", "photo": {"lytro": "gallery/a3-photo-lytro.jpg", "ours": "gallery/a3-photo-ours.jpg"}, "depth": {"lytro": "gallery/a3-depth-lytro.jpg", "ours": "gallery/a3-depth-ours.jpg"}}, {"title": "Chain-link fence", "photo": {"lytro": "gallery/a4-photo-lytro.jpg", "ours": "gallery/a4-photo-ours.jpg"}, "depth": {"lytro": "gallery/a4-depth-lytro.jpg", "ours": "gallery/a4-depth-ours.jpg"}}, {"title": "Peeling wall", "photo": {"lytro": "gallery/a5-photo-lytro.jpg", "ours": "gallery/a5-photo-ours.jpg"}, "depth": {"lytro": "gallery/a5-depth-lytro.jpg", "ours": "gallery/a5-depth-ours.jpg"}}]</script>
   </div>
 </section>
 
@@ -520,6 +560,59 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
     <span><a href="https://abstractpolygon.com">abstractpolygon.com</a> · <a href="https://github.com/AbstractPolygon/ILLUMinator">GitHub</a> · <a href="https://github.com/AbstractPolygon/ILLUMinator/wiki">Guide</a></span>
   </footer>
 </div>
+
+<script>
+// Gallery: the divider moves with the pointer, the arrow keys (the slider) or a tap;
+// the thumbnails and the Photo / Depth buttons swap the pair of pictures.
+(() => {
+  const root = document.getElementById('gallery');
+  if (!root) return;
+  const items = JSON.parse(root.querySelector('script[type="application/json"]').textContent);
+  const stage = root.querySelector('.gal-stage');
+  const under = stage.querySelector('.gal-under');
+  const top = stage.querySelector('.gal-top');
+  const slider = stage.querySelector('input');
+  const caption = root.querySelector('.gal-caption');
+  const modeButtons = [...root.querySelectorAll('.gal-mode button')];
+  const thumbs = [...root.querySelectorAll('.gal-thumbs button')];
+  let mode = 'photo';
+  let current = 0;
+  const show = () => {
+    const it = items[current];
+    top.src = it[mode].lytro;
+    under.src = it[mode].ours;
+    top.alt = 'Lytro Desktop ' + mode + ' of ' + it.title;
+    under.alt = 'ILLUMinator ' + mode + ' of ' + it.title;
+    caption.textContent = it.title + (mode === 'depth' ? '. Depth maps: near is warm, far is cool.' : '.');
+    thumbs.forEach((b, i) => b.setAttribute('aria-pressed', String(i === current)));
+    modeButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+  };
+  const place = (percent) => {
+    const p = Math.max(0, Math.min(100, percent));
+    stage.style.setProperty('--pos', p + '%');
+    slider.value = String(Math.round(p));
+  };
+  const fromPointer = (e) => {
+    const r = stage.getBoundingClientRect();
+    place(((e.clientX - r.left) / r.width) * 100);
+  };
+  let dragging = false;
+  stage.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    stage.setPointerCapture(e.pointerId);
+    fromPointer(e);
+  });
+  stage.addEventListener('pointermove', (e) => { if (dragging) fromPointer(e); });
+  const stop = () => { dragging = false; };
+  stage.addEventListener('pointerup', stop);
+  stage.addEventListener('pointercancel', stop);
+  slider.addEventListener('input', () => place(+slider.value));
+  thumbs.forEach((b, i) => b.addEventListener('click', () => { current = i; show(); }));
+  modeButtons.forEach((b) => b.addEventListener('click', () => { mode = b.dataset.mode; show(); }));
+  place(50);
+  show();
+})();
+</script>
 
 <script>
 // The library import: the dialog opens, pictures copy across one by one into
