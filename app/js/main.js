@@ -6343,7 +6343,9 @@ $('version').textContent = VERSION;
 // its drive mounts, and make the main process look for the drive sooner.
 if (native) document.body.classList.add('native');
 if (CAMERA_IMPORT) {
-  $('camera-btn').hidden = false;
+  // The desktop app shows the button once a camera is detected (below);
+  // a browser has no way to tell, so it always shows it.
+  $('camera-btn').hidden = !!native;
   $('camera-status').hidden = false;
 }
 if (native && CAMERA_IMPORT) {
@@ -6355,6 +6357,7 @@ if (native && CAMERA_IMPORT) {
       ? `Lytro camera connected · ${count} photo${count === 1 ? '' : 's'}`
       : usbLytros ? 'Lytro camera connected · looking for photos…' : '';
     $('camera-status').classList.toggle('connected', lastCams.length > 0 || usbLytros > 0);
+    $('camera-btn').hidden = !(lastCams.length > 0 || usbLytros > 0);
     const c = lastCams.find((x) => x.files.length) || lastCams[0];
     setCameraSection(c ? { cam: { kind: c.kind, id: c.id, label: c.label, files: c.files } }
       : usbLytros ? { note: 'Lytro camera connected. Looking for its photos…' } : {});
