@@ -36,7 +36,7 @@ const state = {
   lf: null,
   sampler: null,
   dev: null,
-  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {}, mvDenoise: { on: false, blend: 1 } },
+  settings: { ev: 0, saturation: 1, useCcm: true, autoWb: false, detail: 1, defringe: null, wb: { kelvin: null, tint: 0 }, tone: {}, color: {}, mvDenoise: { on: true, blend: 1 } },
   pp: null, // ProcessedPicture for .lfp files without raw data
   fringeAuto: null, // colors found by auto defringe
   look: null,

@@ -389,6 +389,11 @@ input[type=range]:disabled { cursor: default; }
 .details-panel label:has(input[type=range]:disabled),
 [data-panel=camera] label:has(input[type=range]:disabled),
 #fringe-controls:not(:disabled) label:has(input[type=range]:disabled) { opacity: 0.45; }
+/* A checkbox that is not active (Show tilt while Tilt is not Enabled, in the
+   sidebar or any dialog) dims its label like the sliders. */
+label:has(> input[type=checkbox]:disabled) { opacity: 0.45; }
+/* With no photo open the whole sidebar is already dimmed. */
+.controls.no-photo label:has(> input[type=checkbox]:disabled) { opacity: 1; }
 input[type=range]:disabled::-webkit-slider-thumb { background: var(--muted); }
 input[type=range]:disabled::-moz-range-thumb { background: var(--muted); }
 button.wide { display: block; width: 100%; }

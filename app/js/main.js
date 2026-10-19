@@ -1171,6 +1171,9 @@ function ensureAnimation() {
 
 // A camera or animation setting changed: the frames are stale.
 function invalidateAnimation() {
+  // The playhead stays on the frame that was showing (while frames play, only
+  // their index moves, not the playhead's time).
+  if (state.showingFrames && state.frames.length > 1) state.keyTime = (state.drawFrame ?? state.index) / KEY_FPS;
   if (state.animKey) {
     engine.cancel('frames');
     engine.cancel('refocus');
@@ -2026,8 +2029,16 @@ $('depth-smooth').oninput = () => {
 };
 $('depth-smooth').onchange = () => {};
 // Normal or high quality depth: the depth map is measured again.
-$('depth-hq').onchange = () => applySettingsSoon();
-$('depth-objects').onchange = () => applySettingsSoon();
+// Object edges work on the high quality depth map: turning them on turns that
+// on too, and turning it off turns them off.
+$('depth-hq').onchange = () => {
+  if (!$('depth-hq').checked) $('depth-objects').checked = false;
+  applySettingsSoon();
+};
+$('depth-objects').onchange = () => {
+  if ($('depth-objects').checked) $('depth-hq').checked = true;
+  applySettingsSoon();
+};
 $('lytro-depth').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {

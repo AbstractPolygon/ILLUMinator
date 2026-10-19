@@ -596,11 +596,11 @@
         </details>
         <details class="subpanel">
           <summary><h3>Noise Reduction</h3></summary>
-          <label class="check" title="Finds hot and dead pixels on the sensor and fills them from their neighbors before the picture is made"><input id="nr-hot" type="checkbox" checked> Remove hot pixels</label>
-          <label class="check"><input id="mv-on" type="checkbox"> Multi-view</label>
+          <label class="check"><input id="mv-on" type="checkbox" checked> Multi-view</label>
           <label title="How much the other views are blended in to reduce noise">Blend <output for="mv-blend" data-for="mv-blend">100</output>
-            <input id="mv-blend" type="range" min="0" max="100" step="1" value="100" data-default="100" disabled>
+            <input id="mv-blend" type="range" min="0" max="100" step="1" value="100" data-default="100">
           </label>
+          <label class="check" title="Finds hot and dead pixels on the sensor and fills them from their neighbors before the picture is made"><input id="nr-hot" type="checkbox" checked> Remove hot pixels</label>
           <label title="Smooths grain in brightness">Luminance <output for="nr-luminance" data-for="nr-luminance">30</output>
             <input id="nr-luminance" type="range" min="0" max="100" step="1" value="30" data-default="30">
           </label>
