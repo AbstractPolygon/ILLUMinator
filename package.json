@@ -60,6 +60,12 @@
             "x64",
             "arm64"
           ]
+        },
+        {
+          "target": "msi",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -110,7 +116,14 @@
       "menuCategory": false
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
-    "npmRebuild": false
+    "npmRebuild": false,
+    "msi": {
+      "oneClick": false,
+      "perMachine": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ILLUMinator"
+    }
   },
   "devDependencies": {
     "electron": "44.4.5",

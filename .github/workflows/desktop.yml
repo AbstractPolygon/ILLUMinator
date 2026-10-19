@@ -63,6 +63,7 @@ jobs:
           name: ILLUMinator-${{ matrix.name }}
           path: |
             dist/*.exe
+            dist/*.msi
             dist/*.dmg
             dist/*.AppImage
             dist/*.deb
@@ -112,7 +113,7 @@ jobs:
           cat > notes.md <<NOTES
           ILLUMinator ${version}.
 
-          - **Windows:** \`ILLUMinator-${version}-win-x64.exe\` (Intel and AMD) or \`ILLUMinator-${version}-win-arm64.exe\` (ARM, such as Snapdragon)
+          - **Windows:** \`ILLUMinator-${version}-win-x64.exe\` (Intel and AMD) or \`ILLUMinator-${version}-win-arm64.exe\` (ARM, such as Snapdragon), or \`ILLUMinator-${version}-win-x64.msi\` (Windows Installer package, for managed installs)
           - **macOS:** \`ILLUMinator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`ILLUMinator-${version}-mac-x64.dmg\` (Intel)
           - **Linux:** \`ILLUMinator-${version}-linux-amd64.deb\` (Debian, Ubuntu) or \`ILLUMinator-${version}-linux-x86_64.AppImage\` (other distributions)
           - **Web:** \`ILLUMinator-${version}-web.zip\`, to unzip onto any static web server
