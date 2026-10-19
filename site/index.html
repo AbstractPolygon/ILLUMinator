@@ -294,8 +294,8 @@ p.section-title { max-width: none; }
 footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
 
 /* Gallery: Lytro Desktop against ILLUMinator, photo and depth, with a draggable divider. */
-.gallery { margin-top: 56px; max-width: 920px; }
-.gal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.gallery { max-width: 920px; }
+.gal-head { display: flex; justify-content: flex-start; margin: 22px 0 14px; }
 .gal-head h3 { font-family: var(--display); font-size: 20px; font-weight: 800; margin: 0; }
 .gal-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .gal-mode button { background: var(--panel); color: var(--muted); border: 0; padding: 7px 16px; font: 600 13px var(--display); cursor: pointer; }
@@ -507,9 +507,13 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       </div>
     </div>
   </div>
+</section>
+
+<section class="band" id="compare">
   <div class="wrap gallery" id="gallery">
+    <p class="eyebrow">Side by side</p>
+    <h2>The same photos, in Lytro Desktop and in ILLUMinator.</h2>
     <div class="gal-head">
-      <h3>Lytro Desktop and ILLUMinator, side by side</h3>
       <div class="gal-mode" role="group" aria-label="What to compare"><button type="button" data-mode="photo" aria-pressed="true">Photo</button><button type="button" data-mode="depth" aria-pressed="false">Depth</button></div>
     </div>
     <div class="gal-stage">
