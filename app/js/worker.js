@@ -17,6 +17,7 @@ import { pickObjects, signatures } from './core/objects.js';
 import { DEPTH_PASSES, measureMatch } from './core/depthmatch.js';
 import { measureMatchGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
+import { removePeriodicPattern } from './core/notch.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -723,6 +724,8 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
     gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });
   state.lensOffsets = sr.lensOffsets;
+  // What the lens grid correction leaves of the dotted pattern (core/notch.js).
+  removePeriodicPattern(sr.rgb, sr.width, sr.height);
   return sr;
 }
 
