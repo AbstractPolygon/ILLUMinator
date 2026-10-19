@@ -337,9 +337,11 @@ test('depth cleanup: a near halo on a flat background is put back on the backgro
   assert.equal(out[10 * w + 5], 1, 'the object is untouched');
 });
 
-test('auto white balance adds the blue and red Lytro Desktop adds, keeping brightness', async () => {
-  const { AUTO_WB_GAINS } = await import('../app/js/core/color.js');
-  const y = 0.2126 * AUTO_WB_GAINS[0] + 0.7152 * AUTO_WB_GAINS[1] + 0.0722 * AUTO_WB_GAINS[2];
-  assert.ok(Math.abs(y - 1) < 1e-9);
-  assert.ok(AUTO_WB_GAINS[2] / AUTO_WB_GAINS[1] > 1.05 && AUTO_WB_GAINS[2] / AUTO_WB_GAINS[1] < 1.09);
+test('auto white balance keeps the camera gains, and falls back to gray world without them', async () => {
+  const { autoWhiteBalance } = await import('../app/js/core/color.js');
+  const camera = autoWhiteBalance([0.2, 0.3, 0.1], { wb: [1.3, 1, 1.4] });
+  assert.deepEqual(camera.auto, [1, 1, 1]);
+  assert.deepEqual(camera.manual, [1, 1, 1]);
+  const gray = autoWhiteBalance([0.2, 0.3, 0.1], { wb: [1, 1, 1] });
+  assert.ok(Math.abs(gray.auto[0] * 0.2 - 0.3) < 1e-9 && Math.abs(gray.auto[2] * 0.1 - 0.3) < 1e-9);
 });

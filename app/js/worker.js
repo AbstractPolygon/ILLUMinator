@@ -21,7 +21,7 @@ import { removePeriodicPattern } from './core/notch.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
-import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, AUTO_WB_GAINS, solveWhiteBalance } from './core/color.js';
+import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
@@ -149,11 +149,11 @@ function updateColor() {
   const center = centerView();
   state.centerMeans = channelMeans(center);
   const s = state.settings;
-  const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
   const asShot = asShotKelvin();
   // Auto white balance replaces the manual temperature and tint.
-  const manual = s.autoWb ? AUTO_WB_GAINS : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
-  state.wbGains = auto.map((g, i) => g * manual[i]);
+  const awb = s.autoWb ? autoWhiteBalance(state.centerMeans, lf.cam) : null;
+  const manual = awb ? awb.manual : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  state.wbGains = (awb ? awb.auto : [1, 1, 1]).map((g, i) => g * manual[i]);
   state.look = makeLook(s);
   state.detail = makeDetail(s);
   state.lens = lensParams(s.lens, state.lf && state.lf.cam);
@@ -192,9 +192,9 @@ function colorState(color) {
   // Auto defringe keeps the colors it found; radius and threshold animate.
   if (s.defringe && s.defringe.auto && state.settings.defringe) s.defringe = { ...s.defringe, colors: state.settings.defringe.colors };
   const asShot = asShotKelvin();
-  const m = state.centerMeans;
-  const auto = s.autoWb ? m.map((v) => m[1] / v) : [1, 1, 1];
-  const manual = s.autoWb ? AUTO_WB_GAINS : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const awb = s.autoWb ? autoWhiteBalance(state.centerMeans, state.lf && state.lf.cam) : null;
+  const auto = awb ? awb.auto : [1, 1, 1];
+  const manual = awb ? awb.manual : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   const look = makeLook(s);
   if (state.pp) {
     const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
@@ -1444,8 +1444,9 @@ function updateProcessedColor() {
   const center = pp.linear(pp.images[0]);
   state.centerMeans = channelMeans(center);
   const asShot = asShotKelvin();
-  const auto = s.autoWb ? state.centerMeans.map((m) => state.centerMeans[1] / m) : [1, 1, 1];
-  const manual = s.autoWb ? AUTO_WB_GAINS : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
+  const awb = s.autoWb ? autoWhiteBalance(state.centerMeans, null) : null;
+  const auto = awb ? awb.auto : [1, 1, 1];
+  const manual = awb ? awb.manual : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
   state.matrix = sat.map((v, i) => v * auto[i % 3] * manual[i % 3]);
   state.baseExposure = 1;

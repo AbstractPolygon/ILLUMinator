@@ -622,11 +622,14 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
   const strip = root.querySelector('.gal-thumbs');
   const prev = root.querySelector('.gal-arrow.prev');
   const next = root.querySelector('.gal-arrow.next');
-  const updateArrows = () => {
-    prev.disabled = strip.scrollLeft <= 4;
-    next.disabled = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 2;
+  // The arrows loop: past the last photo they return to the first, and back.
+  const updateArrows = () => {};
+  const page = (dir) => {
+    const max = strip.scrollWidth - strip.clientWidth;
+    if (dir > 0 && strip.scrollLeft >= max - 2) strip.scrollTo({ left: 0, behavior: 'smooth' });
+    else if (dir < 0 && strip.scrollLeft <= 4) strip.scrollTo({ left: max, behavior: 'smooth' });
+    else strip.scrollBy({ left: dir * strip.clientWidth * 0.8, behavior: 'smooth' });
   };
-  const page = (dir) => strip.scrollBy({ left: dir * strip.clientWidth * 0.8, behavior: 'smooth' });
   prev.addEventListener('click', () => page(-1));
   next.addEventListener('click', () => page(1));
   strip.addEventListener('scroll', updateArrows, { passive: true });

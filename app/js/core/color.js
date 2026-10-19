@@ -43,14 +43,22 @@ import { curveTable, curveAt } from './curve.js';
 
 export const DEFAULT_KELVIN = 5500;
 
-// Lytro Desktop's Auto white balance starts from the camera's own balance
-// and adds a little blue: measured on nine library photos set to Auto, its
-// pictures carry 7% more blue (relative to green) than the camera's gains
-// give, 2% more red; the spread between photos is about 4% (one photo, a red
-// shelf, is far off at 42%).
-const AUTO_EXTRA = [1.02, 1, 1.07];
-const AUTO_Y = 0.2126 * AUTO_EXTRA[0] + 0.7152 * AUTO_EXTRA[1] + 0.0722 * AUTO_EXTRA[2];
-export const AUTO_WB_GAINS = AUTO_EXTRA.map((g) => g / AUTO_Y);
+// Lytro Desktop's Auto white balance: the camera's own estimate. Read from
+// Middleware.dll (awb2.cpp), LFE's automatic white balance is the same
+// estimator the camera runs: it averages the picture's colors weighted by a
+// per-product table of plausible neutrals (a 64 x 64 map over sqrt(R)+sqrt(B)
+// -2 sqrt(G) and sqrt(B)-sqrt(R)), then reports a temperature and tint
+// against the camera's calibration. On eleven library photos set to Auto its
+// temperature is within 3% of the camera's (the cct in the photo) and its tint
+// follows the camera gains (green over the root of red times blue), so the
+// gains stored in the photo are Lytro Desktop's Auto. Photos without them
+// (processed pictures, other sources) fall back to the gray world estimate.
+const AUTO_FLAT = [1, 1, 1];
+export function autoWhiteBalance(means, cam) {
+  const wb = cam && cam.wb;
+  if (wb && wb.some((g) => Math.abs(g - 1) > 1e-4)) return { auto: AUTO_FLAT, manual: AUTO_FLAT };
+  return { auto: means.map((m) => means[1] / m), manual: AUTO_FLAT };
+}
 
 // The per-pixel adjustments, or null when they are all at zero.
 export function makeLook(settings = {}) {
