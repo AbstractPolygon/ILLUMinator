@@ -643,8 +643,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
     while (strip.scrollLeft > mid + w / 2) strip.scrollLeft -= w;
   };
   const page = (dir) => {
-    const n = Math.max(1, Math.floor((strip.clientWidth / step()) * 0.8));
-    strip.scrollBy({ left: dir * n * step(), behavior: 'smooth' });
+    strip.scrollBy({ left: dir * step(), behavior: 'smooth' });
   };
   prev.addEventListener('click', () => page(-1));
   next.addEventListener('click', () => page(1));
