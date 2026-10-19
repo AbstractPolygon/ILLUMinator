@@ -585,7 +585,20 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
   const top = stage.querySelector('.gal-top');
   const slider = stage.querySelector('input');
   const modeButtons = [...root.querySelectorAll('.gal-mode button')];
-  const thumbs = [...root.querySelectorAll('.gal-thumbs button')];
+  // One endless ribbon: copies of the thumbnails sit on both sides of the
+  // real ones, and the ribbon jumps a whole set back to the middle whenever it
+  // rests, so scrolling can go on in either direction without a visible seam.
+  const strip = root.querySelector('.gal-thumbs');
+  const originals = [...strip.children];
+  const N = originals.length;
+  const SETS = 2;
+  originals.forEach((b, i) => { b.dataset.i = i; });
+  const copies = () => originals.map((b) => { const c = b.cloneNode(true); c.setAttribute('aria-hidden', 'true'); c.tabIndex = -1; return c; });
+  for (let k = 0; k < SETS; k++) {
+    strip.prepend(...copies());
+    strip.append(...copies());
+  }
+  const thumbs = [...strip.children];
   let mode = 'photo';
   let current = 0;
   const show = () => {
@@ -594,7 +607,7 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
     under.src = it[mode].ours;
     top.alt = 'Lytro Desktop ' + mode + ' of ' + it.title;
     under.alt = 'ILLUMinator ' + mode + ' of ' + it.title;
-    thumbs.forEach((b, i) => b.setAttribute('aria-pressed', String(i === current)));
+    thumbs.forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.i === current)));
     modeButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
   };
   const place = (percent) => {
@@ -617,41 +630,29 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
   stage.addEventListener('pointerup', stop);
   stage.addEventListener('pointercancel', stop);
   slider.addEventListener('input', () => place(+slider.value));
-  thumbs.forEach((b, i) => b.addEventListener('click', () => { current = i; show(); }));
+  thumbs.forEach((b) => b.addEventListener('click', () => { current = +b.dataset.i; show(); }));
   modeButtons.forEach((b) => b.addEventListener('click', () => { mode = b.dataset.mode; show(); }));
-  const strip = root.querySelector('.gal-thumbs');
   const prev = root.querySelector('.gal-arrow.prev');
   const next = root.querySelector('.gal-arrow.next');
-  // The arrows loop for good: the thumbnails that slide out one side come
-  // round the other, so the strip never runs out.
-  const updateArrows = () => {};
+  const step = () => originals[1].offsetLeft - originals[0].offsetLeft;
+  const recenter = () => {
+    const w = N * step();
+    if (!(w > 0)) return;
+    const mid = SETS * w;
+    while (strip.scrollLeft < mid - w / 2) strip.scrollLeft += w;
+    while (strip.scrollLeft > mid + w / 2) strip.scrollLeft -= w;
+  };
   const page = (dir) => {
-    const all = [...strip.children];
-    if (all.length < 2) return;
-    const step = all[1].offsetLeft - all[0].offsetLeft;
-    const n = Math.min(all.length - 1, Math.max(1, Math.floor((strip.clientWidth / step) * 0.8)));
-    const from = all.map((b) => b.getBoundingClientRect().left);
-    strip.scrollLeft = 0;
-    for (let k = 0; k < n; k++) {
-      if (dir > 0) strip.appendChild(strip.firstElementChild);
-      else strip.insertBefore(strip.lastElementChild, strip.firstElementChild);
-    }
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    all.forEach((b, i) => {
-      b.style.transition = 'none';
-      b.style.transform = `translateX(${from[i] - b.getBoundingClientRect().left}px)`;
-    });
-    strip.getBoundingClientRect();
-    all.forEach((b) => {
-      b.style.transition = 'transform .35s ease';
-      b.style.transform = '';
-    });
+    const n = Math.max(1, Math.floor((strip.clientWidth / step()) * 0.8));
+    strip.scrollBy({ left: dir * n * step(), behavior: 'smooth' });
   };
   prev.addEventListener('click', () => page(-1));
   next.addEventListener('click', () => page(1));
-  strip.addEventListener('scroll', updateArrows, { passive: true });
-  window.addEventListener('resize', updateArrows);
-  updateArrows();
+  let rest = 0;
+  strip.addEventListener('scroll', () => { clearTimeout(rest); rest = setTimeout(recenter, 140); }, { passive: true });
+  window.addEventListener('resize', () => { strip.scrollLeft = SETS * N * step(); });
+  window.addEventListener('load', () => { strip.scrollLeft = SETS * N * step(); });
+  strip.scrollLeft = SETS * N * step();
   place(50);
   show();
 })();
