@@ -16,6 +16,7 @@ import { loadSegModel, findObjectMasks } from './core/segmodel.js';
 import { pickObjects, signatures } from './core/objects.js';
 import { DEPTH_PASSES, measureMatch } from './core/depthmatch.js';
 import { measureMatchGpu } from './gpu/depthmatch.js';
+import { combineDepth } from './core/depthcombine.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -836,7 +837,7 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
-  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? 'classic');
+  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? 'combined');
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
@@ -1100,49 +1101,28 @@ async function ensureDepth(id) {
     // Normal quality: the plain cost volume, about twice as fast; high adds
     // occlusion-aware matching and edge-aware filtering (core/depth.js).
     const fast = state.settings.depthQuality !== 'high';
-    setDepthStyle(state.settings.depthStyle ?? 'classic');
-    DEPTH_PASSES.on = (state.settings.depthStyle ?? 'classic') === 'match';
+    // Combined (the default): the classic and the Lytro-style depth, blended
+    // (core/depthcombine.js). Without a real GPU the Lytro-style half would take
+    // minutes, so classic alone is measured there.
+    let style = state.settings.depthStyle ?? 'combined';
+    if (style === 'combined' && !hardwareGpu()) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
+    const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
     try {
-    let matched = null;
-    if (state.gpu && DEPTH_PASSES.on) {
-      // The Lytro-style depth on the GPU; the CPU measures it if the GPU cannot.
-      try {
-        const { outW: gw, outH: gh } = state.sampler;
-        matched = measureMatchGpu(state.gpu, state.gpu.readViewsRect(0, 0, gw, gh), gw, gh, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
-      } catch (e) {
-        console.warn('GPU depth match failed; using the CPU', e);
+      if (style === 'combined') {
+        const classic = measureClassic(id, fast, report(0, 0.4));
+        const match = measureLytro(report(0.4, 0.95));
+        if (match && classic) {
+          state.depthRaw = { ...match, alpha: combineDepth(classic.alpha, match.alpha, outW, outH) };
+        } else {
+          state.depthRaw = classic || match || measureClassic(id, fast, report(0, 1), true);
+        }
+      } else if (style === 'match') {
+        state.depthRaw = measureLytro(report(0, 1)) || measureClassic(id, fast, report(0, 1));
+      } else {
+        state.depthRaw = measureClassic(id, fast, report(0, 1));
       }
-    }
-    if (matched) {
-      state.depthRaw = finishDepth(matched, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
-    } else if (state.gpu && !DEPTH_PASSES.on) {
-      post({ id, type: 'progress', stage: 'Measuring depth', progress: 0 });
-      // The cost volume on the GPU takes most of the time; the two (fine and
-      // coarse) measurements share the bar, then the clean-up steps follow.
-      const coarseOn = !fast && DEPTH_COARSE.on;
-      const share = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
-      const rgb = centerView();
-      const center = luminance(rgb);
-      const guide = depthGuide(center);
-      const floor = brightnessFloor(center);
-      let measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor, guide, onProgress: share(0, coarseOn ? 0.45 : 0.8) });
-      if (!fast && DEPTH_COARSE.on) {
-        // The coarse match for far out-of-focus texture (core/depth.js).
-        const coarse = state.gpu.measureDepth({ ...DEPTH_SEARCH, window: DEPTH_SEARCH.window + 1, detail: DEPTH_COARSE.detail, blur: DEPTH_COARSE.blur, occlusion: false, guided: true, floor, guide, onProgress: share(0.45, 0.8) });
-        measured = combineCoarse(measured, coarse);
-      }
-      state.depthRaw = finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu), fill: state.gpu.edgeAwareFill.bind(state.gpu), onProgress: share(0.8, 1) });
-    } else if (DEPTH_PASSES.on) {
-      const measured = measureMatch(state.gpu ? state.gpu.readViewsRect(0, 0, outW, outH) : state.refocusViews, outW, outH, { onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }) });
-      state.depthRaw = finishDepth(measured, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
-    } else {
-      state.depthRaw = estimateDepth(state.refocusViews, outW, outH, {
-        ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
-        onProgress: (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: p }),
-      });
-    }
     } finally {
       DEPTH_REGIONS.objects = null;
     }
@@ -1150,6 +1130,62 @@ async function ensureDepth(id) {
   }
   return true;
 }
+
+// True when the GPU is a real graphics card; software renderers (SwiftShader,
+// llvmpipe) are too slow for the Lytro-style depth.
+function hardwareGpu() {
+  return !!state.gpu && !/swiftshader|llvmpipe|software|softpipe/i.test(state.gpu.name || '');
+}
+
+// The classic depth (plain cost volume; high quality adds occlusion-aware
+// matching, a coarse match and edge-aware filtering). On the GPU when there is
+// one. Returns the finished, unsmoothed depth.
+function measureClassic(id, fast, progress) {
+  const { outW, outH } = state.sampler;
+  setDepthStyle('classic');
+  DEPTH_PASSES.on = false;
+  if (state.gpu) {
+    progress(0);
+    // The cost volume on the GPU takes most of the time; the two (fine and
+    // coarse) measurements share the bar, then the clean-up steps follow.
+    const coarseOn = !fast && DEPTH_COARSE.on;
+    const share = (from, to) => (p) => progress(from + (to - from) * p);
+    const rgb = centerView();
+    const center = luminance(rgb);
+    const guide = depthGuide(center);
+    const floor = brightnessFloor(center);
+    let measured = state.gpu.measureDepth({ ...DEPTH_SEARCH, occlusion: !fast, guided: !fast, floor, guide, onProgress: share(0, coarseOn ? 0.45 : 0.8) });
+    if (!fast && DEPTH_COARSE.on) {
+      // The coarse match for far out-of-focus texture (core/depth.js).
+      const coarse = state.gpu.measureDepth({ ...DEPTH_SEARCH, window: DEPTH_SEARCH.window + 1, detail: DEPTH_COARSE.detail, blur: DEPTH_COARSE.blur, occlusion: false, guided: true, floor, guide, onProgress: share(0.45, 0.8) });
+      measured = combineCoarse(measured, coarse);
+    }
+    return finishDepth(measured, outW, outH, guide, { refine: !fast, color: depthColorGuide(rgb), median: state.gpu.weightedMedian.bind(state.gpu), fill: state.gpu.edgeAwareFill.bind(state.gpu), onProgress: share(0.8, 1) });
+  }
+  return estimateDepth(state.refocusViews, outW, outH, {
+    ...(fast ? { occlusion: false, guided: false, refine: false } : {}),
+    onProgress: progress,
+  });
+}
+
+// The Lytro-style depth (core/depthmatch.js): on the GPU when there is one,
+// and on the CPU if the GPU cannot do it. Returns the finished, unsmoothed depth.
+function measureLytro(progress) {
+  const { outW, outH } = state.sampler;
+  setDepthStyle('match');
+  DEPTH_PASSES.on = true;
+  let measured = null;
+  if (state.gpu) {
+    try {
+      measured = measureMatchGpu(state.gpu, state.gpu.readViewsRect(0, 0, outW, outH), outW, outH, { onProgress: progress });
+    } catch (e) {
+      console.warn('GPU depth match failed; using the CPU', e);
+    }
+  }
+  if (!measured) measured = measureMatch(state.gpu ? state.gpu.readViewsRect(0, 0, outW, outH) : state.refocusViews, outW, outH, { onProgress: progress });
+  return finishDepth(measured, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
+}
+
 
 // The measured depth, smoothed by the Depth > Smoothing setting (edge-aware,
 // guided by the picture). Re-run when the setting changes.
