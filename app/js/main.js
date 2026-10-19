@@ -924,7 +924,10 @@ function showFocusPoint() {
 const spreadView = { busy: false, pending: false };
 async function updateSpreadOverlay() {
   const overlay = $('spread-overlay');
-  const on = $('spread-show').checked && hasDepth() && state.mode === 'camera' && !state.depthShown;
+  // Show tilt: the same tint, measured from the tilted plane of focus alone
+  // (no sharp range around it), fading in over a short distance from it.
+  const tiltView = $('tilt-show').checked && $('tilt-on').checked;
+  const on = ($('spread-show').checked || tiltView) && hasDepth() && state.mode === 'camera' && !state.depthShown;
   overlay.hidden = !on;
   if (!on) return;
   if (spreadView.busy) {
@@ -933,7 +936,8 @@ async function updateSpreadOverlay() {
   }
   spreadView.busy = true;
   try {
-    const msg = await engine.request('spreadMask', { alpha: +$('focus').value, ...focusField() }, { onProgress: showProgress });
+    const field = tiltView ? { ...focusField(), spread: 0, smooth: 0.3 } : focusField();
+    const msg = await engine.request('spreadMask', { alpha: +$('focus').value, ...field }, { onProgress: showProgress });
     hideProgress();
     if (msg && msg.pixels) {
       const mask = toImageData(msg);
@@ -1620,8 +1624,8 @@ function setMode(mode) {
   for (const id of ['depth-btn', 'depth-grey', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-objects', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
-  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
-  if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = true;
+  for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', 'tilt-show', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
+  if (!$('tilt-on').checked) for (const id of ['tilt', 'tilt-rotation', 'tilt-show']) $(id).disabled = true;
   $('mv-on').disabled = !raw;
   $('nr-hot').disabled = !raw;
   // Pictures Lytro Desktop finished already have its look.
@@ -1897,7 +1901,26 @@ async function focusAt(event) {
   cameraChanged({ final: true });
 }
 
+// Only a short click on the picture sets the focus: not one that follows a
+// drag (turning the viewpoint, panning) or a press held down for a while.
+const CLICK_MAX_MS = 400;
+const CLICK_MAX_MOVE = 4;
+let pressed = null;
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  suppressClick = false;
+  pressed = { x: event.clientX, y: event.clientY, t: performance.now(), moved: false };
+}, true);
+window.addEventListener('pointermove', (event) => {
+  if (pressed && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > CLICK_MAX_MOVE) pressed.moved = true;
+}, true);
+window.addEventListener('pointercancel', () => {
+  pressed = null;
+}, true);
+
 canvas.addEventListener('click', (event) => {
+  const press = pressed;
+  pressed = null;
   if (cropState.editing) return;
   if (state.picking) {
     pickWhiteBalance(event);
@@ -1907,6 +1930,7 @@ canvas.addEventListener('click', (event) => {
     suppressClick = false;
     return;
   }
+  if (press && (press.moved || performance.now() - press.t > CLICK_MAX_MS)) return;
   if (!state.info || state.mode !== 'camera' || state.depthShown) return;
   focusAt(event);
 });
@@ -2044,10 +2068,18 @@ for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread
   $(id).onchange = () => cameraChanged({ final: true });
 }
 
-$('spread-show').onchange = updateSpreadOverlay;
+// One tint at a time: Show spread and Show tilt switch each other off.
+$('spread-show').onchange = () => {
+  if ($('spread-show').checked) $('tilt-show').checked = false;
+  updateSpreadOverlay();
+};
+$('tilt-show').onchange = () => {
+  if ($('tilt-show').checked) $('spread-show').checked = false;
+  updateSpreadOverlay();
+};
 $('tilt-on').onchange = () => {
   const off = !$('tilt-on').checked;
-  for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = off || $('tilt-on').disabled;
+  for (const id of ['tilt', 'tilt-rotation', 'tilt-show']) $(id).disabled = off || $('tilt-on').disabled;
   // Its keyframes show only while it is on.
   clearSelection();
   renderTimeline();
@@ -5979,7 +6011,7 @@ async function applyEdits(info, saved) {
     // Hexagon became Blades (six of them by default).
     if (cam && cam.bokeh === 'hexagon') $('bokeh').value = 'blades';
     showBokehShape();
-    for (const id of ['tilt', 'tilt-rotation']) $(id).disabled = !$('tilt-on').checked || $('tilt-on').disabled;
+    for (const id of ['tilt', 'tilt-rotation', 'tilt-show']) $(id).disabled = !$('tilt-on').checked || $('tilt-on').disabled;
     $('pivot').disabled = !$('pivot-on').checked;
     curve.draw();
     showColorMatrix();

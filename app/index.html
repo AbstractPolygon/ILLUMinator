@@ -513,6 +513,7 @@
             <input id="depth-smooth" type="range" min="0" max="100" step="5" value="30" data-default="30">
           </label>
           <label id="lytro-depth-row" class="check" title="Uses the depth map edited in Lytro Desktop, imported with the photo, instead of measuring depth" hidden><input id="lytro-depth" type="checkbox" checked> Lytro Desktop depth map</label>
+          <label id="depth-objects-row" class="check" title="Finds the objects in the photo and puts depth edges on their outlines, for High quality depth maps. The first time, it downloads a 45 MB object model (kept for later); finding the objects takes a few seconds per photo"><input id="depth-objects" type="checkbox"> Object edges</label>
           <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
           <label class="check" title="Shows the depth map in grey, light for near and dark for far, instead of in color"><input id="depth-grey" type="checkbox"> Greyscale depth map</label>
           <p id="depth-legend" class="hint" hidden>Warm colors are near, cool colors are far.</p>
@@ -540,6 +541,7 @@
           <label title="Direction the plane of focus tilts">Rotation <output data-for="tilt-rotation" for="tilt-rotation">0°</output>
             <input id="tilt-rotation" type="range" min="-90" max="90" step="1" value="0" data-default="0">
           </label>
+          <label class="check" title="Tints the picture by how far each part lies from the tilted plane of focus: blue nearer, orange farther, clear where it is in focus"><input id="tilt-show" type="checkbox" disabled> Show tilt</label>
         </details>
         <details class="subpanel">
           <summary><h3>Perspective</h3></summary>
@@ -770,7 +772,6 @@
         <details class="subpanel">
           <summary><h3>Quality</h3></summary>
           <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo, for photos and videos; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox"> High quality depth map</label>
-          <label id="depth-objects-row" class="check" title="Finds the objects in the photo and puts depth edges on their outlines, for High quality depth maps. The first time, it downloads a 45 MB object model (kept for later); finding the objects takes a few seconds per photo"><input id="depth-objects" type="checkbox"> Object edges</label>
           <label title="Size of the picture made from the lenses, for photos and every video frame">Resolution
             <select id="detail">
               <option value="1" selected>1× (fast)</option>
