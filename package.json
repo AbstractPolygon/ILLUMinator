@@ -109,7 +109,8 @@
       "shortcutName": "ILLUMinator",
       "menuCategory": false
     },
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "npmRebuild": false
   },
   "devDependencies": {
     "electron": "44.4.5",
