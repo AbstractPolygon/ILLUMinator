@@ -6526,7 +6526,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
     } catch (err) {
       if (err.name === 'SecurityError') {
         // A page embedded in another (a preview frame) is not allowed to use USB.
-        showNotice('This page is not allowed to use USB where it is embedded. Open ILLUMinator in its own browser tab (Chrome or Edge) and try again.');
+        showNotice('This page is not allowed to use USB because it is shown inside another page (a preview or an artifact viewer, even in its own tab). Open ILLUMinator from its own web address, such as the website\'s Try online link, in Chrome or Edge.');
         startNoticeTimer();
       } else if (err.name === 'NotFoundError') {
         // Also what a closed chooser gives. A first generation camera shows
