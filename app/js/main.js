@@ -6770,8 +6770,11 @@ async function checkForUpdate() {
   }
   const latest = String(release.tag_name || '').replace(/^v/, '');
   if (!newerVersion(latest, VERSION)) return;
+  // "Don't remind me" only stops the pop-up at start: the Update available!
+  // message in the toolbar stays, and opens the same pop-up.
+  let skipped = false;
   try {
-    if (localStorage.getItem('illuminator.skipVersion') === latest) return;
+    skipped = localStorage.getItem('illuminator.skipVersion') === latest;
   } catch {
     // No storage: ask every time.
   }
@@ -6809,6 +6812,13 @@ async function checkForUpdate() {
       // Ignore: the reminder comes back next time.
     }
   };
-  $('update-dialog').showModal();
+  const open = () => {
+    $('update-skip').checked = false;
+    if (!$('update-dialog').open) $('update-dialog').showModal();
+  };
+  $('update-btn').textContent = `Update available! ${latest}`;
+  $('update-btn').onclick = open;
+  $('update-btn').hidden = false;
+  if (!skipped) open();
 }
 setTimeout(checkForUpdate, 3000);
