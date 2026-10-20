@@ -6734,12 +6734,12 @@ showLut();
 // that version.
 const RELEASES_API = 'https://api.github.com/repos/AbstractPolygon/ILLUMinator/releases/latest';
 const BUILDS = [
-  { re: /-win-x64\.exe$/, os: 'win', name: 'Windows', detail: 'Intel and AMD' },
-  { re: /-win-arm64\.exe$/, os: 'win', name: 'Windows', detail: 'ARM, such as Snapdragon' },
-  { re: /-mac-arm64\.dmg$/, os: 'mac', name: 'macOS', detail: 'Apple Silicon' },
-  { re: /-mac-x64\.dmg$/, os: 'mac', name: 'macOS', detail: 'Intel' },
-  { re: /-linux-amd64\.deb$/, os: 'linux', name: 'Linux', detail: '.deb for Debian and Ubuntu' },
-  { re: /-linux-x86_64\.AppImage$/, os: 'linux', name: 'Linux', detail: 'AppImage for other distributions' },
+  { re: /-win-x64\.exe$/, os: 'win', arch: 'x64', name: 'Windows', detail: 'Intel and AMD' },
+  { re: /-win-arm64\.exe$/, os: 'win', arch: 'arm64', name: 'Windows', detail: 'ARM, such as Snapdragon' },
+  { re: /-mac-arm64\.dmg$/, os: 'mac', arch: 'arm64', name: 'macOS', detail: 'Apple Silicon' },
+  { re: /-mac-x64\.dmg$/, os: 'mac', arch: 'x64', name: 'macOS', detail: 'Intel' },
+  { re: /-linux-amd64\.deb$/, os: 'linux', arch: 'x64', name: 'Linux', detail: '.deb for Debian and Ubuntu' },
+  { re: /-linux-x86_64\.AppImage$/, os: 'linux', arch: 'x64', name: 'Linux', detail: 'AppImage for other distributions' },
 ];
 
 export function newerVersion(a, b) {
@@ -6776,10 +6776,12 @@ async function checkForUpdate() {
     // No storage: ask every time.
   }
   const os = thisOs();
+  const arch = window.lytroNative.arch || '';
   const files = (release.assets || [])
     .map((a) => ({ a, b: BUILDS.find((b) => b.re.test(a.name)) }))
-    // Only this computer's platform (all of them when it cannot be told).
-    .filter((x) => x.b && (!os || x.b.os === os));
+    // Only this computer's platform and this app's architecture (all of them
+    // when they cannot be told: an app built before the architecture was passed on).
+    .filter((x) => x.b && (!os || x.b.os === os) && (!arch || x.b.arch === arch));
   if (!files.length) return;
   $('update-title').textContent = `ILLUMinator ${latest} is available`;
   $('update-note').replaceChildren(

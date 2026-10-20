@@ -10,6 +10,8 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('lytroNative', {
+  // The architecture this app was built for ('x64', 'arm64'): the update notice lists only that one.
+  arch: process.arch,
   openFiles: (options) => ipcRenderer.invoke('open-files', options),
   readFile: (path) => ipcRenderer.invoke('read-file', path),
   findSidecar: (path) => ipcRenderer.invoke('find-sidecar', path),
