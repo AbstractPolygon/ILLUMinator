@@ -6778,8 +6778,8 @@ async function checkForUpdate() {
   const os = thisOs();
   const files = (release.assets || [])
     .map((a) => ({ a, b: BUILDS.find((b) => b.re.test(a.name)) }))
-    .filter((x) => x.b)
-    .sort((x, y) => (y.b.os === os) - (x.b.os === os));
+    // Only this computer's platform (all of them when it cannot be told).
+    .filter((x) => x.b && (!os || x.b.os === os));
   if (!files.length) return;
   $('update-title').textContent = `ILLUMinator ${latest} is available`;
   $('update-note').replaceChildren(
