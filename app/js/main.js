@@ -6796,7 +6796,7 @@ async function checkForUpdate() {
     const li = document.createElement('li');
     if (b.os === os) li.className = 'mine';
     const name = Object.assign(document.createElement('span'), { className: 'name', textContent: b.name });
-    const detail = Object.assign(document.createElement('span'), { className: 'size', textContent: b.detail });
+    const detail = Object.assign(document.createElement('span'), { className: 'size', textContent: `${b.arch} · ${b.detail}` });
     const spacer = Object.assign(document.createElement('span'), { className: 'spacer' });
     li.append(name, detail);
     const button = Object.assign(document.createElement('a'), { className: 'download-btn', href: a.browser_download_url, target: '_blank', rel: 'noopener', textContent: `Download (${Math.round(a.size / 1e6)} MB)` });
