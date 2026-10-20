@@ -26,17 +26,30 @@ export function blackBody(kelvin) {
   return [lin(r) / G, 1, lin(b) / G];
 }
 
+// Lytro Desktop's own white balance: the red and blue gains (green = 1) that
+// it stores for a photo whose temperature and tint are T and t, fitted to
+// eleven ILLUM photos set to Auto (their gains from stack.preadjust.lfp, their
+// temperature and tint from stack.view.lfp). ln gain = a + b x + c x^2 + d t,
+// x = 1000 / kelvin. It reproduces those gains to 0.4% (0.8% leaving one photo
+// out, and on a twelfth set to Daylight). Tint moves red and blue together by
+// 0.084% a step, a third of what the old blackbody math did.
+const LD_WB = {
+  r: [0.900531, -3.792749, 3.341364, 0.000836],
+  b: [-0.303873, 3.712129, -3.190405, 0.000847],
+};
+const lnGain = (c, x, t) => c[0] + c[1] * x + c[2] * x * x + c[3] * t;
+
 // Camera RGB gains that re-balance a picture white balanced for `asShot`
 // kelvin as if for `kelvin` (higher looks warmer, like Lightroom), and add
-// tint (-150 green to 150 magenta). Normalized to keep luminance.
+// tint (-150 green to 150 magenta), the way Lytro Desktop's temperature and
+// tint move its gains. Normalized to keep luminance.
 export function whiteBalanceGains(kelvin, asShot, tint = 0) {
-  const from = blackBody(asShot);
-  const to = blackBody(kelvin);
-  const r = from[0] / to[0];
-  const b = from[2] / to[2];
-  const g = 2 ** (-0.35 * (tint / 100));
-  const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return [r / y, g / y, b / y];
+  const x = 1000 / kelvin;
+  const x0 = 1000 / asShot;
+  const r = Math.exp(lnGain(LD_WB.r, x, tint) - lnGain(LD_WB.r, x0, 0));
+  const b = Math.exp(lnGain(LD_WB.b, x, tint) - lnGain(LD_WB.b, x0, 0));
+  const y = 0.2126 * r + 0.7152 + 0.0722 * b;
+  return [r / y, 1 / y, b / y];
 }
 
 import { curveTable, curveAt } from './curve.js';

@@ -42,3 +42,26 @@ test('eyedropper finds the white balance that makes a color neutral', async () =
   assert.ok(Math.abs(res.kelvin - 3500) <= 100, `kelvin ${res.kelvin}`);
   assert.ok(Math.abs(res.tint - 20) <= 3, `tint ${res.tint}`);
 });
+
+test('temperature and tint move the gains the way Lytro Desktop does', () => {
+  // [temperature, tint, red gain, blue gain] (green = 1): what Lytro Desktop
+  // stored in stack.preadjust.lfp for photos with that temperature and tint.
+  const ld = [
+    [3195, 84, 1.1171, 1.8517],
+    [3123, 15, 1.0429, 1.7702],
+    [5051, -14, 1.3004, 1.3505],
+    [6098, -69, 1.3732, 1.1662],
+    [6131, -19, 1.4359, 1.2118],
+  ];
+  for (const [k0, t0, r0, b0] of ld) {
+    for (const [k1, t1, r1, b1] of ld) {
+      // From the first photo's balance to the second's.
+      const g = whiteBalanceGains(k1, k0, t1 - t0);
+      assert.ok(Math.abs(g[0] / g[1] / (r1 / r0) - 1) < 0.02, `red ${k0}->${k1}`);
+      assert.ok(Math.abs(g[2] / g[1] / (b1 / b0) - 1) < 0.02, `blue ${k0}->${k1}`);
+    }
+  }
+  // As shot changes nothing.
+  const same = whiteBalanceGains(4200, 4200, 0);
+  assert.ok(same.every((v) => Math.abs(v - 1) < 1e-9));
+});
