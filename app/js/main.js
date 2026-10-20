@@ -5599,8 +5599,22 @@ $('grid-import-all').onclick = async () => {
   if (added.length) openItem(added[0]);
 };
 
-function importFromCamera() {
-  return native ? importFromConnectedCamera(null) : importFromCameraFolder();
+// Browser: the USB chooser is the permission to connect to a camera; it is
+// asked first (the browser offers cameras it may use, such as an ILLUM), then
+// the camera's drive is read through a folder the user chooses.
+let askCameraPermission = async () => false;
+async function importFromCamera() {
+  if (native) return importFromConnectedCamera(null);
+  if (!navigator.usb) return importFromCameraFolder();
+  // Choosing the folder needs its own click, so the dialog comes next.
+  const allowed = await askCameraPermission();
+  $('camera-select-row').hidden = true;
+  $('camera-dest').hidden = true;
+  $('camera-choose').hidden = false;
+  $('camera-dialog-source').textContent = allowed
+    ? 'Camera allowed. Now choose its drive\'s DCIM folder to list its photos.'
+    : 'Switch the camera on and connect its USB cable, then choose its drive\'s DCIM folder to list its photos.';
+  showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
 }
 
 $('camera-select-all').onclick = () => {
@@ -6516,7 +6530,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
       arrived();
     } else showUsbStatus();
   }).catch(() => showUsbStatus());
-  $('usb-watch-btn').onclick = async () => {
+  askCameraPermission = async () => {
     try {
       const device = await navigator.usb.requestDevice({ filters: [{ vendorId: LYTRO_USB_VENDOR }] });
       allowed = true;
@@ -6532,6 +6546,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
       showUsbStatus();
       showNotice('ILLUMinator will now notice when this camera is plugged in.');
       startNoticeTimer();
+      return true;
     } catch (err) {
       if (err.name === 'SecurityError') {
         // A page embedded in another (a preview frame) is not allowed to use USB.
@@ -6545,7 +6560,9 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
         startNoticeTimer();
       } else showError(err);
     }
+    return false;
   };
+  $('usb-watch-btn').onclick = () => askCameraPermission();
 }
 $('camera-choose').onclick = () => importFromCameraFolder();
 
