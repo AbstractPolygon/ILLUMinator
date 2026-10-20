@@ -6461,6 +6461,14 @@ if (native && CAMERA_IMPORT) {
 // the camera's drive is chosen once and remembered, and its photos show in
 // the Camera section on later plug-ins (the browser may ask to allow
 // reading it again).
+if (!native && !navigator.usb && CAMERA_IMPORT) {
+  // Firefox and Safari have no WebUSB: say so instead of hiding the button.
+  $('usb-watch-btn').hidden = false;
+  $('usb-watch-btn').onclick = () => {
+    showNotice('This browser cannot detect a camera being plugged in (it has no WebUSB). Use Chrome or Edge, or choose the camera\'s DCIM folder instead.');
+    startNoticeTimer();
+  };
+}
 if (!native && navigator.usb && CAMERA_IMPORT) {
   const isLytro = (d) => d.vendorId === LYTRO_USB_VENDOR;
   const allowedKey = 'illuminator.usbWatch';
@@ -6474,7 +6482,8 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
   const showUsbStatus = () => {
     $('camera-status').textContent = connected ? 'Lytro camera connected' : '';
     $('camera-status').classList.toggle('connected', connected > 0);
-    $('usb-watch-btn').hidden = allowed;
+    // Always shown, so the camera can be chosen again.
+    $('usb-watch-btn').hidden = false;
   };
   const arrived = async () => {
     showUsbStatus();
