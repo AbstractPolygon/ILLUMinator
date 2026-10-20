@@ -6795,13 +6795,13 @@ async function checkForUpdate() {
   $('update-links').replaceChildren(...files.map(({ a, b }) => {
     const li = document.createElement('li');
     if (b.os === os) li.className = 'mine';
-    const link = Object.assign(document.createElement('a'), { href: a.browser_download_url, target: '_blank', rel: 'noopener', textContent: b.name });
-    const detail = Object.assign(document.createElement('span'), { textContent: b.detail });
+    const name = Object.assign(document.createElement('span'), { className: 'name', textContent: b.name });
+    const detail = Object.assign(document.createElement('span'), { className: 'size', textContent: b.detail });
     const spacer = Object.assign(document.createElement('span'), { className: 'spacer' });
-    const size = Object.assign(document.createElement('span'), { className: 'size', textContent: `${Math.round(a.size / 1e6)} MB` });
-    li.append(link, detail, spacer);
+    li.append(name, detail);
     if (b.os === os) li.append(Object.assign(document.createElement('span'), { className: 'tag', textContent: 'this computer' }));
-    li.append(size);
+    const button = Object.assign(document.createElement('a'), { className: 'download-btn', href: a.browser_download_url, target: '_blank', rel: 'noopener', textContent: `Download (${Math.round(a.size / 1e6)} MB)` });
+    li.append(spacer, button);
     return li;
   }));
   $('update-skip').checked = false;
