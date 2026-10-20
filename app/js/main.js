@@ -6524,7 +6524,11 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
       showNotice('ILLUMinator will now notice when this camera is plugged in.');
       startNoticeTimer();
     } catch (err) {
-      if (err.name !== 'NotFoundError') showError(err);
+      if (err.name === 'SecurityError') {
+        // A page embedded in another (a preview frame) is not allowed to use USB.
+        showNotice('This page is not allowed to use USB where it is embedded. Open ILLUMinator in its own browser tab (Chrome or Edge) and try again.');
+        startNoticeTimer();
+      } else if (err.name !== 'NotFoundError') showError(err);
     }
   };
 }
