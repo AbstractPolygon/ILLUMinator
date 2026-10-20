@@ -6782,7 +6782,11 @@ async function checkForUpdate() {
     .sort((x, y) => (y.b.os === os) - (x.b.os === os));
   if (!files.length) return;
   $('update-title').textContent = `ILLUMinator ${latest} is available`;
-  $('update-note').textContent = `You have ${VERSION}. Download the one for your computer and install it over this version; your library and edits stay as they are.`;
+  $('update-note').replaceChildren(
+    `A new release is available (current: ${VERSION} | available: ${latest}).`,
+    document.createElement('br'),
+    'Download and install for the latest features.',
+  );
   $('update-links').replaceChildren(...files.map(({ a, b }) => {
     const li = document.createElement('li');
     if (b.os === os) li.className = 'mine';
