@@ -12,8 +12,10 @@ export const native = typeof window !== 'undefined' ? window.lytroNative || null
 
 // Importing straight from a connected camera (Import from camera…, the
 // Camera section): in the desktop app, over USB (electron/camera.cjs). A
-// browser reads a card or a copy of it through a folder the user chooses.
-export const CAMERA_IMPORT = native !== null;
+// browser notices a Lytro being plugged in (WebUSB, after Detect camera…) and
+// reads a card or a copy of it through a folder the user chooses; it cannot
+// speak the first generation camera's own USB protocol.
+export const CAMERA_IMPORT = true;
 
 function toArrayBuffer(u8) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
