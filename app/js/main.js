@@ -6528,7 +6528,13 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
         // A page embedded in another (a preview frame) is not allowed to use USB.
         showNotice('This page is not allowed to use USB where it is embedded. Open ILLUMinator in its own browser tab (Chrome or Edge) and try again.');
         startNoticeTimer();
-      } else if (err.name !== 'NotFoundError') showError(err);
+      } else if (err.name === 'NotFoundError') {
+        // Also what a closed chooser gives. A first generation camera shows
+        // itself to the computer only as a USB drive, a kind of device the
+        // browser does not offer to pages, so it may not be listed at all.
+        showNotice('No camera was chosen. If none was listed: the browser only offers cameras that are not plain USB drives (a first generation camera may not be listed), and the camera must be plugged in and switched on.');
+        startNoticeTimer();
+      } else showError(err);
     }
   };
 }
