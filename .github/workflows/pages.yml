@@ -6,6 +6,10 @@ name: Web app on GitHub Pages
 
 on:
   workflow_dispatch:
+  # Every change to the app or the site goes live at once.
+  push:
+    branches: [main]
+    paths: ['app/**', 'site/**', 'scripts/build-web.mjs', 'package.json', '.github/workflows/pages.yml']
   workflow_run:
     workflows: ['Build desktop apps']
     types: [completed]
@@ -21,7 +25,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
