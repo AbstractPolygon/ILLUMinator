@@ -5333,10 +5333,11 @@ function showCameraDialog({ files, thumb, onImport }) {
 }
 
 // Browser: the camera is a removable drive; the user picks it (or DCIM).
-async function importFromCameraFolder() {
+// `known`: the folder's listing when it is already read (the remembered one).
+async function importFromCameraFolder(known = null) {
   let result;
   try {
-    result = await pickCameraFolder();
+    result = known || (await pickCameraFolder());
   } catch (err) {
     if (err.name !== 'AbortError') showError(err);
     return;
@@ -5605,6 +5606,19 @@ $('grid-import-all').onclick = async () => {
 let askCameraPermission = async () => false;
 async function importFromCamera() {
   if (native) return importFromConnectedCamera(null);
+  // The drive chosen last time, if the browser lets the page read it again
+  // (one click allows it): no folder to pick.
+  const remembered = await recallCameraFolder();
+  if (remembered && remembered.requestPermission) {
+    try {
+      if ((await remembered.requestPermission({ mode: 'read' })) === 'granted') {
+        const listed = await listCameraFolder(remembered);
+        if (listed.files.length) return importFromCameraFolder({ ...listed, dir: remembered });
+      }
+    } catch {
+      // The drive is not there now: choose it again below.
+    }
+  }
   if (!navigator.usb) return importFromCameraFolder();
   // Choosing the folder needs its own click, so the dialog comes next.
   const allowed = await askCameraPermission();
