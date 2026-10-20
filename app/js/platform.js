@@ -11,11 +11,13 @@ export const LYTRO_USB_VENDOR = 0x24cf;
 export const native = typeof window !== 'undefined' ? window.lytroNative || null : null;
 
 // Importing straight from a connected camera (Import from camera…, the
-// Camera section): in the desktop app, over USB (electron/camera.cjs). A
-// browser notices a Lytro being plugged in (WebUSB, after Detect camera…) and
-// reads a card or a copy of it through a folder the user chooses; it cannot
-// speak the first generation camera's own USB protocol.
-export const CAMERA_IMPORT = true;
+// Camera section, Detect camera…): only in the desktop app, over USB
+// (electron/camera.cjs). A browser cannot read these cameras: Chrome hides
+// USB drives and HID devices from pages (WebUSB), and both the first
+// generation camera and the ILLUM present as one or both of those. The
+// browser code for it (the Camera section, remembering the card's folder) is
+// kept behind this flag.
+export const CAMERA_IMPORT = native !== null;
 
 function toArrayBuffer(u8) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
