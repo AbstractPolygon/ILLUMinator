@@ -8,6 +8,7 @@ import { upscaleImage } from './gpu/upscale.js';
 import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
+import { connectWebUsb, downloadPicture } from './camera/webusb.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -5334,6 +5335,38 @@ function showCameraDialog({ files, thumb, onImport }) {
 
 // Browser: the camera is a removable drive; the user picks it (or DCIM).
 // `known`: the folder's listing when it is already read (the remembered one).
+// Browser: the camera read over WebUSB, when it has an interface a page can use
+// (the ILLUM's vendor interface). null when not connected.
+let webUsbConn = null;
+let webUsbDevice = null;
+let webUsbReport = '';
+
+// Connects to the chosen camera and lists its photos in the Camera section.
+// Returns true when it worked; otherwise the reason is in the Camera section
+// and in the console, and `webUsbReport` has what the camera answered.
+async function openWebUsbCamera(device) {
+  if (webUsbConn && webUsbDevice === device) return true;
+  if (webUsbConn) {
+    await webUsbConn.close().catch(() => {});
+    webUsbConn = null;
+  }
+  setCameraSection({ note: 'Reading the camera…' });
+  try {
+    webUsbConn = await connectWebUsb(device, (line) => console.log('camera:', line));
+    webUsbDevice = device;
+    webUsbReport = webUsbConn.report;
+    const { info, pictures } = webUsbConn;
+    const files = pictures.map((p) => ({ id: p.id, name: p.name, folder: p.folder, size: 0, picture: p }));
+    setCameraSection({ cam: { kind: 'webusb', id: `webusb:${info.serial || device.serialNumber || 'camera'}`, label: `Lytro camera${info.serial ? ` ${info.serial}` : ''} (USB)`, files } });
+    return true;
+  } catch (err) {
+    webUsbReport = err.report || '';
+    console.warn('camera:', err.message, webUsbReport);
+    setCameraSection({ note: err.message, show: true });
+    return false;
+  }
+}
+
 async function importFromCameraFolder(known = null) {
   let result;
   try {
@@ -5521,6 +5554,21 @@ async function importCameraFiles(cam, picked) {
     entries = picked.map((f) => ({ path: f.path, file: f.file }));
   } else if (cam.kind === 'drive') {
     entries = picked.map((f) => ({ path: `${f.folder}/${f.name}`, file: new NativeFile({ path: f.id, name: f.name, size: f.size }) }));
+  } else if (cam.kind === 'webusb') {
+    // Over WebUSB, in the page: each picture is read off the camera.
+    entries = [];
+    try {
+      for (let i = 0; i < picked.length; i++) {
+        showProgress(`Copying ${picked[i].name} from the camera (${i + 1} of ${picked.length})`, i / picked.length);
+        const got = await downloadPicture(webUsbConn.camera, picked[i].picture, webUsbConn.product);
+        entries.push({ path: got.name, file: new File([got.data], got.name) });
+      }
+    } catch (err) {
+      showError(err);
+      return [];
+    } finally {
+      hideProgress();
+    }
   } else {
     const stop = native.onImportProgress((p) => showProgress(`Copying ${p.file} from the camera (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
     try {
@@ -5622,6 +5670,23 @@ async function importFromCamera() {
   if (!navigator.usb) return importFromCameraFolder();
   // Choosing the folder needs its own click, so the dialog comes next.
   const allowed = await askCameraPermission();
+  if (webUsbConn) {
+    // Read over USB: the dialog lists the photos on the camera.
+    const cam = cameraSection.cam;
+    $('camera-choose').hidden = true;
+    $('camera-select-row').hidden = true;
+    $('camera-dest').hidden = true;
+    $('camera-dialog-source').textContent = `${cam.files.length} light field photo(s) on ${cam.label}.`;
+    showCameraDialog({
+      files: cam.files,
+      thumb: async () => null,
+      onImport: async (picked) => {
+        const added = await importCameraFiles(cam, picked);
+        if (added.length) openItem(added[0]);
+      },
+    });
+    return;
+  }
   $('camera-select-row').hidden = true;
   $('camera-dest').hidden = true;
   $('camera-choose').hidden = false;
@@ -6543,18 +6608,27 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
   navigator.usb.addEventListener('connect', (e) => {
     if (!isLytro(e.device)) return;
     connected++;
-    arrived();
+    openWebUsbCamera(e.device).then((ok) => { if (!ok) arrived(); });
   });
   navigator.usb.addEventListener('disconnect', (e) => {
     if (!isLytro(e.device)) return;
+    if (webUsbDevice === e.device) {
+      webUsbConn = null;
+      webUsbDevice = null;
+    }
     connected = Math.max(0, connected - 1);
     showUsbStatus();
     if (!connected) setCameraSection({});
   });
-  navigator.usb.getDevices().then((devices) => {
-    connected = devices.filter(isLytro).length;
+  navigator.usb.getDevices().then(async (devices) => {
+    const cameras = devices.filter(isLytro);
+    connected = cameras.length;
     if (connected) {
       allowed = true;
+      if (await openWebUsbCamera(cameras[0])) {
+        showUsbStatus();
+        return;
+      }
       arrived();
     } else showUsbStatus();
   }).catch(() => showUsbStatus());
@@ -6569,10 +6643,15 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
       }
       if (isLytro(device)) {
         connected = Math.max(connected, 1);
+        // Read the camera over USB if it has an interface a browser can use.
+        if (await openWebUsbCamera(device)) {
+          showUsbStatus();
+          return true;
+        }
         arrived();
       }
       showUsbStatus();
-      showNotice('ILLUMinator will now notice when this camera is plugged in.');
+      showNotice(webUsbReport ? `The camera was found but could not be read over USB. ${cameraSection.note || ''} ${webUsbReport.replace(/\n/g, ' · ')}` : 'ILLUMinator will now notice when this camera is plugged in.');
       startNoticeTimer();
       return true;
     } catch (err) {
