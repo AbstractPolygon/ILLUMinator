@@ -282,7 +282,16 @@ async function pullUsbCalibration(entry, destDir, onFile = () => {}) {
 
 // All connected cameras: [{ id, kind, label, files: [{ id, name, size }] }].
 // `roots` overrides the drive locations (tests).
+let lastWake = 0;
 async function listCameras({ roots, adb = true, lytro = true } = {}) {
+  if (!roots && lytro && process.platform === 'win32' && Date.now() - lastWake > 20000) {
+    lastWake = Date.now();
+    try {
+      lytroScsi.wakeStorage(log);
+    } catch (err) {
+      log(`storage wake failed: ${err.message}`);
+    }
+  }
   const drives = [];
   for (const root of roots || (await volumeRoots())) {
     const cam = await scanVolume(root);

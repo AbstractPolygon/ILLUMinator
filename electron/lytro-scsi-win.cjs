@@ -145,4 +145,46 @@ async function connect({ path }, log = () => {}, api = windowsApi()) {
   return { camera: new LytroCamera(new ScsiTransport(api, handle), log), close: async () => api.close(handle), product: FIRST_GENERATION_PRODUCT };
 }
 
-module.exports = { listDevices, connect, passThrough, queryIdentity, isFirstGeneration, ScsiTransport, DATA_OFFSET, IDENTITIES };
+
+// An ILLUM that Windows lists as an empty removable drive: ask its disk why
+// ("not ready" sense data goes to the log) and tell it to start up, as an
+// ordinary host would for a drive that spun down. `drives` lists letters.
+const CAMERA_NAME = /lytro|illum|firefly/i;
+
+function senseText(api, handle) {
+  const buf = passThrough(Buffer.from([0x03, 0, 0, 0, 18, 0]), DATA_IN, 18);
+  if (api.ioctl(handle, IOCTL_SCSI_PASS_THROUGH, buf, buf) < 0) return 'sense unavailable';
+  const d = buf.subarray(DATA_OFFSET, DATA_OFFSET + 18);
+  return `sense key ${d[2] & 15} asc ${d[12].toString(16)} ascq ${d[13].toString(16)}`;
+}
+
+function wakeStorage(log = () => {}, api = windowsApi(), letters = 'DEFGHIJKLMNOPQRSTUVWXYZ') {
+  if (!api) return [];
+  const woken = [];
+  for (const letter of letters) {
+    const path = `\\\\.\\${letter}:`;
+    const handle = api.open(path, GENERIC_READ_WRITE);
+    if (!handle) continue;
+    try {
+      const inq = passThrough(Buffer.from([0x12, 0, 0, 0, 36, 0]), DATA_IN, 36);
+      if (api.ioctl(handle, IOCTL_SCSI_PASS_THROUGH, inq, inq) < 0 || inq[2] !== 0) continue;
+      const id = inq.toString('latin1', DATA_OFFSET + 8, DATA_OFFSET + 32).trim();
+      if (!CAMERA_NAME.test(id)) continue;
+      const ready = () => {
+        const t = passThrough(Buffer.alloc(6), NO_DATA, 0);
+        return api.ioctl(handle, IOCTL_SCSI_PASS_THROUGH, t, t) >= 0 && t[2] === 0;
+      };
+      if (ready()) continue;
+      log(`${letter}: ${id} not ready (${senseText(api, handle)}); sending start`);
+      const start = passThrough(Buffer.from([0x1b, 0, 0, 0, 1, 0]), NO_DATA, 0);
+      api.ioctl(handle, IOCTL_SCSI_PASS_THROUGH, start, start);
+      log(`${letter}: start unit status ${start[2]}; now ${ready() ? 'ready' : 'still not ready (' + senseText(api, handle) + ')'}`);
+      woken.push(letter);
+    } finally {
+      api.close(handle);
+    }
+  }
+  return woken;
+}
+
+module.exports = { wakeStorage, listDevices, connect, passThrough, queryIdentity, isFirstGeneration, ScsiTransport, DATA_OFFSET, IDENTITIES };
