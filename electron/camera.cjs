@@ -16,6 +16,7 @@ const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const lytroUsb = require('./lytro-usb.cjs');
+const lytroScsi = require('./lytro-scsi-win.cjs');
 const { LytroCamera } = require('./lytro-protocol.cjs');
 
 const LIGHT_FIELD = /\.(lfr|lfp)$/i;
@@ -68,8 +69,11 @@ async function volumeRoots(platform = process.platform) {
 
 // Light field photos under <root>/DCIM/*/.
 async function scanVolume(root) {
+  // Lytro Desktop (WinSDCardCamera) knows an ILLUM drive by MISC/.LYT_VER.inf
+  // and DCIM; a camera with no photos yet still shows up, empty.
   const dcim = path.join(root, 'DCIM');
-  if (!(await isDir(dcim))) return null;
+  const isLytro = await isDir(path.join(root, 'MISC')) && (await readJson(path.join(root, 'MISC', '.LYT_VER.inf'))) !== null;
+  if (!(await isDir(dcim)) && !isLytro) return null;
   const files = [];
   for (const folder of (await listDir(dcim)).sort()) {
     const dir = path.join(dcim, folder);
@@ -85,7 +89,7 @@ async function scanVolume(root) {
       }
     }
   }
-  if (!files.length) return null;
+  if (!files.length && !isLytro) return null;
   const info = await driveInfo(root);
   return { id: `drive:${root}`, kind: 'drive', label: `Camera drive ${root}`, root, files, info, hasCalibration: await isDir(path.join(root, CALIBRATION_FOLDER)) };
 }
@@ -204,7 +208,9 @@ const log = (line) => {
 
 async function openUsbCamera(found) {
   try {
-    const { camera, close, product } = await lytroUsb.connect(found, log);
+    // The first generation camera on Windows is reached through its disk, as
+    // Lytro Desktop does; otherwise over USB (libusb).
+    const { camera, close, product } = found.scsi ? await lytroScsi.connect(found, log) : await lytroUsb.connect(found, log);
     const info = await camera.hardwareInfo();
     log(`hardware info: ${JSON.stringify(info)}`);
     const pictures = await camera.pictureList();
@@ -230,7 +236,10 @@ async function openUsbCamera(found) {
 const USB_RETRY_MS = 30000;
 
 async function scanLytroUsb() {
-  const present = lytroUsb.listDevices();
+  const scsi = process.platform === 'win32' ? lytroScsi.listDevices().map((d) => ({ ...d, product: lytroUsb.FIRST_GENERATION_PRODUCT, scsi: true })) : [];
+  // On Windows the first generation camera is taken through its disk (above):
+  // its USB entry is the same camera.
+  const present = scsi.concat(lytroUsb.listDevices().filter((d) => !(scsi.length && d.product === lytroUsb.FIRST_GENERATION_PRODUCT)));
   const keys = new Set(present.map((d) => d.key));
   for (const [key, c] of usbCameras) {
     if (!keys.has(key)) {

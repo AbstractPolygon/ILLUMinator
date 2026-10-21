@@ -130,6 +130,7 @@
     "electron-builder": "26.16.1"
   },
   "optionalDependencies": {
+    "koffi": "^2.9.0",
     "usb": "^2.16.0"
   }
 }
