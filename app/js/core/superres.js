@@ -15,6 +15,7 @@
 
 import { lensWarp } from './lens.js';
 import { lensRange, lensCenter } from './lenslet.js';
+import { LAMBDA_TO_ALPHA } from './recipe.js';
 
 const BINS = 17;
 
@@ -456,7 +457,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         rdv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch;
       }
       let rayAlpha = lensAlpha;
-      if (allInFocus && depth) {
+      if (allInFocus && depth && RAY_MARCH.on) {
         // Every ray takes the depth of the surface it meets, not the one
         // under its lens: at an edge a lens sees both sides (Lytro's
         // extended depth of field projection). Where a ray's depth does not
@@ -567,10 +568,18 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   // The lattice pattern is divided out before each pass too: otherwise the
   // passes, correcting toward samples that carry it, build it up.
   const lattice = { g, xMin, yMin, unit, scale, warp };
+  const edgeMask = allInFocus && depth && BACK_PROJECTION_EDGE.on ? depthEdgeMask(depth, bw, bh) : null;
   for (let pass = 0; pass < passes; pass++) {
     removeLatticePattern(sharpY, upY, focus, wsum, W, H, lattice);
     const r = splat(sharpY, pass + 1);
-    for (let p = 0; p < W * H; p++) sharpY[p] = Math.max(0, sharpY[p] + (0.8 * r.accY[p]) / (r.wsum[p] + lambda));
+    for (let p = 0; p < W * H; p++) {
+      // Where the rays landing on a pixel disagree (a depth edge) their
+      // residuals come from two surfaces and would only draw the edge
+      // doubled, lens by lens: leave those pixels to the edge handling.
+      let keep = bestDis ? 1 - smoothDisagreement(bestDis[p]) : 1;
+      if (edgeMask) keep *= 1 - edgeMask[(Math.min(bh - 1, Math.floor(((Math.floor(p / W) + 0.5) / scale) * detail))) * bw + Math.min(bw - 1, Math.floor((((p % W) + 0.5) / scale) * detail))];
+      sharpY[p] = Math.max(0, sharpY[p] + (0.8 * keep * r.accY[p]) / (r.wsum[p] + lambda));
+    }
   }
   for (let p = 0; p < W * H; p++) {
     sumUp += upY[p];
@@ -607,7 +616,33 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // corrects separately), or leave it out.
 export const RAY_WARP = { on: true, centre: false };
 export const OCCLUSION = { on: false, tol: 0.1 };
+export const RAY_MARCH = { on: true };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
+
+// Lytro Desktop keeps its filters off a box of `radius` depth pixels around
+// every depth step of `step` lambda or more (its depth edge mask).
+export const BACK_PROJECTION_EDGE = { on: true, step: 0.3, radius: 4 };
+
+// 1 within `radius` depth pixels of a step between neighbors (right or below)
+// of at least `step` lambda, softened by a 3 x 3 mean; 0 elsewhere.
+export function depthEdgeMask(depth, w, h, { step = BACK_PROJECTION_EDGE.step, radius = BACK_PROJECTION_EDGE.radius } = {}) {
+  const jump = new Float32Array(w * h);
+  const limit = step * LAMBDA_TO_ALPHA;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = depth[y * w + x];
+      if ((x + 1 < w && Math.abs(d - depth[y * w + x + 1]) >= limit) || (y + 1 < h && Math.abs(d - depth[(y + 1) * w + x]) >= limit)) jump[y * w + x] = 1;
+    }
+  }
+  const box = depthFilter(jump, w, h, radius, Math.max);
+  return depthFilter(box, w, h, 1, (a, b) => a + b).map((v) => Math.min(1, v / 9));
+}
+
+// 0 where the rays landing on a pixel agree, 1 where they clearly do not.
+function smoothDisagreement(dis) {
+  const t = Math.min(1, Math.max(0, (dis - DITHER_FIX.low) / (DITHER_FIX.high - DITHER_FIX.low)));
+  return t * t * (3 - 2 * t);
+}
 
 function smoothDisagreeing(y, dis, W, H, scale) {
   if (!DITHER_FIX.on) return;

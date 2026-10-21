@@ -19,7 +19,7 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX, BACK_PROJECTION_EDGE, depthEdgeMask } from '../core/superres.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1390,25 +1390,6 @@ void main() {
 
 // The splatted brightness, normalized (uPass 0), or corrected by a
 // back-projection residual (uPass 1).
-const SR_COMBINE = `#version 300 es
-precision highp float;
-uniform sampler2D uAcc;    // r: sum, g: weight
-uniform sampler2D uPrep;
-uniform sampler2D uSharp;
-uniform int uPass;
-out vec4 outColor;
-const float LAMBDA = 0.15;
-void main() {
-  ivec2 p = ivec2(gl_FragCoord.xy);
-  vec2 acc = texelFetch(uAcc, p, 0).rg;
-  if (uPass == 0) {
-    float upY = dot(texelFetch(uPrep, p, 0).rgb, vec3(0.2126, 0.7152, 0.0722));
-    outColor = vec4((acc.r + upY * LAMBDA) / (acc.g + LAMBDA), 0.0, 0.0, 0.0);
-  } else {
-    outColor = vec4(max(0.0, texelFetch(uSharp, p, 0).r + 0.8 * acc.r / (acc.g + LAMBDA)), 0.0, 0.0, 0.0);
-  }
-}`;
-
 // Edge snapping (core/superres.js EDGE_SNAP): the splat with the depth map
 // as is, with the nearest and farthest depth around each pixel and with the
 // depth shifted, blended by how well the rays landing on the pixel agree.
@@ -1454,6 +1435,48 @@ float candY(int k, ivec2 p) {
   ${Array.from({ length: SNAP_CANDIDATES }, (_, k) => `if (k == ${k}) return texelFetch(uC${k}, p, 0).g;`).join('\n  ')}
   return 0.0;
 }`;
+
+
+const SR_COMBINE = `#version 300 es
+precision highp float;
+${SR_CANDS}
+uniform sampler2D uAcc;    // r: sum, g: weight
+uniform sampler2D uPrep;
+uniform sampler2D uSharp;
+uniform sampler2D uEdge;   // depth edge mask (core/superres.js depthEdgeMask), depth map sized
+uniform int uPass;
+uniform int uCount;        // candidates of the edge snapping (0: none)
+uniform float uLow;
+uniform float uHigh;
+uniform int uEdgeOn;
+uniform vec3 uEdgeMap;     // detail / scale, depth map width and height
+out vec4 outColor;
+const float LAMBDA = 0.15;
+${SR_CAND_AT}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 acc = texelFetch(uAcc, p, 0).rg;
+  if (uPass == 0) {
+    float upY = dot(texelFetch(uPrep, p, 0).rgb, vec3(0.2126, 0.7152, 0.0722));
+    outColor = vec4((acc.r + upY * LAMBDA) / (acc.g + LAMBDA), 0.0, 0.0, 0.0);
+  } else {
+    // Back-projection, left off where the rays disagree and near depth edges.
+    float keep = 1.0;
+    if (uCount > 0) {
+      float best = 1e9;
+      for (int k = 0; k < uCount; k++) best = min(best, candD(k, p));
+      float t = clamp((best - uLow) / (uHigh - uLow), 0.0, 1.0);
+      keep = 1.0 - t * t * (3.0 - 2.0 * t);
+    }
+    if (uEdgeOn == 1) {
+      ivec2 e = ivec2(floor((vec2(p) + 0.5) * uEdgeMap.x));
+      e = clamp(e, ivec2(0), ivec2(int(uEdgeMap.y) - 1, int(uEdgeMap.z) - 1));
+      keep *= 1.0 - texelFetch(uEdge, e, 0).r;
+    }
+    outColor = vec4(max(0.0, texelFetch(uSharp, p, 0).r + 0.8 * keep * acc.r / (acc.g + LAMBDA)), 0.0, 0.0, 0.0);
+  }
+}`;
+
 
 const SR_SNAP = `#version 300 es
 precision highp float;
@@ -3412,6 +3435,14 @@ export class GpuRenderer {
     let next = this.texture(W, H, gl.R32F);
     const estimate = p.passes > 0 ? this.texture(W, H, gl.R16F, gl.LINEAR) : null;
     owned.push(sharp, next, estimate);
+    let snapAccs = null;
+    let edgeTex = null;
+    if (p.allInFocus && p.depth && BACK_PROJECTION_EDGE.on) {
+      edgeTex = this.texture(p.baseW, p.baseH, gl.R32F);
+      gl.bindTexture(gl.TEXTURE_2D, edgeTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, p.baseW, p.baseH, gl.RED, gl.FLOAT, depthEdgeMask(p.depth, p.baseW, p.baseH));
+      owned.push(edgeTex);
+    }
     const combine = (accTex, pass) => {
       Q = P.srCombine;
       this.target(next, W, H);
@@ -3423,6 +3454,19 @@ export class GpuRenderer {
       gl.uniform1i(Q.u.uSharp, 3);
       this.bindTex(3, sharp);
       gl.uniform1i(Q.u.uPass, pass);
+      // The edge snapping candidates (units 4 and up) and the depth edge mask.
+      const cands = pass > 0 && snapAccs ? snapAccs : [];
+      for (let k = 0; k < SNAP_CANDIDATES; k++) {
+        gl.uniform1i(Q.u[`uC${k}`], 4 + k);
+        this.bindTex(4 + k, cands[k] || prep);
+      }
+      gl.uniform1i(Q.u.uCount, cands.length);
+      gl.uniform1f(Q.u.uLow, DITHER_FIX.low);
+      gl.uniform1f(Q.u.uHigh, DITHER_FIX.high);
+      gl.uniform1i(Q.u.uEdge, 4 + SNAP_CANDIDATES);
+      this.bindTex(4 + SNAP_CANDIDATES, edgeTex || prep);
+      gl.uniform1i(Q.u.uEdgeOn, pass > 0 && edgeTex ? 1 : 0);
+      gl.uniform3f(Q.u.uEdgeMap, p.detail / p.scale, p.baseW, p.baseH);
       this.draw();
       [sharp, next] = [next, sharp];
     };
@@ -3518,7 +3562,6 @@ export class GpuRenderer {
       owned.push(inputs.lens.tex, again);
       combine(again, 0);
     }
-    let snapAccs = null;
     if (p.allInFocus && p.depth && EDGE_SNAP.on) {
       // Edge snapping (core/superres.js EDGE_SNAP).
       const depthTex = (values) => {

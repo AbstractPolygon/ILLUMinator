@@ -1205,6 +1205,7 @@ function rayWarpShift() {
 // pictures: they were measured with it in. A depth map measured here is
 // consistent with the plain rays.
 function activeRayWarp() {
+  if (globalThis.__noRayWarp) return null;
   return state.rayWarp && state.depthRaw && state.depthRaw.fromLytro && state.lf && state.lf.grid ? state.rayWarp : null;
 }
 
