@@ -10,14 +10,14 @@ export const LYTRO_USB_VENDOR = 0x24cf;
 
 export const native = typeof window !== 'undefined' ? window.lytroNative || null : null;
 
-// Importing straight from a connected camera (Import from camera…, the
-// Camera section, Detect camera…): only in the desktop app, over USB
-// (electron/camera.cjs). A browser cannot read these cameras: Chrome hides
-// USB drives and HID devices from pages (WebUSB), and both the first
-// generation camera and the ILLUM present as one or both of those. The
-// browser code for it (the Camera section, remembering the card's folder) is
-// kept behind this flag.
-export const CAMERA_IMPORT = native !== null;
+// Importing from a connected camera (Import from camera…, the Camera section,
+// Detect camera…). The desktop app reads the camera over USB
+// (electron/camera.cjs). A browser cannot read these cameras over USB: Chrome
+// hides USB drives and HID devices from pages (WebUSB), and both the first
+// generation camera and the ILLUM present as one or both of those. There it
+// notices the camera being plugged in (WebUSB, Chrome and Edge) and reads the
+// photos from the camera's DCIM folder, chosen once and remembered.
+export const CAMERA_IMPORT = true;
 
 function toArrayBuffer(u8) {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
