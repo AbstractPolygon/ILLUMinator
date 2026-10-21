@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('lytroNative', {
   findSidecar: (path) => ipcRenderer.invoke('find-sidecar', path),
   readRange: (path, offset, length) => ipcRenderer.invoke('read-range', path, offset, length),
   listCameras: () => ipcRenderer.invoke('list-cameras'),
+  cameraProblems: () => ipcRenderer.invoke('camera-problems'),
   cameraThumbnail: (cameraId, fileId) => ipcRenderer.invoke('camera-thumbnail', cameraId, fileId),
   libraryDir: () => ipcRenderer.invoke('library-dir'),
   chooseLibraryDir: () => ipcRenderer.invoke('choose-library-dir'),

@@ -270,6 +270,9 @@ function registerIpc() {
   // The page saw a Lytro plugged in over USB (app/js/main.js, WebUSB).
   ipcMain.on('camera-usb-connected', () => scanSoon());
 
+  // Why a Lytro on USB could not be used, and the protocol log.
+  ipcMain.handle('camera-problems', () => ({ problems: camera.usbProblems(), log: camera.usbDiagnostics() }));
+
   ipcMain.handle('list-cameras', async () => {
     cameras = await camera.listCameras();
     for (const c of cameras) for (const f of c.files) if (c.kind === 'drive') allow(f.id);

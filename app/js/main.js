@@ -6444,6 +6444,7 @@ if (CAMERA_IMPORT) {
 if (native && CAMERA_IMPORT) {
   let lastCams = [];
   let usbLytros = 0;
+  let usbProblem = '';
   const showCameras = () => {
     const count = lastCams.reduce((n, c) => n + c.files.length, 0);
     $('camera-status').textContent = lastCams.length
@@ -6453,11 +6454,24 @@ if (native && CAMERA_IMPORT) {
     $('camera-btn').hidden = !(lastCams.length > 0 || usbLytros > 0);
     const c = lastCams.find((x) => x.files.length) || lastCams[0];
     setCameraSection(c ? { cam: { kind: c.kind, id: c.id, label: c.label, files: c.files } }
-      : usbLytros ? { note: 'Lytro camera connected. Looking for its photos…' } : {});
+      : usbProblem ? { note: usbProblem } : usbLytros ? { note: 'Lytro camera connected. Looking for its photos…' } : {});
   };
+  // A Lytro on USB the app could not use: say why (a driver, a protocol the
+  // camera does not answer), instead of showing nothing.
+  const refreshProblems = () => {
+    if (lastCams.length || !native.cameraProblems) return;
+    native.cameraProblems().then(({ problems }) => {
+      const next = problems && problems.length ? problems[0] : '';
+      if (next === usbProblem) return;
+      usbProblem = next;
+      if (!lastCams.length) setCameraSection(usbProblem ? { note: usbProblem } : usbLytros ? { note: 'Lytro camera connected. Looking for its photos…' } : {});
+    }).catch(() => {});
+  };
+  setInterval(refreshProblems, 5000);
   native.listCameras().then((cams) => {
     lastCams = cams;
     showCameras();
+    refreshProblems();
   }).catch(() => {});
   native.onCamerasChanged((cams) => {
     lastCams = cams;

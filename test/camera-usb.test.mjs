@@ -211,3 +211,16 @@ test('the transport waits until the camera reports ready', async () => {
   assert.equal(sent.length, 3);
   assert.ok(sent[0].subarray(15, 31).every((v) => v === 0));
 });
+
+test('the ILLUM is tried on its vendor interface first, the first generation on mass storage', () => {
+  const { describeInterfaces, candidateInterfaces } = require('../electron/lytro-usb.cjs');
+  const ep = (direction) => ({ direction, transferType: 2, address: direction === 'in' ? 0x81 : 0x02 });
+  const iface = (number, cls, sub = 0, proto = 0) => ({ interfaceNumber: number, descriptor: { bInterfaceClass: cls, bInterfaceSubClass: sub, bInterfaceProtocol: proto }, endpoints: [ep('in'), ep('out')] });
+  const illum = describeInterfaces({ interfaces: [iface(0, 8, 6, 0x50), iface(1, 0xff, 0, 0)] });
+  assert.deepEqual(candidateInterfaces(illum, 0x00b1).map((i) => i.number), [1, 0]);
+  const gen1 = describeInterfaces({ interfaces: [iface(0, 8, 6, 0x50)] });
+  assert.deepEqual(candidateInterfaces(gen1, 0x00a1).map((i) => i.number), [0]);
+  // An Android debug interface is left to adb.
+  const adb = describeInterfaces({ interfaces: [iface(0, 8, 6, 0x50), iface(2, 0xff, 0x42, 1)] });
+  assert.deepEqual(candidateInterfaces(adb, 0x00b1).map((i) => i.number), [0]);
+});

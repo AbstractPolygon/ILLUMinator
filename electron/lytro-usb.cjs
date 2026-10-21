@@ -35,13 +35,17 @@ const pify = (fn) => new Promise((resolve, reject) => fn((err, result) => (err ?
 // Bulk-only transport over a claimed interface: command block wrapper, data,
 // status wrapper.
 class BulkTransport {
-  constructor(epIn, epOut, log = () => {}) {
+  constructor(epIn, epOut, log = () => {}, timeoutMs = IO_TIMEOUT_MS) {
     this.epIn = epIn;
     this.epOut = epOut;
-    this.epIn.timeout = IO_TIMEOUT_MS;
-    this.epOut.timeout = IO_TIMEOUT_MS;
+    this.setTimeout(timeoutMs);
     this.tag = 0;
     this.log = log;
+  }
+
+  setTimeout(ms) {
+    this.epIn.timeout = ms;
+    this.epOut.timeout = ms;
   }
 
   wrapper(cdb, size, toDevice) {
@@ -108,53 +112,98 @@ function listDevices() {
     .map((d) => ({ key: `${d.busNumber}:${d.deviceAddress}`, product: d.deviceDescriptor.idProduct, device: d }));
 }
 
-// Opens a device and claims its mass storage interface: { camera, close,
-// product }. Throws with a reason the user can act on.
+// The USB interfaces of a device, as { iface, number, cls, sub, proto, bulkIn,
+// bulkOut, kind }: kind is 'mass' (class 8), 'adb' (Android debug bridge:
+// vendor class, subclass 0x42, protocol 1) or 'vendor' (any other vendor
+// class); null otherwise.
+function describeInterfaces(device) {
+  return device.interfaces.map((iface) => {
+    const d = iface.descriptor;
+    const endpoints = iface.endpoints || [];
+    const bulk = (dir) => endpoints.find((e) => e.direction === dir && e.transferType === 2) || null;
+    const kind = d.bInterfaceClass === 8 ? 'mass' : d.bInterfaceClass === 0xff ? (d.bInterfaceSubClass === 0x42 && d.bInterfaceProtocol === 1 ? 'adb' : 'vendor') : null;
+    return { iface, number: iface.interfaceNumber, cls: d.bInterfaceClass, sub: d.bInterfaceSubClass, proto: d.bInterfaceProtocol, bulkIn: bulk('in'), bulkOut: bulk('out'), kind };
+  });
+}
+
+// The interfaces to try the camera's protocol on, best first. The first
+// generation camera speaks it on its mass storage interface. A camera that
+// is also a drive (the ILLUM: product 00B1, interface 0 its drive, interface 1
+// vendor specific) is tried on its vendor interfaces first, so that its drive
+// keeps its driver and stays a drive. An Android debug interface is left to
+// adb.
+function candidateInterfaces(infos, product) {
+  const usable = infos.filter((i) => i.bulkIn && i.bulkOut && (i.kind === 'mass' || i.kind === 'vendor'));
+  const rank = (i) => (product === FIRST_GENERATION_PRODUCT ? (i.kind === 'mass' ? 0 : 1) : i.kind === 'vendor' ? 0 : 1);
+  return usable.slice().sort((x, y) => rank(x) - rank(y) || x.number - y.number);
+}
+
+const KIND_NAMES = { mass: 'mass storage', adb: 'Android debug (adb)', vendor: 'vendor specific' };
+const describe = (infos) => infos.map((i) => `${i.number}: class ${i.cls.toString(16)}/${i.sub.toString(16)}/${i.proto.toString(16)} ${KIND_NAMES[i.kind] || 'other'}${i.bulkIn && i.bulkOut ? '' : ' (no bulk endpoints)'}`).join('; ');
+
+// Opens a device and finds the interface that answers the camera's protocol:
+// { camera, close, product }. Throws with a reason the user can act on.
 async function connect({ device, product, key }, log = () => {}) {
   const lib = usbLib();
   if (!lib) throw new Error('USB access is not available in this build');
   try {
     device.open();
   } catch (err) {
-    throw new Error(`The camera cannot be opened (${err.message}). ${process.platform === 'win32' ? 'Windows needs the camera\'s WinUSB driver (Zadig)' : process.platform === 'linux' ? 'Linux needs a udev rule for USB vendor 24cf' : 'macOS may need the camera\'s disk driver released'}.`);
+    throw new Error(`The camera cannot be opened (${err.message}). ${process.platform === 'win32' ? 'Windows needs the camera\'s WinUSB driver on the interface of the camera (Zadig; for the ILLUM its interface 1, not the mass storage one)' : process.platform === 'linux' ? 'Linux needs a udev rule for USB vendor 24cf' : 'macOS may need the camera\'s disk driver released'}.`);
   }
-  let iface = null;
-  try {
-    iface = device.interfaces.find((i) => i.descriptor.bInterfaceClass === 8) || device.interfaces[0];
-    if (!iface) throw new Error('The camera has no USB interface');
-    // Only the first generation camera, which is not a drive, has its driver
-    // released; a camera showing up as a drive keeps it (and its drive).
-    if (product === FIRST_GENERATION_PRODUCT && process.platform !== 'win32' && iface.isKernelDriverActive()) iface.detachKernelDriver();
-    iface.claim();
-    const endpoints = iface.endpoints;
-    const epIn = endpoints.find((e) => e.direction === 'in' && e.transferType === 2);
-    const epOut = endpoints.find((e) => e.direction === 'out' && e.transferType === 2);
-    if (!epIn || !epOut) throw new Error('The camera has no bulk endpoints');
-    log(`${key}: product ${product.toString(16)}, interface ${iface.interfaceNumber}, endpoints ${epIn.address.toString(16)}/${epOut.address.toString(16)}`);
-    const transport = new BulkTransport(epIn, epOut, log);
-    if (!(await transport.waitReady())) log('the camera did not report ready; going on');
-    const camera = new LytroCamera(transport, log);
-    const close = async () => {
-      try {
-        await pify((cb) => iface.release(true, cb));
-      } catch {
-        // Already gone.
-      }
-      try {
-        device.close();
-      } catch {
-        // Already gone.
-      }
-    };
-    return { camera, close, product };
-  } catch (err) {
+  const closeDevice = () => {
     try {
       device.close();
     } catch {
       // Not open.
     }
+  };
+  try {
+    const infos = describeInterfaces(device);
+    log(`${key}: product ${product.toString(16)}; interfaces ${describe(infos)}`);
+    const candidates = candidateInterfaces(infos, product);
+    if (!candidates.length) {
+      throw new Error(infos.some((i) => i.kind === 'adb') ? 'This camera offers only its Android debug interface (adb) over USB: use USB debugging (adb) to import from it.' : `The camera has no interface to talk to (${describe(infos)}).`);
+    }
+    const failures = [];
+    for (const c of candidates) {
+      const { iface } = c;
+      try {
+        // Only the first generation camera, which is not a drive, has its
+        // driver released; a camera that is also a drive keeps its drive.
+        if ((product === FIRST_GENERATION_PRODUCT || c.kind === 'vendor') && process.platform !== 'win32' && iface.isKernelDriverActive()) iface.detachKernelDriver();
+        iface.claim();
+      } catch (err) {
+        failures.push(`interface ${c.number}: ${err.message}`);
+        log(`interface ${c.number} cannot be claimed: ${err.message}`);
+        continue;
+      }
+      const transport = new BulkTransport(c.bulkIn, c.bulkOut, log, 4000);
+      const camera = new LytroCamera(transport, log);
+      const release = async () => {
+        try {
+          await pify((cb) => iface.release(true, cb));
+        } catch {
+          // Already gone.
+        }
+      };
+      try {
+        if (!(await transport.waitReady(8, 150))) log(`interface ${c.number} did not report ready; going on`);
+        await camera.hardwareInfo();
+        transport.setTimeout(IO_TIMEOUT_MS);
+        log(`interface ${c.number} answers the camera protocol`);
+        return { camera, close: async () => { await release(); closeDevice(); }, product, interfaceNumber: c.number };
+      } catch (err) {
+        failures.push(`interface ${c.number} (${KIND_NAMES[c.kind]}): ${err.message}`);
+        log(`interface ${c.number} does not answer: ${err.message}`);
+        await release();
+      }
+    }
+    throw new Error(`The camera did not answer its protocol (${failures.join('; ')}).`);
+  } catch (err) {
+    closeDevice();
     throw err;
   }
 }
 
-module.exports = { LYTRO_VENDOR, FIRST_GENERATION_PRODUCT, BulkTransport, listDevices, connect, usbAvailable: () => !!usbLib() };
+module.exports = { LYTRO_VENDOR, FIRST_GENERATION_PRODUCT, BulkTransport, describeInterfaces, candidateInterfaces, listDevices, connect, usbAvailable: () => !!usbLib() };
