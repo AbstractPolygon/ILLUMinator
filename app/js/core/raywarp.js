@@ -29,7 +29,7 @@
 const MAGIC = 0xaf0990fa;
 
 // The field curvature of the rays as a change of the depth map (see focusAt).
-export const FOCUS_FIELD = { on: false, gain: 1, across: 24, down: 16 };
+export const FOCUS_FIELD = { on: false, gain: 1, across: 24, down: 16, own: true };
 
 export function parseRayWarp(bytes, width, height, { tilt = true } = {}) {
   if (!bytes || bytes.length < 104) return null;
@@ -257,6 +257,31 @@ function makeEvaluator(dense, n, mins, step, border, removeTilt) {
         }
       }
       return { width: w, height: h, grid, cover, nodes: n.slice(), mins: mins.slice(), step: step.slice(), border };
+    },
+    // The picture's distortion as the table has it: (r, ratio) pairs, r the
+    // distance of the corrected position from the middle in half diagonals and
+    // ratio its distance in the uncorrected picture over that (as lens.js
+    // lensSource). The table is the same in every direction, so the
+    // diagonal, which reaches the corners, is read.
+    distortionProfile(width, height, count = 40) {
+      const out = [];
+      const half = Math.hypot(width, height) / 2;
+      const angle = Math.atan2(height, width);
+      const q = [0, 0, 0, 0];
+      for (let i = 0; i < count; i++) {
+        const r0 = 0.01 + (0.96 * i) / (count - 1);
+        const px = r0 * half * Math.cos(angle);
+        const py = r0 * half * Math.sin(angle);
+        q[0] = px / width;
+        q[1] = py / height;
+        q[2] = q[3] = 0;
+        if (!(sample(q, tmp) > 0)) continue;
+        const cx = px + tmp[0] * width;
+        const cy = py + tmp[1] * height;
+        const rc = Math.hypot(cx, cy);
+        if (rc > 0) out.push({ r: rc / half, ratio: r0 * half / rc });
+      }
+      return out;
     },
     // The depth (in lambda) at which the corrected rays of an image position
     // (x, y: -0.5..0.5) come together, relative to the middle of the picture:

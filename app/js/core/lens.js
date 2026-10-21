@@ -73,12 +73,46 @@ export function autoDistortion(zoomStep) {
   return { scale, k1: k1 + dk1, k2: k2 + dk2, edge: edgeEase(zoomStep) };
 }
 
-// `cam`: the camera's info (capture.zoomStep picks the automatic correction).
+// The automatic correction fitted to a distortion profile of (r, ratio) pairs
+// (core/raywarp.js distortionProfile), in the same form as autoDistortion:
+// ratio = scale + k1 r^2 + k2 r^4 + edge ease, by least squares.
+export function fitDistortion(profile) {
+  if (!profile || profile.length < 8) return null;
+  const A = Array.from({ length: 4 }, () => new Float64Array(5));
+  for (const { r, ratio } of profile) {
+    const g = r > EDGE_START ? ((r - EDGE_START) / (1 - EDGE_START)) ** 2 / r : 0;
+    const b = [1, r * r, r ** 4, g];
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) A[i][j] += b[i] * b[j];
+      A[i][4] += b[i] * ratio;
+    }
+  }
+  for (let i = 0; i < 4; i++) {
+    let p = i;
+    for (let j = i + 1; j < 4; j++) if (Math.abs(A[j][i]) > Math.abs(A[p][i])) p = j;
+    [A[i], A[p]] = [A[p], A[i]];
+    if (Math.abs(A[i][i]) < 1e-12) return null;
+    for (let j = i + 1; j < 4; j++) {
+      const f = A[j][i] / A[i][i];
+      for (let k = i; k < 5; k++) A[j][k] -= f * A[i][k];
+    }
+  }
+  const x = new Float64Array(4);
+  for (let i = 3; i >= 0; i--) {
+    let t = A[i][4];
+    for (let j = i + 1; j < 4; j++) t -= A[i][j] * x[j];
+    x[i] = t / A[i][i];
+  }
+  return { scale: x[0] - 1, k1: x[1], k2: x[2], edge: x[3] };
+}
+
+// `cam`: the camera's info (capture.zoomStep picks the automatic correction;
+// `distortionFit` is the photo's own, when it came with its ray table).
 export function lensParams(s = {}, cam = null) {
   const k = ((s.distortion || 0) / 100) * 0.25;
   const vig = (s.vignetting || 0) / 100;
   const start = (((s.midpoint ?? 50) / 100)) * 0.9;
-  const auto = s.auto !== false && cam && cam.capture ? autoDistortion(cam.capture.zoomStep) : null;
+  const auto = s.auto !== false && cam ? cam.distortionFit || (cam.capture ? autoDistortion(cam.capture.zoomStep) : null) : null;
   const sc = auto ? 1 + auto.scale : 1;
   const k2 = auto ? auto.k2 / sc : 0;
   const kk = (k + (auto ? auto.k1 : 0)) / sc;

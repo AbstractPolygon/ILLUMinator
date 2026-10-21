@@ -31,7 +31,7 @@ import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, l
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
-import { lensParams, applyLens, withoutDistortion } from './core/lens.js';
+import { lensParams, applyLens, withoutDistortion, fitDistortion } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -434,6 +434,8 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     if (state.settings.hotPixels !== false) useHotPixelFix(true);
     state.dev = makeDevelopParams(state.lf.cam);
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
+    // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
+    state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
     if (state.gpu === null && state.settings.gpu !== false) {
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
       if (state.gpu && state.lut) state.gpu.setLut(state.lut);
@@ -1198,6 +1200,8 @@ function measureLytro(progress) {
 // The depth map moved to meet the camera's ray correction (core/raywarp.js).
 function rayWarpShift() {
   const warp = activeRayWarp();
+  if (warp && !state.depthRaw.fromLytro && FOCUS_FIELD.own && globalThis.__ownShift === undefined) return (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
+  if (warp && !state.depthRaw.fromLytro && globalThis.__ownShift !== undefined) return globalThis.__ownShift * LAMBDA_TO_ALPHA + (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
   return (warp ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0) + (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
 }
 
@@ -1206,26 +1210,30 @@ function rayWarpShift() {
 // consistent with the plain rays.
 function activeRayWarp() {
   if (globalThis.__noRayWarp) return null;
-  return state.rayWarp && state.depthRaw && state.depthRaw.fromLytro && state.lf && state.lf.grid ? state.rayWarp : null;
+  return state.rayWarp && state.depthRaw && (state.depthRaw.fromLytro || FOCUS_FIELD.own) && state.lf && state.lf.grid ? state.rayWarp : null;
 }
 
 // The depth map's change for the rays' field curvature (core/raywarp.js
 // focusAt), per depth map pixel, in focus units; null when there is none.
 function rayWarpField(outW, outH) {
   const warp = activeRayWarp();
-  if (!warp || !FOCUS_FIELD.on || !FOCUS_FIELD.gain) return null;
-  const key = `${outW}x${outH}:${FOCUS_FIELD.gain}:${FOCUS_FIELD.across}x${FOCUS_FIELD.down}`;
+  const own = !!warp && !state.depthRaw.fromLytro && FOCUS_FIELD.own;
+  if (!warp || !(own || (FOCUS_FIELD.on && FOCUS_FIELD.gain))) return null;
+  const gain = own ? -1 : FOCUS_FIELD.gain;
+  const key = `${outW}x${outH}:${gain}:${own}:${FOCUS_FIELD.across}x${FOCUS_FIELD.down}`;
   if (state.rayField && state.rayField.key === key && state.rayField.warp === warp) return state.rayField.values;
   const { width, height } = state.lf.cam;
   const kx = state.lf.grid.pitch / width;
   const ky = state.lf.grid.pitch / height;
   const nx = FOCUS_FIELD.across;
   const ny = FOCUS_FIELD.down;
-  const e0 = warp.focusAt(0, 0, kx, ky);
+  // A depth measured here is in the frame of the plain rays; the corrected rays
+  // meet at that depth plus their own offset (-e: the whole offset), so it moves by it.
+  const e0 = own ? 0 : warp.focusAt(0, 0, kx, ky);
   const coarse = new Float32Array(nx * ny);
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
-      coarse[j * nx + i] = FOCUS_FIELD.gain * LAMBDA_TO_ALPHA * (warp.focusAt(-0.49 + (0.98 * i) / (nx - 1), -0.49 + (0.98 * j) / (ny - 1), kx, ky) - e0);
+      coarse[j * nx + i] = gain * LAMBDA_TO_ALPHA * (warp.focusAt(-0.49 + (0.98 * i) / (nx - 1), -0.49 + (0.98 * j) / (ny - 1), kx, ky) - e0);
     }
   }
   const values = new Float32Array(outW * outH);
