@@ -215,7 +215,7 @@ export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, s
 export function renderSuperRes(raw, cam, dev, sampler, options) {
   const {
     alpha = 0, allInFocus = false, u0 = 0, v0 = 0, apertureSigma = Infinity, scale = 3, vignetting: vg, base, depth,
-    depthTolerance = 0.12, onProgress, passes = 0, calibrate = false, lens = null,
+    depthTolerance = 0.12, onProgress, passes = 0, calibrate = false, lens = null, rayWarp = null,
   } = options;
   let lensOffsets = options.lensOffsets || null;
   // The depth map the rays follow (edge snapping tries others).
@@ -223,7 +223,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   const inv2a2 = Number.isFinite(apertureSigma) ? 1 / (2 * apertureSigma * apertureSigma) : 0;
   const { W, H, sigma, rUse, spreadRadius, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale, apertureSigma, sigma: options.sigma, aperture: options.aperture });
   const { grid: g } = sampler;
-  const { width } = cam;
+  const { width, height } = cam;
   // The lens distortion is corrected where each ray lands, before the rays
   // are combined (see core/lens.js lensWarp), so the picture comes out
   // corrected without resampling it.
@@ -287,7 +287,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   // its difference from the estimate at its position instead (a residual).
   const gpuParams = (estimate) => ({
     W, H, scale, sigma, reach, rUse, alpha, allInFocus, u0, v0, apertureSigma, vignetting: vg,
-    xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate, lensOffsets, lens,
+    xMin, yMin, unit, detail, base, baseW: bw, baseH: bh, depth, estimate, lensOffsets, lens, rayWarp,
   });
   const totalSteps = 1 + passes;
   const splat = (estimate, step) => {
@@ -399,11 +399,22 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     let lastLens = NaN;
     let tw = null;
     let lensAlpha = alpha;
+    let cell = null;
+    const warpOut = [0, 0, 0, 0];
+    const centreOut = [0, 0, 0, 0];
+    const cosR = Math.cos(g.rotation);
+    const sinR = Math.sin(g.rotation);
 
     forEachLensPixel(g, cam, rUse, (i, x, y, u, v, lensX, lensY) => {
       if (lensX + lensY * 1e6 !== lastLens) {
         lastLens = lensX + lensY * 1e6;
         tw = tileWeights(vg, x, y);
+        if (rayWarp && RAY_WARP.on && allInFocus) {
+          // This lens's place on the sensor, for the camera's ray correction.
+          const cx = x - (cosR * u - sinR * v);
+          const cy = y - (sinR * u + cosR * v);
+          cell = rayWarp.lens(cx / width - 0.5, cy / height - 0.5);
+        }
         if (allInFocus && depth) {
           lensAlpha = sampleDepth(rayDepth, bw, bh, ((lensX - xMin) / unit) * detail, ((lensY - yMin) / unit) * detail);
         }
@@ -424,8 +435,26 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       const dv = v - v0;
       const conf = (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
       if (conf < 1e-3) return;
-      const lx = (lensX - xMin) / unit;
-      const ly = (lensY - yMin) / unit;
+      let lx = (lensX - xMin) / unit;
+      let ly = (lensY - yMin) / unit;
+      let rdu = du;
+      let rdv = dv;
+      if (cell && rayWarp) {
+        // The ray as the camera really made it: where it comes from and which
+        // way it goes differ a little from the ideal, more away from the middle.
+        rayWarp.fromLens(cell, u / g.pitch, v / g.pitch, warpOut);
+        let sx = warpOut[0] * width;
+        let sy = warpOut[1] * height;
+        if (!RAY_WARP.centre) {
+          rayWarp.fromLens(cell, 0, 0, centreOut);
+          sx -= centreOut[0] * width;
+          sy -= centreOut[1] * height;
+        }
+        lx += (cosR * sx + sinR * sy) / unit;
+        ly += (-sinR * sx + cosR * sy) / unit;
+        rdu += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch;
+        rdv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch;
+      }
       let rayAlpha = lensAlpha;
       if (allInFocus && depth) {
         // Every ray takes the depth of the surface it meets, not the one
@@ -433,7 +462,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         // extended depth of field projection). Where a ray's depth does not
         // settle it meets two surfaces: the nearer one wins if the ray
         // lands on it, else the farther.
-        const at = (a) => sampleDepth(rayDepth, bw, bh, (lx - a * du) * detail, (ly - a * dv) * detail);
+        const at = (a) => sampleDepth(rayDepth, bw, bh, (lx - a * rdu) * detail, (ly - a * rdv) * detail);
         const a1 = at(rayAlpha);
         const a2 = at(a1);
         if (Math.abs(a2 - a1) <= RAY_DEPTH_TOLERANCE) rayAlpha = a2;
@@ -442,8 +471,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           rayAlpha = Math.abs(at(near) - near) <= RAY_DEPTH_TOLERANCE ? near : Math.max(a1, a2);
         }
       }
-      let ox = (lx - rayAlpha * du) * scale;
-      let oy = (ly - rayAlpha * dv) * scale;
+      let ox = (lx - rayAlpha * rdu) * scale;
+      let oy = (ly - rayAlpha * rdv) * scale;
       if (warp) [ox, oy] = warp.forward(ox + 0.5, oy + 0.5).map((q) => q - 0.5);
       const px = Math.round(ox);
       const py = Math.round(oy);
@@ -463,7 +492,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         if (lens < 0) return;
         const { cand, est, err } = probe;
         for (let k = 0; k < cand.length; k++) {
-          const e = yEst - sampleBilinear(est, W, H, ...landing((lx - rayAlpha * (du - cand[k][0])) * scale, (ly - rayAlpha * (dv - cand[k][1])) * scale));
+          const e = yEst - sampleBilinear(est, W, H, ...landing((lx - rayAlpha * (rdu - cand[k][0])) * scale, (ly - rayAlpha * (rdv - cand[k][1])) * scale));
           err[lens * cand.length + k] += conf * e * e;
         }
         return;
@@ -573,6 +602,10 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // Rays hidden behind a nearer surface at the pixel they land on are dropped
 // (see the visibility test in renderSuperRes); `tol` in depth units. Off: on
 // the turntable and fence photos it did not change the dotted edge pattern.
+// The camera's ray correction (core/raywarp.js). `centre`: keep the part of the
+// shift that moves the whole view (it is the lens distortion, which the render
+// corrects separately), or leave it out.
+export const RAY_WARP = { on: true, centre: false };
 export const OCCLUSION = { on: false, tol: 0.1 };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
 
@@ -941,9 +974,9 @@ export function vignettingGainAt(vg, u, v) {
 // by an amount that differs from photo to photo, and rays placed with it land
 // slightly out of focus and come out soft. Found from the middle of the
 // sensor at a coarse scale in a few seconds.
-export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, gpuSplat, candidates = [-0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
+export function estimateFocusOffset(raw, cam, dev, sampler, { base, baseW, baseH, depth, vignetting, lensOffsets, lambdaToAlpha, gpuSplat, rayWarp = null, candidates = [-0.6, -0.4, -0.2, 0, 0.2, 0.4] }) {
   const r = renderSuperRes(raw, cam, dev, sampler, {
-    gpuSplat,
+    gpuSplat, rayWarp,
     allInFocus: true, scale: 3, passes: 0, vignetting, base, baseW, baseH, depth, lensOffsets,
     probeFocus: { lambdaToAlpha, candidates },
   });

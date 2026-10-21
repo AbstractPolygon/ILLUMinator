@@ -26,6 +26,7 @@ import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
+import { parseRayWarp } from './core/raywarp.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -432,6 +433,7 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     state.rawFixed = null;
     if (state.settings.hotPixels !== false) useHotPixelFix(true);
     state.dev = makeDevelopParams(state.lf.cam);
+    state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     if (state.gpu === null && state.settings.gpu !== false) {
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
       if (state.gpu && state.lut) state.gpu.setLut(state.lut);
@@ -649,7 +651,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     const probeBase = await allInFocusBase(id, u, v);
     const probe = estimateFocusOffset(lf.raw, lf.cam, dev, sampler, {
       base: probeBase, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
-      vignetting: state.vignetting, lensOffsets: state.lensOffsets, lambdaToAlpha: LAMBDA_TO_ALPHA,
+      vignetting: state.vignetting, lensOffsets: state.lensOffsets, lambdaToAlpha: LAMBDA_TO_ALPHA, rayWarp: activeRayWarp(),
       gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
     });
     globalThis.__focusMetrics = probe.metrics;
@@ -675,7 +677,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     const tex = state.gpu.superRes({
       ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
       vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes,
-      lensOffsets: state.lensOffsets, calibrate: true, lens: cs.lens,
+      lensOffsets: state.lensOffsets, calibrate: true, lens: cs.lens, rayWarp: activeRayWarp(),
     });
     if (tex) {
       state.lensOffsets = state.gpu.lensOffsets;
@@ -709,7 +711,7 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
     const params = superResParams(sampler, { scale, apertureSigma: Infinity });
     const tex = state.gpu.superRes({
       ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: Infinity, vignetting: state.vignetting, base,
-      baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes: 0, calibrate: true,
+      baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes: 0, calibrate: true, rayWarp: activeRayWarp(),
     });
     if (tex) {
       state.lensOffsets = state.gpu.lensOffsets;
@@ -720,7 +722,7 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: sigma,
     scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
-    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus, lens,
+    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus, lens, rayWarp: activeRayWarp(),
     gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });
   state.lensOffsets = sr.lensOffsets;
@@ -1193,6 +1195,19 @@ function measureLytro(progress) {
 
 // The measured depth, smoothed by the Depth > Smoothing setting (edge-aware,
 // guided by the picture). Re-run when the setting changes.
+// The depth map moved to meet the camera's ray correction (core/raywarp.js).
+function rayWarpShift() {
+  const warp = activeRayWarp();
+  return warp ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0;
+}
+
+// The camera's ray correction, for depth maps that came with Lytro Desktop's
+// pictures: they were measured with it in. A depth map measured here is
+// consistent with the plain rays.
+function activeRayWarp() {
+  return state.rayWarp && state.depthRaw && state.depthRaw.fromLytro && state.lf && state.lf.grid ? state.rayWarp : null;
+}
+
 function applyDepthSmoothing() {
   const amount = state.settings.depthSmoothing ?? 0.3;
   if (state.pp) {
@@ -1206,7 +1221,7 @@ function applyDepthSmoothing() {
   const smooth = state.gpu ? state.gpu.smoothDepth.bind(state.gpu) : smoothDepth;
   const smoothed = smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence, step: raw.flat ? DEPTH_STEP : 0 });
   // Moved by the focus offset found for this photo (see superRes).
-  const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA;
+  const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA + rayWarpShift();
   state.depth = { ...raw, alpha: shift ? Float32Array.from(smoothed, (x) => x + shift) : smoothed };
   state.depthSmoothingApplied = amount;
   state.gen++;

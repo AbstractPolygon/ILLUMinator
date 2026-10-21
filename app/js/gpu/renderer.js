@@ -1124,6 +1124,15 @@ uniform int uResidual;        // 1: splat the difference from uEstimate
 uniform highp sampler2D uLensOff; // per-lens center offsets (rg)
 uniform ivec4 uLensTable;     // first row, first column, rows, columns
 uniform int uUseLens;         // 1: move each lens's center by uLensOff
+uniform int uRayWarp;         // 1: the camera's ray correction (core/raywarp.js)
+uniform int uRayCentre;       // 1: keep the part of it that moves the whole view
+uniform highp sampler2D uRayGrid;  // (dx, dy, du, dv) at (ix * nu + iu, iy * nv + iv)
+uniform highp sampler2D uRayCover; // 1 where the node is covered
+uniform vec4 uRayMin;
+uniform vec4 uRayStep;
+uniform ivec4 uRayN;
+uniform float uRayBorder;
+uniform vec2 uImage;          // sensor size in pixels
 uniform int uProbe;           // 1: one point per sample at its lens's texel
 flat out vec2 vCenter;
 flat out float vY;
@@ -1133,6 +1142,28 @@ flat out vec2 vD;
 flat out float vAlpha;
 
 float rawAt(ivec2 p) { return float(texelFetch(uRaw, p, 0).r); }
+
+// The ray correction at a ray (x, y, u, v): 16 surrounding nodes, normalized by
+// the ones that are covered.
+vec4 rayWarpAt(vec4 q) {
+  vec4 t = uRayBorder + (q - uRayMin) / uRayStep;
+  vec4 f0 = clamp(floor(t), vec4(0.0), vec4(uRayN) - 2.0);
+  ivec4 i = ivec4(f0);
+  vec4 f = t - f0;
+  vec4 acc = vec4(0.0);
+  float w = 0.0;
+  for (int c = 0; c < 16; c++) {
+    ivec4 o = ivec4(c & 1, (c >> 1) & 1, (c >> 2) & 1, (c >> 3) & 1);
+    float k = ((o.x == 1) ? f.x : 1.0 - f.x) * ((o.y == 1) ? f.y : 1.0 - f.y) * ((o.z == 1) ? f.z : 1.0 - f.z) * ((o.w == 1) ? f.w : 1.0 - f.w);
+    ivec4 n = i + o;
+    ivec2 px = ivec2(n.x * uRayN.z + n.z, n.y * uRayN.w + n.w);
+    if (texelFetch(uRayCover, px, 0).r > 0.5) {
+      acc += k * texelFetch(uRayGrid, px, 0);
+      w += k;
+    }
+  }
+  return w > 0.0 ? acc / w : vec4(0.0);
+}
 
 float depthAt(vec2 p) {
   ivec2 sz = textureSize(uDepth, 0);
@@ -1208,18 +1239,29 @@ void main() {
   if (conf < 1e-3) return;
   vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
   float alpha = uAllInFocus == 1 ? depthAt(lens * uDetail) : uAlpha;
+  // The ray as the camera really made it (core/superres.js).
+  vec2 duv = vec2(du, dv);
+  if (uRayWarp == 1) {
+    vec2 center = vec2(uOrigin.x + uGrid.z * lensX - uGrid.w * lensY, uOrigin.y + uGrid.w * lensX + uGrid.z * lensY);
+    vec2 pos = center / uImage - 0.5;
+    vec4 wv = rayWarpAt(vec4(pos, u / pitch, v / pitch));
+    vec2 sh = wv.xy * uImage;
+    if (uRayCentre == 0) sh -= rayWarpAt(vec4(pos, 0.0, 0.0)).xy * uImage;
+    lens += vec2(uGrid.z * sh.x + uGrid.w * sh.y, -uGrid.w * sh.x + uGrid.z * sh.y) / uUnit;
+    duv += vec2(uGrid.z * wv.z + uGrid.w * wv.w, -uGrid.w * wv.z + uGrid.z * wv.w) * pitch;
+  }
   if (uAllInFocus == 1) {
     // Each ray at the depth of the surface it meets (core/superres.js).
-    float a1 = depthAt((lens - alpha * vec2(du, dv)) * uDetail);
-    float a2 = depthAt((lens - a1 * vec2(du, dv)) * uDetail);
+    float a1 = depthAt((lens - alpha * duv) * uDetail);
+    float a2 = depthAt((lens - a1 * duv) * uDetail);
     if (abs(a2 - a1) <= ${RAY_DEPTH_TOLERANCE.toFixed(3)}) alpha = a2;
     else {
       // Two surfaces: the nearer wins if the ray lands on it.
       float nearA = min(a1, a2);
-      alpha = abs(depthAt((lens - nearA * vec2(du, dv)) * uDetail) - nearA) <= ${RAY_DEPTH_TOLERANCE.toFixed(3)} ? nearA : max(a1, a2);
+      alpha = abs(depthAt((lens - nearA * duv) * uDetail) - nearA) <= ${RAY_DEPTH_TOLERANCE.toFixed(3)} ? nearA : max(a1, a2);
     }
   }
-  vec2 o = (lens - alpha * vec2(du, dv)) * uOutScale;
+  vec2 o = (lens - alpha * duv) * uOutScale;
   o = warpForward(o + 0.5) - 0.5;
   ivec2 pp = ivec2(floor(o + 0.5));
   if (pp.x < uReach || pp.y < uReach || pp.x >= uOutSize.x - uReach || pp.y >= uOutSize.y - uReach) return;
@@ -1233,7 +1275,7 @@ void main() {
   vConf = conf;
   vCenter = o;
   vLens = lens;
-  vD = vec2(du, dv);
+  vD = duv;
   vAlpha = alpha;
   if (uProbe == 1) {
     gl_PointSize = 1.0;
@@ -3219,6 +3261,7 @@ export class GpuRenderer {
     gl.uniform1i(U.uDepth, 3);
     this.bindTex(3, depthTex || this.depthTex);
     gl.uniform1i(U.uAllInFocus, p.allInFocus && p.depth ? 1 : 0);
+    this.setRayWarp(U, p.rayWarp);
     gl.uniform1f(U.uAlpha, p.alpha);
     gl.uniform2f(U.uMin, p.xMin, p.yMin);
     gl.uniform1f(U.uUnit, p.unit);
@@ -3239,6 +3282,47 @@ export class GpuRenderer {
       gl.uniform1i(U.uStart, start);
       gl.drawArrays(gl.POINTS, 0, Math.min(chunk, total - start));
     }
+  }
+
+  // The camera's ray correction (core/raywarp.js) as two float textures on
+  // units 7 and 8, kept for as long as the same table is used.
+  setRayWarp(U, rw) {
+    const gl = this.gl;
+    gl.uniform1i(U.uRayWarp, rw ? 1 : 0);
+    gl.uniform1i(U.uRayCentre, 0);
+    gl.uniform2f(U.uImage, this.cam.width, this.cam.height);
+    gl.uniform1i(U.uRayGrid, 7);
+    gl.uniform1i(U.uRayCover, 8);
+    if (!rw) {
+      this.bindTex(7, this.depthTex);
+      this.bindTex(8, this.depthTex);
+      gl.uniform4f(U.uRayMin, 0, 0, 0, 0);
+      gl.uniform4f(U.uRayStep, 1, 1, 1, 1);
+      gl.uniform4i(U.uRayN, 2, 2, 2, 2);
+      gl.uniform1f(U.uRayBorder, 0);
+      return;
+    }
+    if (!this.rayTex || this.rayTex.source !== rw) {
+      if (this.rayTex) {
+        gl.deleteTexture(this.rayTex.grid);
+        gl.deleteTexture(this.rayTex.cover);
+      }
+      const im = rw.gridImages();
+      const grid = this.texture(im.width, im.height, gl.RGBA32F);
+      gl.bindTexture(gl.TEXTURE_2D, grid);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, im.width, im.height, gl.RGBA, gl.FLOAT, im.grid);
+      const cover = this.texture(im.width, im.height, gl.R32F);
+      gl.bindTexture(gl.TEXTURE_2D, cover);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, im.width, im.height, gl.RED, gl.FLOAT, im.cover);
+      this.rayTex = { source: rw, grid, cover, im };
+    }
+    const { im } = this.rayTex;
+    this.bindTex(7, this.rayTex.grid);
+    this.bindTex(8, this.rayTex.cover);
+    gl.uniform4f(U.uRayMin, im.mins[0], im.mins[1], im.mins[2], im.mins[3]);
+    gl.uniform4f(U.uRayStep, im.step[0], im.step[1], im.step[2], im.step[3]);
+    gl.uniform4i(U.uRayN, im.nodes[0], im.nodes[1], im.nodes[2], im.nodes[3]);
+    gl.uniform1f(U.uRayBorder, im.border);
   }
 
   // The lens correction position map of a render (WARP_GLSL), for the program

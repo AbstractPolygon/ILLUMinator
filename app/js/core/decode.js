@@ -31,10 +31,19 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     // Lytro Desktop edits saved in the file, if any (recipe.js).
     recipe: picture ? findRecipe(picture.toc) : null,
     readSection: picture ? picture.container.readSection : async () => null,
+    // The camera's own correction of its rays (core/raywarp.js).
+    rayWarpBytes: null,
     cam: null,
     raw: null,
   };
 
+  if (picture && picture.frame && picture.frame.aberrationCorrectionRef) {
+    try {
+      result.rayWarpBytes = await picture.container.readSection(picture.frame.aberrationCorrectionRef);
+    } catch {
+      result.rayWarpBytes = null;
+    }
+  }
   if (!rawBytes) return result;
   const cam = cameraInfo(result.metadata, layout);
   if (!cam.width || !cam.height || rawBytes.length < packedSize(cam.width, cam.height, cam.bits)) {
