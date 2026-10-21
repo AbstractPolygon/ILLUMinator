@@ -26,7 +26,7 @@ import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
-import { parseRayWarp } from './core/raywarp.js';
+import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -1198,7 +1198,7 @@ function measureLytro(progress) {
 // The depth map moved to meet the camera's ray correction (core/raywarp.js).
 function rayWarpShift() {
   const warp = activeRayWarp();
-  return warp ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0;
+  return (warp ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0) + (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
 }
 
 // The camera's ray correction, for depth maps that came with Lytro Desktop's
@@ -1207,6 +1207,41 @@ function rayWarpShift() {
 function activeRayWarp() {
   if (globalThis.__noRayWarp) return null;
   return state.rayWarp && state.depthRaw && state.depthRaw.fromLytro && state.lf && state.lf.grid ? state.rayWarp : null;
+}
+
+// The depth map's change for the rays' field curvature (core/raywarp.js
+// focusAt), per depth map pixel, in focus units; null when there is none.
+function rayWarpField(outW, outH) {
+  const warp = activeRayWarp();
+  if (!warp || !FOCUS_FIELD.on || !FOCUS_FIELD.gain) return null;
+  const key = `${outW}x${outH}:${FOCUS_FIELD.gain}:${FOCUS_FIELD.across}x${FOCUS_FIELD.down}`;
+  if (state.rayField && state.rayField.key === key && state.rayField.warp === warp) return state.rayField.values;
+  const { width, height } = state.lf.cam;
+  const kx = state.lf.grid.pitch / width;
+  const ky = state.lf.grid.pitch / height;
+  const nx = FOCUS_FIELD.across;
+  const ny = FOCUS_FIELD.down;
+  const e0 = warp.focusAt(0, 0, kx, ky);
+  const coarse = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      coarse[j * nx + i] = FOCUS_FIELD.gain * LAMBDA_TO_ALPHA * (warp.focusAt(-0.49 + (0.98 * i) / (nx - 1), -0.49 + (0.98 * j) / (ny - 1), kx, ky) - e0);
+    }
+  }
+  const values = new Float32Array(outW * outH);
+  for (let y = 0; y < outH; y++) {
+    const fy = Math.min(ny - 1.001, Math.max(0, (((y + 0.5) / outH - 0.5) / 0.98 + 0.5) * (ny - 1)));
+    const j = Math.floor(fy);
+    for (let x = 0; x < outW; x++) {
+      const fx = Math.min(nx - 1.001, Math.max(0, (((x + 0.5) / outW - 0.5) / 0.98 + 0.5) * (nx - 1)));
+      const i = Math.floor(fx);
+      const a = fx - i;
+      const b = fy - j;
+      values[y * outW + x] = (coarse[j * nx + i] * (1 - a) + coarse[j * nx + i + 1] * a) * (1 - b) + (coarse[(j + 1) * nx + i] * (1 - a) + coarse[(j + 1) * nx + i + 1] * a) * b;
+    }
+  }
+  state.rayField = { key, warp, values };
+  return values;
 }
 
 function applyDepthSmoothing() {
@@ -1223,7 +1258,8 @@ function applyDepthSmoothing() {
   const smoothed = smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence, step: raw.flat ? DEPTH_STEP : 0 });
   // Moved by the focus offset found for this photo (see superRes).
   const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA + rayWarpShift();
-  state.depth = { ...raw, alpha: shift ? Float32Array.from(smoothed, (x) => x + shift) : smoothed };
+  const field = rayWarpField(outW, outH);
+  state.depth = { ...raw, alpha: shift || field ? Float32Array.from(smoothed, (x, i) => x + shift + (field ? field[i] : 0)) : smoothed };
   state.depthSmoothingApplied = amount;
   state.gen++;
   if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);

@@ -28,6 +28,9 @@
 
 const MAGIC = 0xaf0990fa;
 
+// The field curvature of the rays as a change of the depth map (see focusAt).
+export const FOCUS_FIELD = { on: false, gain: 1, across: 24, down: 16 };
+
 export function parseRayWarp(bytes, width, height, { tilt = true } = {}) {
   if (!bytes || bytes.length < 104) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -254,6 +257,37 @@ function makeEvaluator(dense, n, mins, step, border, removeTilt) {
         }
       }
       return { width: w, height: h, grid, cover, nodes: n.slice(), mins: mins.slice(), step: step.slice(), border };
+    },
+    // The depth (in lambda) at which the corrected rays of an image position
+    // (x, y: -0.5..0.5) come together, relative to the middle of the picture:
+    // the rays of a lens are shifted in proportion to their direction by an
+    // amount that changes across the picture (field curvature), so a flat
+    // scene is in focus at a different depth in the corners than in the middle.
+    // Read from how the shift changes with the direction (`kx`, `ky`: lens
+    // pitch over image width and height).
+    focusAt(x, y, kx, ky) {
+      const us = [-0.3, -0.15, 0, 0.15, 0.3];
+      const q = [0, 0, 0, 0];
+      const slope = (axis, k) => {
+        let su = 0;
+        let sm = 0;
+        let suu = 0;
+        let sum = 0;
+        for (const u of us) {
+          q[0] = x;
+          q[1] = y;
+          q[2] = axis === 0 ? u : 0;
+          q[3] = axis === 1 ? u : 0;
+          sample(q, tmp);
+          const m = tmp[axis];
+          su += u;
+          sm += m;
+          suu += u * u;
+          sum += u * m;
+        }
+        return -((us.length * sum - su * sm) / (us.length * suu - su * su)) / k;
+      };
+      return 0.5 * (slope(0, kx) + slope(1, ky));
     },
     // How far the depth map has to move (in focus units, the app's alpha) so
     // that rays with the tilt taken out still meet where the depth says: the
