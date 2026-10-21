@@ -173,7 +173,10 @@ h2 { font-size: 13px; font-weight: 600; color: var(--heading); margin: 14px 0 8p
   background: rgba(20, 22, 26, 0.92); border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 8px 8px 12px; display: flex; gap: 10px; align-items: flex-start; max-width: min(460px, calc(100% - 28px));
 }
-.notice p { margin: 0; }
+/* A popover, so it is in the top layer above an open dialog and its dark backdrop. */
+.notice[popover] { position: fixed; inset: auto; top: 14px; left: 50%; margin: 0; color: inherit; overflow: visible; user-select: text; }
+.notice[popover]:not(:popover-open) { display: none; }
+.notice p { margin: 0; user-select: text; }
 .notice .hint { margin-top: 2px; }
 .notice button { padding: 0 4px; font-size: 16px; line-height: 1; }
 
@@ -725,3 +728,5 @@ label.lut-amount { margin-top: 14px; }
 .controls.no-photo > .panel > :not(summary), .controls.no-photo > .render-actions { opacity: 0.45; }
 
 #desktop-only-dialog { max-width: 480px; }
+
+#camera-dialog-source { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 40vh; overflow: auto; }

@@ -5690,9 +5690,12 @@ async function importFromCamera() {
   $('camera-select-row').hidden = true;
   $('camera-dest').hidden = true;
   $('camera-choose').hidden = false;
-  $('camera-dialog-source').textContent = allowed
-    ? 'Camera allowed. Now choose its drive\'s DCIM folder to list its photos.'
-    : 'Switch the camera on and connect its USB cable, then choose its drive\'s DCIM folder to list its photos.';
+  $('camera-dialog-source').textContent = webUsbReport
+    // What the camera answered over USB, to read and select here.
+    ? `The camera was found but could not be read over USB. ${cameraSection.note || ''}\n\n${webUsbReport}\n\nYou can still choose its drive's DCIM folder to list its photos.`
+    : allowed
+      ? 'Camera allowed. Now choose its drive\'s DCIM folder to list its photos.'
+      : 'Switch the camera on and connect its USB cable, then choose its drive\'s DCIM folder to list its photos.';
   showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
 }
 
@@ -6203,13 +6206,31 @@ async function lytroEdits(info, item) {
 // A note over the picture; it goes away by itself a while after the picture
 // first shows.
 let noticeTimer = null;
+// Where the notice lives when no dialog is open.
+const noticeHome = $('notice').parentElement;
+
 function showNotice(text, detail = '') {
   hideNotice();
   $('notice-text').textContent = text;
   $('notice-detail').textContent = detail;
   $('notice-detail').hidden = !detail;
   $('notice').hidden = false;
+  // Above an open dialog and its backdrop, and usable: everything outside a
+  // modal dialog is inert (its text cannot be selected), so the notice goes
+  // into the dialog while one is open.
+  const dialog = document.querySelector('dialog[open]');
+  if (dialog && $('notice').parentElement !== dialog) dialog.prepend($('notice'));
+  else if (!dialog && $('notice').parentElement !== noticeHome) noticeHome.prepend($('notice'));
+  try {
+    if ($('notice').matches(':popover-open')) $('notice').hidePopover();
+    $('notice').showPopover();
+  } catch {
+    // No popover support: it stays under a dialog's backdrop.
+  }
 }
+
+// While the pointer is over a notice (to select its text) it stays.
+$('notice').addEventListener('pointerenter', () => { clearTimeout(noticeTimer); noticeTimer = null; });
 
 function startNoticeTimer() {
   if (noticeTimer || $('notice').hidden) return;
@@ -6219,6 +6240,11 @@ function startNoticeTimer() {
 function hideNotice() {
   clearTimeout(noticeTimer);
   noticeTimer = null;
+  try {
+    if ($('notice').matches(':popover-open')) $('notice').hidePopover();
+  } catch {
+    // Not a popover here.
+  }
   $('notice').hidden = true;
 }
 
