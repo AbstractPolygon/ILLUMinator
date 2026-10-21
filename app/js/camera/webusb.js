@@ -243,7 +243,9 @@ export async function connectWebUsb(device, log = () => {}) {
     try { await device.close(); } catch { /* already closed */ }
     throw fail(infos.some((i) => i.kind === 'adb')
       ? 'This camera offers a vendor interface only for Android debugging (adb). The browser version cannot use that: use the desktop app, or USB debugging with adb.'
-      : `The camera has no interface a browser can use (${describe(infos) || 'none listed'}). A camera that is only a USB drive cannot be read by a browser: use the desktop app.`);
+      : infos.some((i) => i.kind === 'mass')
+        ? `This camera is a USB drive${infos.some((i) => i.cls === 3) ? ' with a HID (control) interface' : ''} to the computer. A browser cannot claim either over USB (it keeps drives and HID devices from pages), so its photos are read from its drive: choose the drive's DCIM folder. The desktop app reads the camera over USB itself.`
+        : `The camera has no interface a browser can use (${describe(infos) || 'none listed'}).`);
   }
   const failures = [];
   for (const c of candidates) {

@@ -89,7 +89,7 @@ test('connects on the vendor interface, reads the picture list and a file', asyn
 
 test('a camera with no usable interface says why, with a report', async () => {
   const dev = fakeDevice({ interfaces: [{ number: 0, cls: 8, sub: 6, proto: 0x50 }] });
-  await assert.rejects(() => connectWebUsb(dev), (err) => /only a USB drive/.test(err.message) && /mass storage/.test(err.report));
+  await assert.rejects(() => connectWebUsb(dev), (err) => /USB drive/.test(err.message) && /mass storage/.test(err.report));
   const stuck = fakeDevice({ interfaces: ILLUM, claimFails: [1] });
   await assert.rejects(() => connectWebUsb(stuck), /cannot be claimed/);
 });
