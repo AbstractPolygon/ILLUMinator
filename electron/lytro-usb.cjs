@@ -62,6 +62,22 @@ class BulkTransport {
     if (csw[12] !== 0) throw new Error(`The camera refused the command (status ${csw[12]})`);
   }
 
+  // TEST UNIT READY (an all zero block): the camera answers it once it can take
+  // commands; Lyli waits for that before anything else.
+  async waitReady(tries = 25, delayMs = 200) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        await pify((cb) => this.epOut.transfer(this.wrapper(Buffer.alloc(16), 0, true), cb));
+        await this.status();
+        return true;
+      } catch (err) {
+        this.log(`not ready yet: ${err.message}`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    return false;
+  }
+
   async read(cdb, size) {
     await pify((cb) => this.epOut.transfer(this.wrapper(cdb, size, false), cb));
     const parts = [];
@@ -115,7 +131,9 @@ async function connect({ device, product, key }, log = () => {}) {
     const epOut = endpoints.find((e) => e.direction === 'out' && e.transferType === 2);
     if (!epIn || !epOut) throw new Error('The camera has no bulk endpoints');
     log(`${key}: product ${product.toString(16)}, interface ${iface.interfaceNumber}, endpoints ${epIn.address.toString(16)}/${epOut.address.toString(16)}`);
-    const camera = new LytroCamera(new BulkTransport(epIn, epOut, log), log);
+    const transport = new BulkTransport(epIn, epOut, log);
+    if (!(await transport.waitReady())) log('the camera did not report ready; going on');
+    const camera = new LytroCamera(transport, log);
     const close = async () => {
       try {
         await pify((cb) => iface.release(true, cb));

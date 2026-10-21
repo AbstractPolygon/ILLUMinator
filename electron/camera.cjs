@@ -260,6 +260,17 @@ function usbDiagnostics() {
   return usbLog.join('\n');
 }
 
+// Saves the first generation camera's calibration files (C:\\T1CALIB\\MOD_xxxx)
+// to <destDir>/cameras/<serial>/T1CALIB. Returns the folder.
+async function pullUsbCalibration(entry, destDir, onFile = () => {}) {
+  const files = await entry.camera.calibrationFiles(onFile);
+  if (!files.length) throw new Error('The camera has no calibration files to read.');
+  const dest = path.join(destDir, 'cameras', (entry.info && entry.info.serial) || 'camera', 'T1CALIB');
+  await fsp.mkdir(dest, { recursive: true });
+  for (const f of files) await fsp.writeFile(path.join(dest, f.name), f.data);
+  return dest;
+}
+
 // All connected cameras: [{ id, kind, label, files: [{ id, name, size }] }].
 // `roots` overrides the drive locations (tests).
 async function listCameras({ roots, adb = true, lytro = true } = {}) {
@@ -404,4 +415,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { pullUsbCalibration, pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };

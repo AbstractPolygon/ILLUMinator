@@ -16,6 +16,8 @@
 // camera's answers before trusting it.
 
 const LOAD_TYPES = { hardware_info: 0, file: 1, picture_list: 2, picture: 5, calibration: 6, rawcompressedpicture: 7 };
+const PACKET = 65536;
+const CALIBRATION_FILES = 62;
 const PICTURE_FORMATS = ['jpg', 'raw', 'txt', '128', 'stk'];
 
 function command(code, ...params) {
@@ -64,18 +66,42 @@ class LytroCamera {
     const size = (await this.query(0, 4)).readUInt32LE(0);
     this.log(`load ${type}${name ? ` ${name}` : ''}: ${size} bytes`);
     if (!size) throw new Error(`The camera has no ${name || type}`);
-    const read = Buffer.alloc(16);
-    read[0] = 0xc4;
-    read[2] = 1;
-    read.writeUInt32LE(0, 3);
-    const data = await this.t.read(read, size);
-    return data.subarray(0, size);
+    // In packets of 64 KB, each asked for by its offset, as Lyli does (a
+    // camera answers big single reads less reliably).
+    const parts = [];
+    for (let offset = 0; offset < size; offset += PACKET) {
+      const read = Buffer.alloc(16);
+      read[0] = 0xc4;
+      read[2] = 1;
+      read.writeUInt32LE(offset, 3);
+      const part = await this.t.read(read, Math.min(PACKET, size - offset));
+      parts.push(part);
+      if (part.length < Math.min(PACKET, size - offset)) break;
+    }
+    return Buffer.concat(parts).subarray(0, size);
   }
 
   // The camera's calibration data as it hands it out (a batch of named
   // files; unpacking it is not done yet), saved as it is.
   async calibration() {
     return this.download('calibration');
+  }
+
+  // The 62 calibration files the first generation camera keeps in
+  // C:\\T1CALIB\\MOD_0000 .. MOD_0061 (as Lyli reads them): [{ name, data }];
+  // files the camera does not have are left out.
+  async calibrationFiles(onFile = () => {}) {
+    const files = [];
+    for (let i = 0; i < CALIBRATION_FILES; i++) {
+      const name = `MOD_${String(i).padStart(4, '0')}`;
+      try {
+        files.push({ name, data: await this.download('file', `C:\\T1CALIB\\${name}`) });
+      } catch (err) {
+        this.log(`no ${name}: ${err.message}`);
+      }
+      onFile(name, i + 1, CALIBRATION_FILES);
+    }
+    return files;
   }
 
   async hardwareInfo() {
@@ -93,7 +119,10 @@ class LytroCamera {
     const b = await this.download('picture_list');
     if (b.length < 12 || b.readUInt32LE(0) !== 1) throw new Error('Unexpected picture list from the camera');
     const recordsPerItem = b.readUInt32LE(8);
-    const RECORD = 8 + 8 + 4 + 4 + 16 + 4 + 4 + 48 + 28 + 4;
+    // The header gives the record length (Lyli reads it from there); 128 bytes
+    // is what the cameras seen so far use.
+    const declared = b.readUInt32LE(4);
+    const RECORD = declared >= 124 && declared <= 512 ? declared : 8 + 8 + 4 + 4 + 16 + 4 + 4 + 48 + 28 + 4;
     const ROTATION = { 1: 0, 8: 90, 3: 180, 6: 270 };
     const pictures = [];
     for (let o = 12 + 8 * recordsPerItem; o + RECORD <= b.length; o += RECORD) {
@@ -105,7 +134,7 @@ class LytroCamera {
       const starred = b.readUInt32LE(o + 40);
       const id = cString(b.subarray(o + 48, o + 96));
       const date = cString(b.subarray(o + 96, o + 124));
-      const rotation = b.readUInt32LE(o + 124);
+      const rotation = RECORD >= 128 ? b.readUInt32LE(o + 124) : 1;
       pictures.push({
         id,
         folder: `${String(folderNumber).padStart(3, '0')}${folderPostfix}`,

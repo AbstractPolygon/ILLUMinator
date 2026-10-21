@@ -169,3 +169,45 @@ test('the calibration item is requested as load type 6', async () => {
   assert.deepEqual([...await cam.calibration()], [1, 2, 3]);
   assert.equal(log[0], 'c2:6');
 });
+
+test('a big item is read in 64 KB packets by offset', async () => {
+  const big = Buffer.alloc(150000);
+  for (let i = 0; i < big.length; i++) big[i] = i % 251;
+  const fake = fakeCamera({ 'I:\\DCIM\\100PHOTO\\IMG_0001.RAW': big }, []);
+  const got = await new LytroCamera(fake).download('file', 'I:\\DCIM\\100PHOTO\\IMG_0001.RAW');
+  assert.ok(got.equals(big));
+  const reads = fake.log.filter((l) => l[1] === 0xc4);
+  assert.deepEqual(reads.map((l) => l[3]), [65536, 65536, 150000 - 131072]);
+});
+
+test('the picture list takes its record length from the header', async () => {
+  const fake = fakeCamera({}, [{ prefix: 'IMG_', folder: 100, postfix: 'PHOTO', number: 7, id: 'sha1-cc', date: '2026-10-01T10:00:00.000Z' }]);
+  const list = await new LytroCamera(fake).pictureList();
+  assert.equal(list[0].name, 'IMG_0007');
+});
+
+test('calibration files MOD_0000..MOD_0061 are read and saved under the camera serial', async () => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { pullUsbCalibration } = require('../electron/camera.cjs');
+  const files = {};
+  for (const i of [0, 1, 61]) files[`C:\\T1CALIB\\MOD_${String(i).padStart(4, '0')}`] = Buffer.from(`cal ${i}`);
+  const camera = new LytroCamera(fakeCamera(files, []));
+  const list = await camera.calibrationFiles();
+  assert.deepEqual(list.map((f) => f.name), ['MOD_0000', 'MOD_0001', 'MOD_0061']);
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'lytro-cal-'));
+  const dest = await pullUsbCalibration({ camera, info: { serial: 'A5120012' } }, out);
+  assert.ok(dest.endsWith(path.join('cameras', 'A5120012', 'T1CALIB')));
+  assert.equal((await fs.readFile(path.join(dest, 'MOD_0061'), 'utf8')), 'cal 61');
+});
+
+test('the transport waits until the camera reports ready', async () => {
+  const csw = (status = 0) => { const b = Buffer.alloc(13); b.write('USBS', 0, 'latin1'); b[12] = status; return b; };
+  const replies = [csw(1), csw(1), csw(0)];
+  const sent = [];
+  const t = new BulkTransport({ transfer(len, cb) { cb(null, replies.shift()); } }, { transfer(data, cb) { sent.push(Buffer.from(data)); cb(null); } });
+  assert.equal(await t.waitReady(5, 1), true);
+  assert.equal(sent.length, 3);
+  assert.ok(sent[0].subarray(15, 31).every((v) => v === 0));
+});
