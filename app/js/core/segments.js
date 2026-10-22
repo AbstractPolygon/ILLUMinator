@@ -589,12 +589,12 @@ export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
 // each pixel takes the layer whose color it is closer to (layerSnap), then a
 // vote among like colored neighbors straightens the border (colorMedian).
 // `rgb`: the picture, 0..1, 3 per pixel.
-export const EDGE_SNAP_DEPTH = { on: true, passes: 2 };
+export const EDGE_SNAP_DEPTH = { on: true, passes: 2, layer: { radius: 20, stride: 3, band: 0.2, hard: true } };
 export function snapDepthEdges(depth, rgb, w, h) {
   if (!EDGE_SNAP_DEPTH.on) return depth;
   const lab = new Float32Array(w * h * 3);
   for (let p = 0; p < w * h; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
-  let d = layerSnap(depth, lab, w, h);
+  let d = layerSnap(depth, lab, w, h, EDGE_SNAP_DEPTH.layer);
   for (let i = 0; i < EDGE_SNAP_DEPTH.passes; i++) d = colorMedian(d, lab, w, h);
   return d;
 }
@@ -664,7 +664,7 @@ export function colorMedian(depth, lab, w, h, r = 7, sigma = 9, levels = 128) {
 // around, the far layer's that of the farthest quarter. Halos next to thin
 // near objects, where the measured depth is in between, are put on one
 // layer or the other by the picture, with a hard edge.
-export function layerSnap(depth, lab, w, h, { radius = 12, stride = 2, minRange = 0.25, band = 0.3, margin = 1.4 } = {}) {
+export function layerSnap(depth, lab, w, h, { radius = 12, stride = 2, minRange = 0.25, band = 0.3, margin = 1.4, hard = false } = {}) {
   let lo = Infinity;
   let hi = -Infinity;
   for (const d of depth) {
@@ -719,6 +719,9 @@ export function layerSnap(depth, lab, w, h, { radius = 12, stride = 2, minRange 
       const df = (lab[3 * p] - fL / fC) ** 2 + (lab[3 * p + 1] - fA / fC) ** 2 + (lab[3 * p + 2] - fB / fC) ** 2;
       if (dn * margin < df) out[p] = nVal / nC;
       else if (df * margin < dn) out[p] = fVal / fC;
+      // Colors too alike to tell: by depth, whichever layer it is nearer to,
+      // so no pixel is left halfway between (which would render out of focus).
+      else if (hard) out[p] = t > 0.5 ? nVal / nC : fVal / fC;
     }
   }
   return out;
