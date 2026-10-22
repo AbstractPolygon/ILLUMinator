@@ -584,6 +584,21 @@ export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
   return guidedFilter(depth, lab, w, h, r, eps);
 }
 
+// Normal quality depth: the edges of near objects follow the picture's. Where
+// the depth spans a lot within a few pixels (a near wire against a far wall)
+// each pixel takes the layer whose color it is closer to (layerSnap), then a
+// vote among like colored neighbors straightens the border (colorMedian).
+// `rgb`: the picture, 0..1, 3 per pixel.
+export const EDGE_SNAP_DEPTH = { on: true, passes: 2 };
+export function snapDepthEdges(depth, rgb, w, h) {
+  if (!EDGE_SNAP_DEPTH.on) return depth;
+  const lab = new Float32Array(w * h * 3);
+  for (let p = 0; p < w * h; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
+  let d = layerSnap(depth, lab, w, h);
+  for (let i = 0; i < EDGE_SNAP_DEPTH.passes; i++) d = colorMedian(d, lab, w, h);
+  return d;
+}
+
 // Halos: depth measured next to a near thin object (a wire) comes out in
 // between the object's and the background's. Each depth becomes the median
 // of its neighbours' depths, counting those of the same color as the pixel

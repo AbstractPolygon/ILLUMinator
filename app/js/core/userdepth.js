@@ -106,7 +106,7 @@ export async function decodePngGray(bytes) {
 // `offset` (in lambda) moves the whole map: Lytro's depth places surfaces a
 // little off where the rays from the lenses meet, by an amount that differs
 // from photo to photo (see core/superres.js estimateFocusOffset).
-export function userDepthAlpha(map, sampler, cam, offset = 0) {
+export function userDepthAlpha(map, sampler, cam, offset = 0, warp = null) {
   const { outW, outH } = sampler;
   const { width: W, height: H, data, min, max } = map;
   // Output position -> sensor position (sensorToOutput is affine).
@@ -121,8 +121,18 @@ export function userDepthAlpha(map, sampler, cam, offset = 0) {
       const dy = y + 0.5 - ay;
       const sx = (dx * (cy - ay) - dy * (cx - ax)) / det;
       const sy = ((bx - ax) * dy - (by - ay) * dx) / det;
-      const X = Math.min(W - 1, Math.max(0, ((sx / cam.width - 0.5) * FIT.kx + 0.5 + FIT.dx) * W));
-      const Y = Math.min(H - 1, Math.max(0, ((sy / cam.height - 0.5) * FIT.ky + 0.5 + FIT.dy) * H));
+      let X;
+      let Y;
+      if (warp) {
+        // Lytro's depth map is in the corrected picture: where this position
+        // of the uncorrected grid lands once the lens distortion is corrected.
+        const [qx, qy] = warp.forward(x + 0.5, y + 0.5);
+        X = Math.min(W - 1, Math.max(0, (qx / outW) * W - 0.5));
+        Y = Math.min(H - 1, Math.max(0, (qy / outH) * H - 0.5));
+      } else {
+        X = Math.min(W - 1, Math.max(0, ((sx / cam.width - 0.5) * FIT.kx + 0.5 + FIT.dx) * W));
+        Y = Math.min(H - 1, Math.max(0, ((sy / cam.height - 0.5) * FIT.ky + 0.5 + FIT.dy) * H));
+      }
       const x0 = Math.min(W - 2, Math.floor(X));
       const y0 = Math.min(H - 2, Math.floor(Y));
       const fx = X - x0;

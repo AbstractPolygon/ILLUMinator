@@ -31,7 +31,7 @@ import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, l
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
-import { lensParams, applyLens, withoutDistortion, fitDistortion } from './core/lens.js';
+import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 
@@ -1094,7 +1094,7 @@ async function ensureDepth(id) {
   if (!(await ensureRefocusViews(id))) return false;
   if (!state.depth && state.userDepth && state.settings.lytroDepth !== false) {
     const { outW, outH } = state.sampler;
-    const alpha = userDepthAlpha(state.userDepth, state.sampler, state.lf.cam);
+    const alpha = userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH));
     let lo = Infinity, hi = -Infinity;
     for (const a of alpha) {
       lo = Math.min(lo, a);

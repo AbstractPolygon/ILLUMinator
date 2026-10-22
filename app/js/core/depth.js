@@ -1,4 +1,4 @@
-import { segmentDepth, guidedFilterColor } from './segments.js';
+import { segmentDepth, guidedFilterColor, snapDepthEdges } from './segments.js';
 
 // Depth from the light field: for a range of refocus depths (alpha), shift
 // every view as refocusing would and measure how well they agree. At the
@@ -1136,7 +1136,7 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   const flat = !!(color && DEPTH_REGIONS.on && (refine || DEPTH_REGIONS.objects));
   if (flat) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
   // Normal quality: no region cleanup, but the edges still follow the picture's.
-  else if (color && DEPTH_REGIONS.guide !== false) result = guidedFilterColor(result, color, width, height);
+  else if (color && DEPTH_REGIONS.guide !== false) result = snapDepthEdges(guidedFilterColor(result, color, width, height), color, width, height);
   step(1);
   return { alpha: result, confidence, range: [min, max], flat };
 }
