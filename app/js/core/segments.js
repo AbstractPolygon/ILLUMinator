@@ -591,6 +591,7 @@ export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
 // `rgb`: the picture, 0..1, 3 per pixel.
 export const EDGE_SNAP_DEPTH = { on: false, passes: 2, layer: { radius: 20, stride: 3, band: 0.2, hard: true } };
 export function snapDepthEdges(depth, rgb, w, h) {
+  if (globalThis.__snapDump) globalThis.__snapDump(depth, rgb, w, h);
   if (!EDGE_SNAP_DEPTH.on) return depth;
   const lab = new Float32Array(w * h * 3);
   for (let p = 0; p < w * h; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);

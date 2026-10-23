@@ -18,6 +18,7 @@ import { DEPTH_PASSES, measureMatch } from './core/depthmatch.js';
 import { measureMatchGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { removePeriodicPattern } from './core/notch.js';
+import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -1103,6 +1104,10 @@ async function ensureDepth(id) {
     state.depthRaw = { alpha, confidence: new Float32Array(outW * outH).fill(1), range: [lo, hi], fromLytro: true };
     applyDepthSmoothing();
   }
+  if (!state.depth && state.userDepth && globalThis.__lytroDump) {
+    const { outW: ow, outH: oh } = state.sampler;
+    globalThis.__lytroDump(userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, ow, oh)), ow, oh);
+  }
   if (!state.depth) {
     const { outW, outH } = state.sampler;
     // Normal quality: the plain cost volume, about twice as fast; high adds
@@ -1113,7 +1118,7 @@ async function ensureDepth(id) {
     // minutes, so classic alone is measured there. ('match' measures the
     // Lytro-style depth alone.)
     let style = state.settings.depthStyle ?? 'combined';
-    if ((style === 'combined' || style === 'match') && !hardwareGpu()) style = 'classic';
+    if ((style === 'combined' || style === 'match') && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
@@ -1134,6 +1139,11 @@ async function ensureDepth(id) {
     } finally {
       DEPTH_REGIONS.objects = null;
     }
+    // Lytro Desktop puts depth edges on the picture's edges (a joint adaptive
+    // filter and an MRF in its engine): the same here, on the depth as finally
+    // measured, so every style gets it.
+    if (EDGE_SNAP_DEPTH.on && state.depthRaw) state.depthRaw = { ...state.depthRaw, alpha: snapDepthEdges(state.depthRaw.alpha, depthColorGuide(centerView()), outW, outH) };
+    if (globalThis.__finalDepthDump) globalThis.__finalDepthDump(state.depthRaw.alpha, centerView(), outW, outH);
     applyDepthSmoothing();
   }
   return true;
