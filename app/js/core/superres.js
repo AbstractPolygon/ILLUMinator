@@ -221,6 +221,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   let lensOffsets = options.lensOffsets || null;
   // The depth map the rays follow (edge snapping tries others).
   let rayDepth = depth;
+  let tapMap = null;
+  let tapFor = null;
   const inv2a2 = Number.isFinite(apertureSigma) ? 1 / (2 * apertureSigma * apertureSigma) : 0;
   const { W, H, sigma, rUse, spreadRadius, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale, apertureSigma, sigma: options.sigma, aperture: options.aperture });
   const { grid: g } = sampler;
@@ -383,6 +385,22 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 
   const { accY, wsum } = splat(null, 0);
 
+  // The depth at every output pixel, for the depth `rayDepth` (rebuilt when
+  // edge snapping switches it).
+  function tapDepthMap() {
+    if (tapFor === rayDepth) return tapMap;
+    const m = new Float32Array(W * H);
+    for (let j = 0; j < H; j++) {
+      for (let k = 0; k < W; k++) {
+        const [sx, sy] = warp ? warp.source(k + 0.5, j + 0.5) : [k + 0.5, j + 0.5];
+        m[j * W + k] = sampleDepth(rayDepth, bw, bh, (sx / scale) * detail - 0.5, (sy / scale) * detail - 0.5);
+      }
+    }
+    tapMap = m;
+    tapFor = rayDepth;
+    return m;
+  }
+
   // `probe`: instead of splatting, add up for every lens how far its samples
   // land from `probe.est` with its center moved by each candidate offset.
   // `squares`: also add up the squared samples (accY2), for how well the
@@ -392,6 +410,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     const wsum = new Float32Array(W * H);
     const accY2 = squares ? new Float32Array(W * H) : null;
     const inv2s2 = 1 / (2 * sigma * sigma);
+    const tapDepth = allInFocus && depth && TAP_DEPTH.on ? tapDepthMap() : null;
+    const invTap = 1 / (2 * TAP_DEPTH.sigma * TAP_DEPTH.sigma);
     const taps = 2 * reach + 1;
     const wx = new Float32Array(taps);
     const wy = new Float32Array(taps);
@@ -507,7 +527,11 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       for (let j = 0; j < taps; j++) {
         let o = (py - reach + j) * W + px - reach;
         for (let k = 0; k < taps; k++, o++) {
-          const w = wx[k] * wy[j];
+          let w = wx[k] * wy[j];
+          if (tapDepth) {
+            const dd = tapDepth[o] - rayAlpha;
+            w *= Math.exp(-dd * dd * invTap);
+          }
           accY[o] += yEst * w;
           wsum[o] += w;
           if (accY2) accY2[o] += yEst * yEst * w;
@@ -616,6 +640,11 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
 // corrects separately), or leave it out.
 export const RAY_WARP = { on: true, centre: false };
 export const OCCLUSION = { on: false, tol: 0.1 };
+// A sample only counts toward the pixels whose depth it matches: the splat
+// kernel reaches a few pixels, so without this a ray that met a near wire
+// also brightens the background pixels next to the wire (a halo), where
+// Lytro's picture has the wire's edge as sharp as its depth map's.
+export const TAP_DEPTH = { on: false, sigma: 0.1 };
 export const RAY_MARCH = { on: true };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
 

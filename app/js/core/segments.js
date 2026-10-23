@@ -589,7 +589,7 @@ export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
 // each pixel takes the layer whose color it is closer to (layerSnap), then a
 // vote among like colored neighbors straightens the border (colorMedian).
 // `rgb`: the picture, 0..1, 3 per pixel.
-export const EDGE_SNAP_DEPTH = { on: true, passes: 2, layer: { radius: 20, stride: 3, band: 0.2, hard: true } };
+export const EDGE_SNAP_DEPTH = { on: false, passes: 2, layer: { radius: 20, stride: 3, band: 0.2, hard: true } };
 export function snapDepthEdges(depth, rgb, w, h) {
   if (!EDGE_SNAP_DEPTH.on) return depth;
   const lab = new Float32Array(w * h * 3);
