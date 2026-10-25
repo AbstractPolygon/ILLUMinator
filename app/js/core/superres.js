@@ -223,6 +223,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   let rayDepth = depth;
   let tapMap = null;
   let tapFor = null;
+  let flagMap = null;
+  let flagFor = null;
   const inv2a2 = Number.isFinite(apertureSigma) ? 1 / (2 * apertureSigma * apertureSigma) : 0;
   const { W, H, sigma, rUse, spreadRadius, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale, apertureSigma, sigma: options.sigma, aperture: options.aperture });
   const { grid: g } = sampler;
@@ -401,6 +403,28 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     return m;
   }
 
+  // Pixels at depth edges (flagged), for the depth `rayDepth`.
+  function edgeFlags() {
+    if (flagFor === rayDepth) return flagMap;
+    const mask = depthEdgeMask(rayDepth, bw, bh, { step: ROBUST_EDGE.step, radius: ROBUST_EDGE.radius });
+    const slot = new Int32Array(W * H).fill(-1);
+    const owners = [];
+    for (let j = 0; j < H; j++) {
+      for (let k = 0; k < W; k++) {
+        const [sx, sy] = warp ? warp.source(k + 0.5, j + 0.5) : [k + 0.5, j + 0.5];
+        const bx = Math.min(bw - 1, Math.max(0, Math.floor((sx / scale) * detail)));
+        const by = Math.min(bh - 1, Math.max(0, Math.floor((sy / scale) * detail)));
+        if (mask[by * bw + bx] > 0.5) {
+          slot[j * W + k] = owners.length;
+          owners.push(j * W + k);
+        }
+      }
+    }
+    flagMap = { slot, owners: Int32Array.from(owners) };
+    flagFor = rayDepth;
+    return flagMap;
+  }
+
   // `probe`: instead of splatting, add up for every lens how far its samples
   // land from `probe.est` with its center moved by each candidate offset.
   // `squares`: also add up the squared samples (accY2), for how well the
@@ -412,6 +436,13 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     const inv2s2 = 1 / (2 * sigma * sigma);
     const tapDepth = allInFocus && depth && TAP_DEPTH.on ? tapDepthMap() : null;
     const invTap = 1 / (2 * TAP_DEPTH.sigma * TAP_DEPTH.sigma);
+    const robust = allInFocus && depth && ROBUST_EDGE.on && !probe;
+    const zMap = robust ? tapDepthMap() : null;
+    const flags = robust ? edgeFlags() : null;
+    const zTol = ROBUST_EDGE.tol * LAMBDA_TO_ALPHA;
+    // A list of up to CAP rays (brightness, weight) for each flagged pixel.
+    const CAP = ROBUST_EDGE.capacity;
+    const lists = robust ? { buf: new Float32Array(flags.owners.length * CAP * 2), count: new Uint8Array(flags.owners.length) } : null;
     const taps = 2 * reach + 1;
     const wx = new Float32Array(taps);
     const wy = new Float32Array(taps);
@@ -532,13 +563,74 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
             const dd = tapDepth[o] - rayAlpha;
             w *= Math.exp(-dd * dd * invTap);
           }
+          if (zMap) {
+            // Not behind the surface this pixel shows.
+            if (rayAlpha - zMap[o] > zTol) continue;
+            const sl = flags.slot[o];
+            if (sl >= 0 && lists.count[sl] < CAP) {
+              const q = (sl * CAP + lists.count[sl]++) * 2;
+              lists.buf[q] = yEst;
+              lists.buf[q + 1] = w;
+              continue;
+            }
+          }
           accY[o] += yEst * w;
           wsum[o] += w;
           if (accY2) accY2[o] += yEst * yEst * w;
         }
       }
     }, progress, stride, win);
+    if (lists) reduceRobust(lists, flags.owners, accY, wsum, accY2);
     return { accY, wsum, accY2 };
+  }
+
+  // The median step of Lytro's projection for the pixels that kept a list.
+  function reduceRobust(lists, owners, accY, wsum, accY2) {
+    const { minCount, sigma, cut, capacity: CAP } = ROBUST_EDGE;
+    const keys = new Float32Array(CAP);
+    for (let sl = 0; sl < owners.length; sl++) {
+      const n = lists.count[sl];
+      if (!n) continue;
+      const o = owners[sl];
+      const base = sl * CAP * 2;
+      let total = 0;
+      for (let i = 0; i < n; i++) total += lists.buf[base + 2 * i + 1];
+      let acc = 0;
+      let acc2 = 0;
+      let kept = 0;
+      if (n > minCount) {
+        for (let i = 0; i < n; i++) keys[i] = lists.buf[base + 2 * i];
+        const sorted = keys.slice(0, n).sort();
+        const med = sorted[n >> 1];
+        for (let i = 0; i < n; i++) {
+          const y = lists.buf[base + 2 * i];
+          const d = Math.abs(y - med);
+          if (d >= cut) continue;
+          const wt = lists.buf[base + 2 * i + 1] * Math.exp(-(d * d) / (2 * sigma * sigma));
+          acc += y * wt;
+          acc2 += y * y * wt;
+          kept += wt;
+        }
+        if (kept > 0) {
+          const f = total / kept;
+          acc *= f;
+          acc2 *= f;
+        }
+      }
+      if (!(kept > 0)) {
+        acc = 0;
+        acc2 = 0;
+        for (let i = 0; i < n; i++) {
+          const y = lists.buf[base + 2 * i];
+          const w = lists.buf[base + 2 * i + 1];
+          acc += y * w;
+          acc2 += y * y * w;
+        }
+      }
+      accY[o] += acc;
+      wsum[o] += total;
+      if (accY2) accY2[o] += acc2;
+    }
   }
 
   // Normalize, falling back smoothly to the standard render where samples
@@ -645,6 +737,21 @@ export const OCCLUSION = { on: false, tol: 0.1 };
 // also brightens the background pixels next to the wire (a halo), where
 // Lytro's picture has the wire's edge as sharp as its depth map's.
 export const TAP_DEPTH = { on: false, sigma: 0.1 };
+
+// Lytro Desktop's EDOF projection (lfe/projection/project_edof_multiview.cpp,
+// read from its code): every ray lands on the pixels around where it falls,
+// and counts at a pixel only if it is not farther than that pixel's own depth
+// by more than a tolerance (`tol`, in focus units like the depth map). At a
+// depth edge (the flagged pixels) the rays are not averaged as they come: they
+// are kept in a list, and once there are more than `minCount` the median of
+// their brightness is found and each ray is weighted by a Gaussian of its
+// distance from the median (exp(-(100 d)^2 / 100) with d in units of
+// R+2G+B of the normalized color; here `sigma` in brightness units), and
+// rays more than `cut` units away are dropped. The weights are then scaled so
+// the pixel keeps the total weight it had. A near wire's rays that reach the
+// background beside it, and the background's that reach the wire, are the
+// odd ones out there and fall away.
+export const ROBUST_EDGE = { on: false, tol: 0.25, minCount: 4, sigma: 0.0177, cut: 1.0, radius: 4, step: 0.3, capacity: 40 };
 export const RAY_MARCH = { on: true };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
 
