@@ -221,6 +221,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   let lensOffsets = options.lensOffsets || null;
   // The depth map the rays follow (edge snapping tries others).
   let rayDepth = depth;
+  let matchFor = null;
+  let matchMapsCache = null;
   let tapMap = null;
   let tapFor = null;
   let flagMap = null;
@@ -425,6 +427,14 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     return flagMap;
   }
 
+  function matchDepthMaps() {
+    if (matchFor !== rayDepth) {
+      matchMapsCache = { lo: depthFilter(rayDepth, bw, bh, RAY_MATCH.radius, Math.min), hi: depthFilter(rayDepth, bw, bh, RAY_MATCH.radius, Math.max) };
+      matchFor = rayDepth;
+    }
+    return matchMapsCache;
+  }
+
   // `probe`: instead of splatting, add up for every lens how far its samples
   // land from `probe.est` with its center moved by each candidate offset.
   // `squares`: also add up the squared samples (accY2), for how well the
@@ -436,6 +446,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     const inv2s2 = 1 / (2 * sigma * sigma);
     const tapDepth = allInFocus && depth && TAP_DEPTH.on ? tapDepthMap() : null;
     const invTap = 1 / (2 * TAP_DEPTH.sigma * TAP_DEPTH.sigma);
+    const matchMaps = allInFocus && depth && RAY_MATCH.on && !probe ? matchDepthMaps() : null;
     const robust = allInFocus && depth && ROBUST_EDGE.on && !probe;
     const zMap = robust ? tapDepthMap() : null;
     const flags = robust ? edgeFlags() : null;
@@ -523,6 +534,35 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           rayAlpha = Math.abs(at(near) - near) <= RAY_DEPTH_TOLERANCE ? near : Math.max(a1, a2);
         }
       }
+      if (matchMaps && ch >= 0) {
+        const sx = (lx - rayAlpha * rdu) * detail;
+        const sy = (ly - rayAlpha * rdv) * detail;
+        const lo = sampleDepth(matchMaps.lo, bw, bh, sx, sy);
+        const hi = sampleDepth(matchMaps.hi, bw, bh, sx, sy);
+        if (hi - lo > RAY_MATCH.gap * LAMBDA_TO_ALPHA) {
+          const value = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
+          const miss = (a) => {
+            let qx = (lx - a * rdu) * scale;
+            let qy = (ly - a * rdv) * scale;
+            if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
+            const qi = Math.round(qy) * W + Math.round(qx);
+            if (!(qx >= reach && qy >= reach && qx < W - reach && qy < H - reach)) return Infinity;
+            const cc = up[3 * qi + ch];
+            return Math.abs(value - cc) / (value + cc + 1e-4);
+          };
+          const ecur = miss(rayAlpha);
+          let best = rayAlpha;
+          let ebest = ecur * RAY_MATCH.margin;
+          for (const a of [lo, hi]) {
+            const e = miss(a);
+            if (e < ebest) {
+              ebest = e;
+              best = a;
+            }
+          }
+          rayAlpha = best;
+        }
+      }
       let ox = (lx - rayAlpha * rdu) * scale;
       let oy = (ly - rayAlpha * rdv) * scale;
       if (warp) [ox, oy] = warp.forward(ox + 0.5, oy + 0.5).map((q) => q - 0.5);
@@ -565,7 +605,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           }
           if (zMap) {
             // Not behind the surface this pixel shows.
-            if (rayAlpha - zMap[o] > zTol) continue;
+            const dz = rayAlpha - zMap[o];
+            if ((ROBUST_EDGE.sym ? Math.abs(dz) : dz) > zTol) continue;
             const sl = flags.slot[o];
             if (sl >= 0 && lists.count[sl] < CAP) {
               const q = (sl * CAP + lists.count[sl]++) * 2;
@@ -588,6 +629,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   function reduceRobust(lists, owners, accY, wsum, accY2) {
     const { minCount, sigma, cut, capacity: CAP } = ROBUST_EDGE;
     const keys = new Float32Array(CAP);
+    const st = (globalThis.__robustStats = { flagged: owners.length, listed: 0, gated: 0, dropped: 0, rays: 0, sumN: 0 });
     for (let sl = 0; sl < owners.length; sl++) {
       const n = lists.count[sl];
       if (!n) continue;
@@ -598,7 +640,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       let acc = 0;
       let acc2 = 0;
       let kept = 0;
+      st.listed++; st.sumN += n;
       if (n > minCount) {
+        st.gated++;
         for (let i = 0; i < n; i++) keys[i] = lists.buf[base + 2 * i];
         const sorted = keys.slice(0, n).sort();
         const med = sorted[n >> 1];
@@ -612,6 +656,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           kept += wt;
         }
         if (kept > 0) {
+          if (kept < total * 0.98) st.dropped++;
           const f = total / kept;
           acc *= f;
           acc2 *= f;
@@ -751,6 +796,9 @@ export const TAP_DEPTH = { on: false, sigma: 0.1 };
 // the pixel keeps the total weight it had. A near wire's rays that reach the
 // background beside it, and the background's that reach the wire, are the
 // odd ones out there and fall away.
+// Per-ray depth match at depth edges: a ray that could belong to a nearer or a
+// farther surface lands where its own color agrees with the picture.
+export const RAY_MATCH = { on: true, radius: 3, gap: 0.5, margin: 0.7 };
 export const ROBUST_EDGE = { on: false, tol: 0.25, minCount: 4, sigma: 0.0177, cut: 1.0, radius: 4, step: 0.3, capacity: 40 };
 export const RAY_MARCH = { on: true };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };

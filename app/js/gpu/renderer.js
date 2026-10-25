@@ -19,7 +19,8 @@ import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
 import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
-import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX, BACK_PROJECTION_EDGE, depthEdgeMask } from '../core/superres.js';
+import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX, BACK_PROJECTION_EDGE, depthEdgeMask, RAY_MATCH, depthFilter } from '../core/superres.js';
+import { LAMBDA_TO_ALPHA } from '../core/recipe.js';
 
 // Texture unit used only for making and uploading textures.
 const SPARE_UNIT = 15;
@@ -1111,6 +1112,9 @@ uniform int uVigBins;
 uniform sampler2D uBase;   // standard render (linear filtering)
 uniform vec2 uBaseSize;
 uniform highp sampler2D uDepth;
+uniform highp sampler2D uDepthLo;  // nearest and farthest depth around each texel (RAY_MATCH)
+uniform highp sampler2D uDepthHi;
+uniform vec3 uMatch;  // on, gap, margin
 uniform int uAllInFocus;
 uniform float uAlpha;
 uniform vec2 uMin;
@@ -1176,6 +1180,21 @@ float depthAt(vec2 p) {
   float d11 = texelFetch(uDepth, i + ivec2(1, 1), 0).r;
   // Between two surfaces take the nearest texel, not an in-between depth
   // (core/superres.js sampleDepth).
+  float lo = min(min(d00, d10), min(d01, d11));
+  float hi = max(max(d00, d10), max(d01, d11));
+  if (hi - lo > ${DEPTH_STEP_TOLERANCE.toFixed(3)}) return a.y < 0.5 ? (a.x < 0.5 ? d00 : d10) : (a.x < 0.5 ? d01 : d11);
+  return mix(mix(d00, d10, a.x), mix(d01, d11, a.x), a.y);
+}
+
+float depthTexAt(highp sampler2D t, vec2 p) {
+  ivec2 sz = textureSize(t, 0);
+  vec2 f = clamp(p, vec2(0.0), vec2(sz) - 1.001);
+  ivec2 i = ivec2(floor(f));
+  vec2 a = f - vec2(i);
+  float d00 = texelFetch(t, i, 0).r;
+  float d10 = texelFetch(t, i + ivec2(1, 0), 0).r;
+  float d01 = texelFetch(t, i + ivec2(0, 1), 0).r;
+  float d11 = texelFetch(t, i + ivec2(1, 1), 0).r;
   float lo = min(min(d00, d10), min(d01, d11));
   float hi = max(max(d00, d10), max(d01, d11));
   if (hi - lo > ${DEPTH_STEP_TOLERANCE.toFixed(3)}) return a.y < 0.5 ? (a.x < 0.5 ? d00 : d10) : (a.x < 0.5 ? d01 : d11);
@@ -1259,6 +1278,36 @@ void main() {
       // Two surfaces: the nearer wins if the ray lands on it.
       float nearA = min(a1, a2);
       alpha = abs(depthAt((lens - nearA * duv) * uDetail) - nearA) <= ${RAY_DEPTH_TOLERANCE.toFixed(3)} ? nearA : max(a1, a2);
+    }
+  }
+  if (uAllInFocus == 1 && uMatch.x > 0.5) {
+    // Per-ray depth match (core/superres.js RAY_MATCH): between a nearer and
+    // a farther surface the ray lands where its own color agrees with the
+    // picture.
+    vec2 src = (lens - alpha * duv) * uDetail;
+    float mlo = depthTexAt(uDepthLo, src);
+    float mhi = depthTexAt(uDepthHi, src);
+    if (mhi - mlo > uMatch.y) {
+      float mval = max(0.0, raw - uBlack[ch]) * uScale[ch] * gain;
+      float cands[3] = float[3](alpha, mlo, mhi);
+      float ebest = 1e9;
+      float abest = alpha;
+      for (int k = 0; k < 3; k++) {
+        vec2 q = warpForward((lens - cands[k] * duv) * uOutScale + 0.5) - 0.5;
+        ivec2 qi = ivec2(floor(q + 0.5));
+        float e = 1e9;
+        if (qi.x >= uReach && qi.y >= uReach && qi.x < uOutSize.x - uReach && qi.y < uOutSize.y - uReach) {
+          float cc = texture(uBase, warpSource(vec2(qi) + 0.5) / uOutScale * uDetail / uBaseSize).rgb[ch];
+          e = abs(mval - cc) / (mval + cc + 1e-4);
+        }
+        if (k == 0) {
+          ebest = e * uMatch.z;
+        } else if (e < ebest) {
+          ebest = e;
+          abest = cands[k];
+        }
+      }
+      alpha = abest;
     }
   }
   vec2 o = (lens - alpha * duv) * uOutScale;
@@ -3248,6 +3297,29 @@ export class GpuRenderer {
   }
 
   // The point draw shared by the splat and the lens measurement.
+  // Nearest and farthest depth around every texel (core/superres.js RAY_MATCH).
+  matchTextures(p) {
+    const gl = this.gl;
+    if (this.match && this.match.src === p.depth && this.match.radius === RAY_MATCH.radius) return this.match;
+    if (this.match) {
+      gl.deleteTexture(this.match.lo);
+      gl.deleteTexture(this.match.hi);
+    }
+    const upload = (values) => {
+      const t = this.texture(p.baseW, p.baseH, gl.R32F);
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, p.baseW, p.baseH, gl.RED, gl.FLOAT, values);
+      return t;
+    };
+    this.match = {
+      src: p.depth,
+      radius: RAY_MATCH.radius,
+      lo: upload(depthFilter(p.depth, p.baseW, p.baseH, RAY_MATCH.radius, Math.min)),
+      hi: upload(depthFilter(p.depth, p.baseW, p.baseH, RAY_MATCH.radius, Math.max)),
+    };
+    return this.match;
+  }
+
   splatPoints(P, p, { base, vig, estimate = null, lens = null, probe = null, depthTex = null }) {
     const gl = this.gl;
     const { cam, dev, sampler } = this;
@@ -3284,6 +3356,12 @@ export class GpuRenderer {
     gl.uniform1i(U.uDepth, 3);
     this.bindTex(3, depthTex || this.depthTex);
     gl.uniform1i(U.uAllInFocus, p.allInFocus && p.depth ? 1 : 0);
+    const match = p.allInFocus && p.depth && RAY_MATCH.on && !depthTex && !probe ? this.matchTextures(p) : null;
+    gl.uniform3f(U.uMatch, match ? 1 : 0, RAY_MATCH.gap * LAMBDA_TO_ALPHA, RAY_MATCH.margin);
+    gl.uniform1i(U.uDepthLo, 9);
+    gl.uniform1i(U.uDepthHi, 10);
+    this.bindTex(9, match ? match.lo : this.depthTex);
+    this.bindTex(10, match ? match.hi : this.depthTex);
     this.setRayWarp(U, p.rayWarp);
     gl.uniform1f(U.uAlpha, p.alpha);
     gl.uniform2f(U.uMin, p.xMin, p.yMin);
