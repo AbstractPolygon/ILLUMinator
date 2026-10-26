@@ -21,52 +21,123 @@ precision highp int;
 precision highp sampler2DArray;
 `;
 
-// Capped color difference to the reference at one trial depth, mean over the
-// views that count (core/depthmatch.js costSlice).
+const ATLAS_COMMON = `
+uniform int uW;
+uniform int uH;
+uniform int uG;
+uniform int uCols;
+ivec2 at(ivec2 p, int g) { return ivec2(p.x + uW * (g % uCols), p.y + uH * (g / uCols)); }
+`;
+
+// The match cost of one trial depth (core/depthmatch.js costVolume): the capped color difference to the
+// reference, in units of the mean over the other views. Red: the cost. Green: 1 where the shifted views
+// average above `uSatur` in some channel (blown out). Corners outside the picture add nothing.
 const COST = `${HEAD}
 uniform sampler2DArray uColors;
 uniform sampler2DArray uWeights;
+uniform sampler2DArray uBehind;
 uniform int uUseWeights;
+uniform int uUseBehind;
 uniform int uCount;
 uniform int uRef;
 uniform vec4 uView[${MAX_VIEWS}];
 uniform float uAlpha;
 uniform float uCap;
-uniform float uFloor;
+uniform float uBehindW;
+uniform float uSatur;
 out vec4 outColor;
 
-bool sample3(int k, vec2 pos, ivec2 size, out vec3 c) {
+vec3 sampleOpen(sampler2DArray tex, int k, vec2 pos, ivec2 size) {
   vec2 f0 = floor(pos);
   ivec2 b = ivec2(f0);
-  if (b.x < 0 || b.y < 0 || b.x >= size.x - 1 || b.y >= size.y - 1) return false;
   vec2 a = pos - f0;
-  vec3 c00 = texelFetch(uColors, ivec3(b, k), 0).rgb;
-  vec3 c10 = texelFetch(uColors, ivec3(b + ivec2(1, 0), k), 0).rgb;
-  vec3 c01 = texelFetch(uColors, ivec3(b + ivec2(0, 1), k), 0).rgb;
-  vec3 c11 = texelFetch(uColors, ivec3(b + ivec2(1, 1), k), 0).rgb;
-  c = (c00 * (1.0 - a.x) + c10 * a.x) * (1.0 - a.y) + (c01 * (1.0 - a.x) + c11 * a.x) * a.y;
-  return true;
+  vec3 c = vec3(0.0);
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 2; i++) {
+      ivec2 q = b + ivec2(i, j);
+      if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
+      float wt = (i == 1 ? a.x : 1.0 - a.x) * (j == 1 ? a.y : 1.0 - a.y);
+      c += texelFetch(tex, ivec3(q, k), 0).rgb * wt;
+    }
+  }
+  return c;
 }
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   ivec2 size = textureSize(uColors, 0).xy;
   vec3 rc = texelFetch(uColors, ivec3(p, uRef), 0).rgb;
-  float sum = 0.0;
-  float cnt = 0.0;
+  float others = float(uCount - 1);
+  float acc0 = 0.0;
+  float accH = 0.0;
+  float accB = 0.0;
+  vec3 sum = vec3(0.0);
   for (int k = 0; k < ${MAX_VIEWS}; k++) {
     if (k >= uCount) break;
     if (k == uRef) continue;
-    float q = uUseWeights == 1 ? texelFetch(uWeights, ivec3(p, k), 0).r : 1.0;
-    if (q <= 0.0) continue;
-    vec3 c;
-    if (!sample3(k, vec2(p) + uAlpha * uView[k].xy, size, c)) continue;
+    vec2 pos = vec2(p) + uAlpha * uView[k].xy;
+    vec3 c = sampleOpen(uColors, k, pos, size);
     vec3 d = abs(c - rc);
     float cd = d.r + d.g + d.b;
-    sum += q * (cd < uCap ? cd : uCap);
-    cnt += q;
+    float a = uUseWeights == 1 ? 1.0 - texelFetch(uWeights, ivec3(p, k), 0).r : 0.0;
+    acc0 += (1.0 - a) * min(cd, uCap);
+    accH += a;
+    if (uUseBehind == 1) accB += sampleOpen(uBehind, k, pos, size).r;
+    sum += c;
   }
-  outColor = vec4(cnt >= uFloor ? sum / cnt : uCap, 1.0, 0.0, 0.0);
+  if (accH > 0.0 && accH < others) acc0 = acc0 * others / (others - accH);
+  float cost = (acc0 + uBehindW * accB / others) / others;
+  float blown = max(sum.r, max(sum.g, sum.b)) > uSatur * others ? 1.0 : 0.0;
+  outColor = vec4(cost, blown, 0.0, 0.0);
+}`;
+
+// A label's value into one channel of an atlas tile: component 0 (cost) or 1 (blown flag) of the source.
+const STORE = `${HEAD}
+uniform sampler2D uSrc;
+uniform int uComp;
+uniform ivec2 uOrigin;
+out vec4 outColor;
+void main() {
+  vec4 t = texelFetch(uSrc, ivec2(gl_FragCoord.xy) - uOrigin, 0);
+  outColor = vec4(uComp == 0 ? t.r : t.g);
+}`;
+
+// Pixels whose cost vector is set to zero: blown out at some depth, or costs (in tool units, ten times
+// ours) that differ by less than uFlat. Red: 1 to zero.
+const ZERO = `${HEAD}
+${ATLAS_COMMON}
+uniform sampler2D uRaw;
+uniform sampler2D uFlags;
+uniform int uK;
+uniform float uFlat;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float lo = 1e30;
+  float hi = -1e30;
+  float blown = 0.0;
+  for (int k = 0; k < ${MAX_LABELS}; k++) {
+    if (k >= uK) break;
+    ivec2 t = at(p, k >> 2);
+    float v = texelFetch(uRaw, t, 0)[k & 3];
+    lo = min(lo, v);
+    hi = max(hi, v);
+    blown = max(blown, texelFetch(uFlags, t, 0)[k & 3]);
+  }
+  outColor = vec4(blown > 0.5 || (hi - lo) * 10.0 < uFlat ? 1.0 : 0.0);
+}`;
+
+// One label's raw cost back out of its atlas tile, zeroed where uZero says so.
+const PULL = `${HEAD}
+${ATLAS_COMMON}
+uniform sampler2D uRaw;
+uniform sampler2D uZeroed;
+uniform int uLabel;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float v = texelFetch(uRaw, at(p, uLabel >> 2), 0)[uLabel & 3];
+  outColor = vec4(texelFetch(uZeroed, p, 0).r > 0.5 ? 0.0 : v, 0.0, 0.0, 0.0);
 }`;
 
 // Each pixel's arms (core/depth.js crossArms): how far it reaches left,
@@ -221,14 +292,6 @@ void main() {
   outColor = vec4(v * uScale);
 }`;
 
-const ATLAS_COMMON = `
-uniform int uW;
-uniform int uH;
-uniform int uG;
-uniform int uCols;
-ivec2 at(ivec2 p, int g) { return ivec2(p.x + uW * (g % uCols), p.y + uH * (g / uCols)); }
-`;
-
 // A sweep along anti-diagonal uS: one point per (pixel, group of four labels).
 const SWEEP_VERTEX = `#version 300 es
 precision highp float;
@@ -320,8 +383,8 @@ void main() {
 }`;
 
 // The labels' beliefs at the end: best label (core/depth.js bestDepth), the
-// refined depth (core/depthmatch.js refinedLabels) or the hidden / visible
-// choice.
+// depth refined by a parabola through the match costs (bestDepth with data costs)
+// or the hidden / visible choice.
 const RESULT = `${HEAD}
 ${ATLAS_COMMON}
 uniform sampler2D uU;
@@ -343,6 +406,10 @@ float belief(ivec2 p, int k) {
   return -(texelFetch(uU, t, 0)[c] + texelFetch(uML, t, 0)[c] + texelFetch(uMR, t, 0)[c] + texelFetch(uMU, t, 0)[c] + texelFetch(uMD, t, 0)[c]) / uScale;
 }
 
+float dataCost(ivec2 p, int k) {
+  return texelFetch(uU, at(p, k >> 2), 0)[k & 3] / uScale;
+}
+
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   if (uMode == 2) {
@@ -359,16 +426,20 @@ void main() {
     if (v > bv) { bv = v; best = k; }
   }
   float value = uFirst + float(best) * uStep;
-  if (best > 0 && best < uK - 1 && (uMode == 1 || uDiscrete == 0)) {
-    float a = belief(p, best - 1);
-    float c = belief(p, best + 1);
+  if (best > 0 && best < uK - 1) {
     if (uMode == 1) {
-      float curve = (-a) + (-c) - 2.0 * (-bv);
-      if (abs(curve) > 0.0) {
-        float shift = (((-c) - (-a)) / (2.0 * curve)) * uStep;
-        if (abs(shift) < uStep) value -= shift;
+      // A parabola through the three match costs around the label (not the beliefs).
+      float cm = dataCost(p, best - 1);
+      float c0 = dataCost(p, best);
+      float cp = dataCost(p, best + 1);
+      float den = cp + cm - 2.0 * c0;
+      if (den > 0.0) {
+        float o = ((cp - cm) / (den * 2.0)) * uStep;
+        if (abs(o) < abs(uStep)) value -= o;
       }
-    } else {
+    } else if (uDiscrete == 0) {
+      float a = belief(p, best - 1);
+      float c = belief(p, best + 1);
       float d = a - 2.0 * bv + c;
       if (d < 0.0) value += clamp(0.5 * (a - c) / d, -0.5, 0.5) * uStep;
     }
@@ -434,14 +505,21 @@ void main() {
 
 const WRITE_LAYER = `${HEAD}
 uniform sampler2D uSrc;
+uniform float uInvert;
 out vec4 outColor;
-void main() { outColor = vec4(texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0).r); }`;
+void main() {
+  float v = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0).r;
+  outColor = vec4(uInvert > 0.5 ? 1.0 - v : v);
+}`;
 
 function programs(gpu) {
   if (!gpu.matchPrograms) {
     const gl = gpu.gl;
     gpu.matchPrograms = {
       cost: program(gl, COST),
+      store: program(gl, STORE),
+      zero: program(gl, ZERO),
+      pull: program(gl, PULL),
       arms: program(gl, ARMS),
       sobel: program(gl, SOBEL),
       gauss: program(gl, GAUSS),
@@ -709,11 +787,15 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
     const flatTmp = work.tex(w, h, gl.R32F);
     const edgeTex = work.tex(w, h);
     const costTex = work.tex(w, h);
+    const behindTex = work.array(w, h, V, gl.R32F);
+    const zeroTex = work.tex(w, h, gl.R32F);
     const aggA = work.tex(w, h);
     const aggB = work.tex(w, h);
     const outTex = work.tex(w, h);
     const bigShape = work.atlasShape(Math.ceil(Math.max(count, fineCount) / 4));
     const big = solverSet(work, bigShape);
+    const rawAtlas = work.tex(bigShape.width, bigShape.height);
+    const flagAtlas = work.tex(bigShape.width, bigShape.height);
 
     const fullscreen = (prog, target, layer) => {
       gpu.target(target, w, h, layer);
@@ -725,7 +807,7 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
     };
 
     // One reference view's depth over `labels` (linear: first + k * step).
-    const measureView = (r, labels, weights, refine) => {
+    const measureView = (r, labels, weights, refine, behind = false) => {
       const K = labels.length;
       const guide = depthColorGuide(Float32Array.from(views[r].rgb, (x) => x * views[r].gain));
       upload2D(work, guideTex, guide, 3);
@@ -768,19 +850,64 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
       });
       const a0 = labels.first;
       const step = labels.step;
+      const tile = (k) => {
+        const g = k >> 2;
+        return { ox: (g % bigShape.cols) * w, oy: Math.floor(g / bigShape.cols) * h, ch: k & 3 };
+      };
+      // The raw costs of every label (and which pixels are blown out), kept in atlases.
       for (let k = 0; k < K; k++) {
         const alpha = a0 + k * step;
         Q = pr.cost;
         fullscreen(Q, costTex);
         bind(Q, 'uColors', 1, colorTex, gl.TEXTURE_2D_ARRAY);
         bind(Q, 'uWeights', 2, weightTex, gl.TEXTURE_2D_ARRAY);
+        bind(Q, 'uBehind', 3, behindTex, gl.TEXTURE_2D_ARRAY);
         gl.uniform1i(Q.u.uUseWeights, weights ? 1 : 0);
+        gl.uniform1i(Q.u.uUseBehind, behind ? 1 : 0);
         gl.uniform1i(Q.u.uCount, V);
         gl.uniform1i(Q.u.uRef, r);
         gl.uniform4fv(Q.u.uView, shifts);
         gl.uniform1f(Q.u.uAlpha, alpha);
         gl.uniform1f(Q.u.uCap, DEPTH_LCOST.tc);
-        gl.uniform1f(Q.u.uFloor, 0.05 * (V - 1));
+        gl.uniform1f(Q.u.uBehindW, P.behind);
+        gl.uniform1f(Q.u.uSatur, P.satur);
+        gpu.draw();
+        const { ox, oy, ch } = tile(k);
+        for (const [atlas, comp] of [[rawAtlas, 0], [flagAtlas, 1]]) {
+          Q = pr.store;
+          gpu.target(atlas, bigShape.width, bigShape.height);
+          gl.viewport(ox, oy, w, h);
+          gl.useProgram(Q.p);
+          bind(Q, 'uSrc', 1, costTex);
+          gl.uniform1i(Q.u.uComp, comp);
+          gl.uniform2i(Q.u.uOrigin, ox, oy);
+          gl.colorMask(ch === 0, ch === 1, ch === 2, ch === 3);
+          gpu.draw();
+          gl.colorMask(true, true, true, true);
+        }
+      }
+      const atlasUniforms = (prog) => {
+        gl.uniform1i(prog.u.uW, w);
+        gl.uniform1i(prog.u.uH, h);
+        gl.uniform1i(prog.u.uG, bigShape.groups);
+        gl.uniform1i(prog.u.uCols, bigShape.cols);
+      };
+      // Pixels set to zero cost at every depth: blown out, or hardly any difference between depths.
+      Q = pr.zero;
+      fullscreen(Q, zeroTex);
+      bind(Q, 'uRaw', 1, rawAtlas);
+      bind(Q, 'uFlags', 2, flagAtlas);
+      atlasUniforms(Q);
+      gl.uniform1i(Q.u.uK, K);
+      gl.uniform1f(Q.u.uFlat, P.flat);
+      gpu.draw();
+      for (let k = 0; k < K; k++) {
+        Q = pr.pull;
+        fullscreen(Q, costTex);
+        bind(Q, 'uRaw', 1, rawAtlas);
+        bind(Q, 'uZeroed', 2, zeroTex);
+        atlasUniforms(Q);
+        gl.uniform1i(Q.u.uLabel, k);
         gpu.draw();
         // Rounds of aggregation: horizontal then vertical, or the other way.
         let src = costTex;
@@ -801,9 +928,7 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
           src = aggB;
         }
         Q = pr.pack;
-        const g = k >> 2;
-        const ox = (g % bigShape.cols) * w;
-        const oy = Math.floor(g / bigShape.cols) * h;
+        const { ox, oy, ch } = tile(k);
         gpu.target(big.U, bigShape.width, bigShape.height);
         gl.viewport(ox, oy, w, h);
         gl.useProgram(Q.p);
@@ -813,7 +938,6 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
         gl.uniform1i(Q.u.uUseFlat, DEPTH_EDGE.on ? 1 : 0);
         gl.uniform1f(Q.u.uScale, DEPTH_TRWS.scale);
         gl.uniform2i(Q.u.uOrigin, ox, oy);
-        const ch = k & 3;
         gl.colorMask(ch === 0, ch === 1, ch === 2, ch === 3);
         gpu.draw();
         gl.colorMask(true, true, true, true);
@@ -850,12 +974,12 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
     const seenTex = work.tex(w, h);
     const visTex = work.tex(w, h, gl.R32F);
     const nv = V - 1;
-    upload2D(work, depthC, depths[c], 1);
-    refs.forEach((v) => {
-      if (v === c) return;
-      upload2D(work, depthV, depths[v], 1);
-      const sx = (views[v].u - views[c].u) * views[v].detail;
-      const sy = (views[v].v - views[c].v) * views[v].detail;
+    // Where `other` sees the pixels of `ref`: 1 visible, 0 hidden, into layer `layer` of `target`.
+    const pairVisible = (ref, other, target, layer, invert = false) => {
+      upload2D(work, depthC, depths[ref], 1);
+      upload2D(work, depthV, depths[other], 1);
+      const sx = (views[other].u - views[ref].u) * views[other].detail;
+      const sy = (views[other].v - views[ref].v) * views[other].detail;
       clear(work, landed);
       let Q = pr.landed;
       gpu.target(landed, w, h);
@@ -871,8 +995,8 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
       bind(Q, 'uColors', 1, colorTex, gl.TEXTURE_2D_ARRAY);
       bind(Q, 'uLanded', 2, landed);
       bind(Q, 'uDepth', 3, depthC);
-      gl.uniform1i(Q.u.uView, v);
-      gl.uniform1i(Q.u.uRef, c);
+      gl.uniform1i(Q.u.uView, other);
+      gl.uniform1i(Q.u.uRef, ref);
       gl.uniform2f(Q.u.uShift, sx, sy);
       gl.uniform1f(Q.u.uCap, DEPTH_LCOST.tc);
       gl.uniform1f(Q.u.uHole, P.hole);
@@ -882,9 +1006,19 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
       solve(work, small, 2, { iterations: P.iterations, slope: P.slope, trunc: P.trunc, gamma: DEPTH_TRWS.gamma }, null);
       readResult(work, small, 2, 2, { scale: 1 }, visTex);
       Q = pr.layer;
-      fullscreen(Q, weightTex, v);
+      fullscreen(Q, target, layer);
       bind(Q, 'uSrc', 1, visTex);
+      gl.uniform1f(Q.u.uInvert, invert ? 1 : 0);
       gpu.draw();
+    };
+    refs.forEach((v) => {
+      if (v === c) return;
+      pairVisible(c, v, weightTex, v);
+    });
+    // And which pixels of each other view the center cannot see (hidden from it): 1 - visible.
+    refs.forEach((v) => {
+      if (v === c) return;
+      pairVisible(v, c, behindTex, v, true);
     });
 
     // Views never measured count fully, as on the CPU.
@@ -903,7 +1037,7 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
       labels = labelsOf(lo, (hi - lo) / (P.adapt.fine - 1), P.adapt.fine);
     }
     done(0.85);
-    const measured = measureView(c, labels, true, true);
+    const measured = measureView(c, labels, true, true, true);
     done(1);
     return measured;
   } finally {
