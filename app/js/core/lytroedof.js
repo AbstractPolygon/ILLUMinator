@@ -240,6 +240,8 @@ export const SPLAT = { aperture: 1.0, tolerance: 2, tolA: 1, tolB: 2, reach: 1, 
 export function correctedPlane(raw, cam, dev, g, vg, radius) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
+  // SaturationState: pixels at the sensor's white keep their (clipped) value and are raised later by the diffusion.
+  plane.sat = new Uint8Array(width * height);
   const binScale = vg.bins / (2 * vg.rMax);
   const binsSq = vg.bins * vg.bins;
   let lastLens = NaN;
@@ -253,7 +255,8 @@ export function correctedPlane(raw, cam, dev, g, vg, radius) {
     const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
     let gain = 0;
     for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
-    if (!(gain > 0) || raw[i] >= dev.saturated[ch] || isDefect(raw, width, i)) return;
+    if (!(gain > 0) || isDefect(raw, width, i)) return;
+    if (raw[i] >= dev.saturated[ch]) plane.sat[i] = 1;
     plane[i] = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
   });
   return plane;
@@ -320,6 +323,7 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
 function completePlane(plane, raw, cam, dev) {
   const { width, height } = cam;
   const out = Float32Array.from(plane);
+  const sat = plane.sat;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
@@ -338,9 +342,31 @@ function completePlane(plane, raw, cam, dev) {
         }
       }
       out[i] = n ? s / n : Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch];
+      if (raw[i] >= dev.saturated[ch]) sat[i] = 1;
     }
   }
+  diffuseSaturation(out, sat, width, height, dev.cfa);
   return out;
+}
+
+// SaturationRecoveryDiffusion (the engine's mode 1, on the mosaic before the
+// demosaic): 20 in-place raster sweeps in which every saturated pixel becomes
+// the mean of its four same-colour neighbours (diagonals at green, two pixels
+// away at red and blue) if that is larger than its own value.
+function diffuseSaturation(a, sat, W, H, cfa) {
+  for (let it = 0; it < 20; it++) {
+    for (let y = 2; y < H - 2; y++) {
+      for (let x = 2; x < W - 2; x++) {
+        const i = y * W + x;
+        if (!sat[i]) continue;
+        const m = cfa[y & 1][x & 1] === 1
+          ? a[i - W - 1] + a[i - W + 1] + a[i + W - 1] + a[i + W + 1]
+          : a[i - 2 * W] + a[i - 2] + a[i + 2] + a[i + 2 * W];
+        const v = m * 0.25;
+        if (a[i] < v) a[i] = v;
+      }
+    }
+  }
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
