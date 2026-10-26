@@ -77,3 +77,12 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
 - View preparation (FUN_1809b02f0) builds each view with ProjectPerspective(CircularAperture(0.12), u, v, CircularAperture(1.0)).
 - Ring vectors p[0x2e38], p[0x2e78] (radius, angle step) are not in the presets; the 7 views follow from the stack files.
 - The app now measures the Lytro-style depth from these seven views (worker.js depthViews) instead of the 37-view disc.
+
+## View images for the depth cost
+- No smoothing: the per-image processor FUN_180b674b0 is a separable blur with sigma p[0x31b8] = 0 in every preset.
+- MatchColor (FUN_1809b3700): per-channel mean and spread of every other view moved onto the reference's; statistics by
+  Welford's running mean, variance divided by (N - 1), floored at 1e-6 (FUN_1809af8f0).
+- The cost caps (0.2), blown-out level (0.95) and flat level (0.15) are in the units of the views as projected, so the
+  app compares linear light with 1.0 at the sensor's clip level, no gamma.
+- Scored on 09eba2d6 and batch4-1 against the stack's depth map: gamma 0.5 + 3x3 box + brightest-value scaling 1.86 lambda mean error,
+  linear + no smoothing + clip-level scale 1.45 (share off by more than 3 lambda 12.4% to 9.3%).

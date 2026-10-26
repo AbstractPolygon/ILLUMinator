@@ -19,7 +19,7 @@ import { measureMatchGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { removePeriodicPattern } from './core/notch.js';
 import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
-import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
+import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
@@ -1212,6 +1212,9 @@ function measureLytro(progress) {
   DEPTH_PASSES.top = Math.max(top, DEPTH_PASSES.first + 8);
   DEPTH_PASSES.step = Math.max(1, Math.ceil((DEPTH_PASSES.top - DEPTH_PASSES.first + 1) / 64));
   Object.assign(DEPTH_SEARCH, { min: DEPTH_PASSES.first * DEPTH_PASSES.lambda, max: DEPTH_PASSES.top * DEPTH_PASSES.lambda });
+  // The maker's tool compares the views as they are: linear light, full scale (1.0) at the sensor's clip level,
+  // no brightness curve and no smoothing (its cost cap 0.2, blown-out level 0.95 and flat level 0.15 are in those units).
+  Object.assign(DEPTH_LCOST, { gamma: 1, normQ: 0, fixedTop: state.dev.clip || 1 });
   let measured = null;
   if (state.gpu) {
     try {

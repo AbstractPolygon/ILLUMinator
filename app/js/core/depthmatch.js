@@ -32,9 +32,9 @@ export const DEPTH_PASSES = {
   // range the first measurement found.
   stats: [],
   // Match every view's mean and spread to the center view's: 'gamma', 'linear' or off.
-  matchColor: 'gamma',
-  // Box smoothing radius of each view before the cost (0: none).
-  blur: 1,
+  matchColor: 'linear',
+  // Box smoothing radius of each view before the cost (0: none; the maker's tool smooths by sigma 0, p[0x31b8]).
+  blur: 0,
   adapt: { on: false, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 },
 };
 
