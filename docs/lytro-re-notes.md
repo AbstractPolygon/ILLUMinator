@@ -217,3 +217,12 @@ computeEnergyFunction = sum data[label] + sum over 4-neighbour pairs of min(|lab
 (truncated linear smoothness). Config offsets (+0x48 solver, +0x58, +0x5c iterations, +0x94 edge-adaptive flag, +0x98/+0x9c edge params) still to be matched
 with the preset values. Next: read BuildEdgeAdaptiveSmoothnessCost, the cost volume (DepthMapCreateDataCostSimpleSubset::Run), the MRF solvers and
 the plane fitting, implement in the worker, and score the depth against `tnt --depth-out`.
+
+### ILLUM depth settings (tnt `GetBlitzenVersion1Configuration` = `FUN 1004e2bf0`; V1_1 only adds the sub-aperture vectors [0.25] and [45])
+Member <- config value of DepthMapAlgorithmSimple (member byte offset): +0x00 min lambda -35; +0x04 100; +0x08 label step 1.0 (SubPixelEstimate argument);
++0x0c 1.0; +0x48 MRF solver 0 = TRW-S, +0x50 2.0, +0x54 10.0, +0x58 TRW-S flag true, +0x5c iterations 10, +0x60 0.5, +0x64 0.15, +0x68 0.95;
+cross-based aggregation (CrossBasedDataCostAggregation) parameters +0x70 0.04, +0x74 0.025, +0x78 34, +0x7c 17, +0x80 4, +0x84 1.0, +0x88 1.5 (arm lengths 34 and 17);
+MRF smoothness: +0x8c = 6.0 (truncation in label steps) and +0x90 = 0.1 (slope per label step) so a pair costs min(|dl| * 0.1, 0.6) * edgeWeight;
++0x94 edge-adaptive smoothness on, +0x98 colour threshold 0.2, +0x9c edge weight 0.5 (BuildEdgeAdaptiveSmoothnessCost: weight = 1 where
+|dR| + 2|dG| + |dB| <= 0.2 between the two pixels, else 0.5, one weight image for horizontal and one for vertical pairs); +0xa0 median filter on.
+Config rows still to read: plane fitting (+0xa4, +0xa8, +0xac, +0xb0, +0xb4, +0xb8, +0xbc) and the cost volume (DepthMapCreateDataCostSimpleSubset::Run).
