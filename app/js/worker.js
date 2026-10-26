@@ -438,6 +438,7 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     state.dev = makeDevelopParams(state.lf.cam);
     // Off until its meaning is settled: applied as a direction shift it made the picture worse against the engine's (MAE 4.62 -> 4.96).
     state.geoTable = state.lf.geometryBytes && globalThis.__useGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
+    state.rayWarpEdof = null;
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
     state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
@@ -730,6 +731,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   progress('Splatting the rays', 0);
   const sp = lytroSplat({
     raw: lf.raw, cam: lf.cam, dev, grid: lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
+    // The engine keeps the table's defocus term in (no chief ray removal), so its depth maps apply as they are.
+    rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false })),
     onProgress: (p) => progress('Splatting the rays', p),
   }, { ...LYTRO_SPLAT, ...(dbg.splat || {}) });
   if (state.jobs.superres !== job) return { cancelled: true };

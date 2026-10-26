@@ -344,14 +344,20 @@ function completePlane(plane, raw, cam, dev) {
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
-export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress }, opts = SPLAT) {
+export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null }, opts = SPLAT) {
   const { width } = cam;
   const unit = g.rowStep;
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
   const radius = g.pitch * opts.aperture * 0.5;
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2);
   const dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
-  const warp = lensWarp(lens, W, H);
+  // With the camera's ray table every ray carries the distortion correction itself (as in the engine), so there is no picture warp afterwards.
+  const warp = rayWarp ? null : lensWarp(lens, W, H);
+  const cosR = Math.cos(g.rotation);
+  const sinR = Math.sin(g.rotation);
+  const warpOut = [0, 0, 0, 0];
+  let cell = null;
+  let lastCell = NaN;
   // z of every output pixel, in lambda
   const zMap = new Float32Array(W * H);
   for (let j = 0; j < H; j++) {
@@ -370,16 +376,37 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   forEachLensPixel(g, cam, radius, (i, x, y, u, v, lensX, lensY) => {
     if (u * u + v * v > r2) return;
     if (dm ? !(plane[i] === plane[i] && dm.at(x, y, rgb)) : !rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
-    const lx = (lensX - xMin) / unit;
-    const ly = (lensY - yMin) / unit;
+    let lx = (lensX - xMin) / unit;
+    let ly = (lensY - yMin) / unit;
+    let ru = u;
+    let rv = v;
+    if (rayWarp) {
+      // The engine corrects every ray with the camera's table: where it comes
+      // from (dx, dy: fractions of the picture) and its direction (du, dv: lens
+      // pitches), then projects the corrected ray (HexLightfieldGeometry::Project).
+      const key = lensX + lensY * 1e6;
+      if (key !== lastCell) {
+        lastCell = key;
+        const cx = x - (cosR * u - sinR * v);
+        const cy = y - (sinR * u + cosR * v);
+        cell = rayWarp.lens(cx / cam.width - 0.5, cy / cam.height - 0.5);
+      }
+      rayWarp.fromLens(cell, u / g.pitch, v / g.pitch, warpOut);
+      const sx = warpOut[0] * cam.width;
+      const sy = warpOut[1] * cam.height;
+      lx += (cosR * sx + sinR * sy) / unit;
+      ly += (-sinR * sx + cosR * sy) / unit;
+      ru += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch;
+      rv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch;
+    }
     const lam0 = sampleDepth(lo, lw, lh, lx, ly) / LAMBDA_TO_ALPHA;
     const lam1 = sampleDepth(hi, lw, lh, lx, ly) / LAMBDA_TO_ALPHA + 1;
-    const lamR = marchRay(lx, ly, u, v, lam0, lam1, depth, lw, lh, opts);
+    const lamR = marchRay(lx, ly, ru, rv, lam0, lam1, depth, lw, lh, opts);
     count++;
     if (!(lamR === lamR)) return;
     const a = lamR * LAMBDA_TO_ALPHA;
-    let qx = (lx - a * u) * scale;
-    let qy = (ly - a * v) * scale;
+    let qx = (lx - a * ru) * scale;
+    let qy = (ly - a * rv) * scale;
     if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
     const x0 = Math.floor(qx);
     const y0 = Math.floor(qy);

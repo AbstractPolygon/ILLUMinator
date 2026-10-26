@@ -291,3 +291,11 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
 - Still open: the (du, dv) part of the standardization (in-tile slope 0.85 .. 0.95 against 1.02), the exact interpolation filter, the hot pixel / saturation /
   highlight stages, the calibration flat-field, and the Catmull-Rom ScaleImage (separable, 1024 sample LUT, kernel widened by the scale) at the end of
   commonPipeline.
+
+## Ray table applied per ray at projection (engine) and the port
+
+- The engine never warps the finished picture. The camera's ray-warp table (dx, dy: fractions of the picture, du, dv: lens pitches) is attached to the standardized lightfield and applied to every ray when it is projected: corrected = coords + table.
+- `HexLightfieldGeometry::Project`: P = origin + R(theta) * p * (i + j/2 - lambda*u, (sqrt(3)/2)*j - lambda*v) / ImageSize - 0.5. A lambda shift is exactly 1.0 px per px of offset, so the exact conversion is alpha = lambda / rowStep (0.080819), not the fitted 0.0814.
+- The standardized image is the processed sensor image scaled (Catmull-Rom ScaleImage) by 14/pitch to 7574 x 5264; lens pitch is about 14 std px.
+- ILLUM effective config: ProductID 2, ConfigVersion 1 -> GetBlitzenVersion1_1Configuration; ToneMap::Apply is off.
+- Port: `lytroSplat({ rayWarp })` takes the table evaluator (`parseRayWarp(..., { tilt: false })`), corrects each ray's lens position and direction, and skips the post-hoc lens warp. `__lytro.noTable` turns it off.
