@@ -436,7 +436,8 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     state.rawFixed = null;
     if (state.settings.hotPixels !== false) useHotPixelFix(true);
     state.dev = makeDevelopParams(state.lf.cam);
-    state.geoTable = state.lf.geometryBytes && !globalThis.__noGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
+    // Off until its meaning is settled: applied as a direction shift it made the picture worse against the engine's (MAE 4.62 -> 4.96).
+    state.geoTable = state.lf.geometryBytes && globalThis.__useGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
     state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;

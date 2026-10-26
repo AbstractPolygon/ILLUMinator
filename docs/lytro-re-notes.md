@@ -244,3 +244,8 @@ CorrectLightfieldPoint: cell = (floor(w * (x + 0.5) + 0.5), floor(h * (y + 0.5) 
 sensor place; the cell's (u, v) is subtracted from the ray's direction (lens pitches, lens-array axes) before the projection. The field on b4-1 runs
 u -0.21..0.16, v -0.12..0.12 with mean (-0.0186, -0.0063): a viewpoint shift of the whole picture that the app's own per-lens offsets drop
 (`whiteOffsets` subtracts the mean; the picture-fitted offsets are relative too), so near objects were 1-3 px off the engine's. `core/geometrytable.js` applies it.
+Tested and refuted as the cause of the near-object shift: applying the table as a disc-centre shift (u -= table * pitch) made b4-1 worse against the engine (MAE 4.62 -> 4.96).
+`HexLightfieldGeometry::DiskCenter(i, j, applyError)` adds the table value (rotated by the MLA rotation) to the model's disc centre, which is what the
+app's image-fitted lens centres already contain, so applying it again double counts. Kept behind `globalThis.__useGeo`. The depth-proportional shift between the
+app and the engine (about -0.097 px per lambda in x, -0.018 in y on b4-1) is therefore still unexplained; next: the engine's ray-to-image mapping
+(`HexLightfieldGeometry::Project`, `Trace`, `SensorAlignedRefocusingEquationRatios`).
