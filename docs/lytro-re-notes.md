@@ -347,3 +347,17 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
 - Splat: ProjectGold: every std pixel p with confidence > 0: weight = aperture(u, v) times the bilinear weights of OutputPoint - 0.5; rgba * weight accumulates (alpha = sum).
 - Not applied for the engine's picture (sharpening off): the per-lambda unsharp mask (cfg 0x5d8, amounts vs lambda and gain, `SmoothlyVaryingUnsharpMaskImage`) is only
   applied when the recipe's own sharpening is on (finalImagePipeline needs the recipe's USM amount > 0); `SharpenFilter` bank (cfg 0x100 = 0) is off.
+
+## Ray range window, table post-processing, aperture (session notes, b4-1 against the engine with its own depth)
+- `AberrationCorrectionCompact::Deserialize` runs RemoveChiefRayAngle (cfg 0x2690 off), ScaleSpatialCoordinate (0x26a8 on) and OffsetFocusPlane only when 0x26c0 is on (it is off on ILLUM), so the
+  table keeps its defocus term. RemoveChiefRayAngle: at every (x, y) node the (du, dv) of the u = v = 0 ray (nearest in x, y, bilinear in u, v) is subtracted from all nodes there.
+  Ported as `parseRayWarp(..., { chief: true })`; no change in the score (5.96 -> 5.96).
+- The splat result does not depend on the table's u term (the ray meets the surface where it meets it): table u scale 0, 0.2 and 1 all score 5.96..5.99; only a wrong scale (3) hurts (11.4).
+- `BackProjectDepthMap::ComputeMinMaxDepthMap`: the lambda range a ray is traced through is the min / max of the depth map in a window of radius ceil(L*0.5+0.5) lenses across and
+  ceil(L/sqrt3+0.5) down (L = largest |lambda|, 35 on b4-1, depth pixel = one lens), built by passes with strides 1, 2, 4, ... so the radius is 1, 3, 7, 15, ... The port used 1 texel.
+  Window sweep: 1 5.96, 2 5.85, 3 5.58, 4 5.32, 6 5.05, 8 5.00, 12 4.99. Now `minMaxRadius` (MAE 4.99, edge rise at lambda -10..-5 9.3 -> 6.2 px, engine 4.75).
+- RayTraceRegion also needs far > lambda for the interpolation branch (ported, no change) and reads an importance map (the depth state's, upscaled): rays whose hit texel has importance 0 are dropped
+  (ProjectGold needs confidence > 0). The importance map is not ported; the engine does not output it.
+- The `--eslf-out` picture is the project4d regrid of the standardized lightfield, not the lightfield itself, so its in-tile slopes (0.5 .. 0.95) say nothing about ray geometry. Stop using them.
+- Still unexplained: a smaller aperture scores better than the nominal 0.857 even after the window fix (0.45: 4.06, 0.6: 4.18, 0.75: 4.50, 0.857: 4.99). Outer rays also come out 12..20 % too bright at r > 0.4 pitch
+  against the engine's calibrated flat field (radial mean over the central tiles), so the app's vignetting estimate is the next suspect, with the importance map. Error is now concentrated along the near fence wire.
