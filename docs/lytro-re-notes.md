@@ -268,3 +268,26 @@ app and the engine (about -0.097 px per lambda in x, -0.018 in y on b4-1) is the
 - red and blue at green sites: the 12 directions again with the G scheme (scale 192): R = g - sum w (G(nb) - R(nb)) / sum w, B likewise.
 - Ported in app/js/core/lfdemosaic.js (banded, window rows y0-5..y1+5; independent of the band size). Not ported yet: HotPixelCorrectionImage,
   SaturationState / SaturationRecoveryDiffusion and the ColorMosaic gain that run before it in commonPipeline.
+
+### Standardized lightfield (what the engine's EDOF actually consumes), measured with `tnt --eslf-out` and synthetic raw files
+Method (scripts/re): `tnt.exe --lfp-in x.lfp --calibration-in cal --eslf-out out.png` writes the standardized light field as a 16 bit RGBA PNG
+(`png16.c` decodes it; 7574 x 5264 for the ILLUM = 541 x 376 tiles of 14 x 14). `patchraw.mjs` overwrites the raw section of an LFP in place (no hash
+check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the engine's response can be identified directly.
+- Layout: `outputExternalStandardizedLightfield` = `LoadRAWLightfield` (Raw::Decode, StandardizeLightfield::operator()<Color1>, commonPipeline) then
+  `project4d`: every pixel of the standardized image is scattered with 4D bilinear weights (tile coordinates of the lens centre `HexLightfieldGeometry::Project`
+  normalised by the image size x (541, 376), pixel coordinates of its normalised (u, v) x 14) times the hex aperture, accumulated with its weight in the
+  alpha channel and divided (alpha above 0.25 becomes 1, else 0: the corner holes). So the eslf tile mixes up to four hex lenses; it is not a lens image.
+- Effective ILLUM configuration = `InitializeScalarParametersBlitzenVersion1_1` (1004e2bf0): `scripts/re/cfgparse.py` extracts offset -> value from the
+  decompile (376 scalars). In commonPipeline: HotPixelCorrection on (0xa18, threshold 1.2), LF demosaic on (0x1478), ToneMap::Analyze always but Apply off
+  (0x1240 = 0), black level 64 from the LUT path off (0x40 on with an empty LUT -> RawInfo black), SaturationState threshold 0.98 (0xfd8).
+- Value response (G, constant raw 64..1023): linear above black 63..64 (slope 1/959 of the 16 bit range times about 0.855), then steeper above raw 600
+  (x1.8 per count at 800..950: highlight handling), clipped at 57000. Flat-field gain is a smooth bowl per lens (about 21000 at the centre of a 14 x 14 tile
+  to 60000 at the rim for a raw level of 500), not flat: the calibration modulation is divided out before the standardization.
+- Geometry: the tile (I, J) centre holds the source ray whose position xi_src (centre-based, units of image width/height, -0.5..0.5) satisfies
+  `xi_std = xi_src + dxy_norm(xi_src)` with xi_std = (I + 0.5) / 541 - 0.5 (eta likewise with 376) and dxy_norm the app's normalized ray warp table
+  (`parseRayWarp(...).at(x, y, 0, 0)`, scale 0.9687, i.e. the table scaled to fill the frame). kappa = 1.0000; the residual over the whole picture is about
+  -0.9 px (x) and -0.8 px (y) with 1 px noise, so the app's position mapping through the table is right to a pixel at u = v = 0. The radial displacement of
+  the table (up to 350 px at the edges, 50 px at mid radius) is what makes the tile spacing in the sensor 13.3 px at I = 100 and 15.0 px at the centre.
+- Still open: the (du, dv) part of the standardization (in-tile slope 0.85 .. 0.95 against 1.02), the exact interpolation filter, the hot pixel / saturation /
+  highlight stages, the calibration flat-field, and the Catmull-Rom ScaleImage (separable, 1024 sample LUT, kernel widened by the scale) at the end of
+  commonPipeline.
