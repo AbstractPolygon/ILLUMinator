@@ -269,9 +269,20 @@ export function correctedPlane(raw, cam, dev, g, vg, radius) {
     const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
     let gain = 0;
     for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
-    if (!(gain > 0) || isDefect(raw, width, i)) return;
-    if (raw[i] >= dev.saturated[ch]) plane.sat[i] = 1;
-    plane[i] = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
+    if (!(gain > 0)) return;
+    let value = raw[i];
+    if (isDefect(raw, width, i)) {
+      // HotPixelCorrectionImage::SimpleCorrection: the mean of the two same-colour neighbours along the smoother axis, if the pixel is
+      // 1.2 times brighter than it (cfg 0xa30) or above 0.99 of the white level.
+      const b = dev.black[ch];
+      const vert = Math.abs(raw[i - 2 * width] - raw[i + 2 * width]) + Math.abs(raw[i - width] - raw[i + width]);
+      const horiz = Math.abs(raw[i - 2] - raw[i + 2]) + Math.abs(raw[i - 1] - raw[i + 1]);
+      const est = (vert <= horiz ? raw[i - 2 * width] + raw[i + 2 * width] : raw[i - 2] + raw[i + 2]) * 0.5 - b;
+      if (value - b > 1.2 * est || value > 0.99 * dev.saturated[ch]) value = est + b;
+      else return;
+    }
+    if (value >= dev.saturated[ch]) plane.sat[i] = 1;
+    plane[i] = Math.max(0, value - dev.black[ch]) * dev.scale[ch] * gain;
   });
   return plane;
 }

@@ -311,3 +311,8 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
   on the v axis: inside if (|u| <= s and |v| <= s/sqrt3) or (|v| <= 2s/sqrt3 and |u| <= s and |v| + |u|/sqrt3 <= 2s/sqrt3), s = 0.5 * value.
   The earlier port used a full circle of radius 0.5 pitch. Against the engine on b4-1 (engine depth with exact lambda): MAE 7.26 -> 6.59, gradient ratio 0.70 -> 0.73.
 - Still unread: the main lens f-number argument of LightfieldLogic (a metadata value), so 0.857 assumes micro f-number = main f-number.
+- Scored against the engine on b4-1: the per-photo reading of NominalApertureFraction (micro f-number = sensorOffset.z / lensPitch = 1.85, main f-number 2.05 -> 0.9025) gives MAE 6.85,
+  the fixed 1 - 2/14 = 0.857 gives 6.59, so the app keeps 0.857 and `nominalAperture(cam)` stays unused until the f-number inputs are read correctly (the micro f-number
+  at +0x24 of HexMicrolensArrayModel and the `a` argument of LightfieldLogic are metadata-derived; one of them, or DiskMaxPitch, differs from my reading).
+- HotPixelCorrectionImage::SimpleCorrection (ported in `correctedPlane`): for each listed hot pixel, est = 0.5 * (sum of the two same-colour neighbours along the axis with the smaller
+  |far difference| + |near difference|); the pixel is replaced when 1.2 * est < value (cfg 0xa30) or value > 0.99. No measurable change on b4-1 (6.59 both).

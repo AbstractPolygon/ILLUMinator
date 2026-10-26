@@ -29,7 +29,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable } from './core/geometrytable.js';
-import { lytroSplat, nominalAperture as lytroNominalAperture, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
+import { lytroSplat, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -734,7 +734,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     // The engine keeps the table's defocus term in (no chief ray removal), so its depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false })),
     onProgress: (p) => progress('Splatting the rays', p),
-  }, { ...LYTRO_SPLAT, aperture: lytroNominalAperture(lf.cam), ...(dbg.splat || {}) });
+  }, { ...LYTRO_SPLAT, ...(dbg.splat || {}) });
   if (state.jobs.superres !== job) return { cancelled: true };
   progress('Filling holes', 0);
   const filled = dbg.noFill ? null : fillHoles(sp.acc, W, H);
