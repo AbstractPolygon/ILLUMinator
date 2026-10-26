@@ -402,7 +402,7 @@ export function nominalAperture(cam) {
   return Math.min(clamp01(ratio), clamp01(2 - ratio - k / 14));
 }
 
-export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine', nearest: true };
+export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -485,6 +485,20 @@ function nearestDepth(D, w, h, x, y) {
 // Lytro's per ray depth (FUN_1809b8280): walk the ray's depth from the
 // lowest to the highest depth near its lens and stop where the depth map at
 // the ray's landing place agrees. Returns lambda, or NaN for none.
+// BackProjectDepthMap::ComputeMinMaxDepthMap: the range of depths a ray is traced through comes from the minimum and maximum of the depth map in a
+// window as wide as the largest ray displacement can be: ceil(L * 0.5 + 0.5) lenses across and ceil(L / sqrt(3) + 0.5) rows down, L the largest
+// |lambda| (the depth map's pixel is one lens in the engine, here one row step). The engine builds the window by passes of 3 with strides 1, 2, 4, ...,
+// so its radius is the first of 1, 3, 7, 15, ... that reaches that.
+function minMaxRadius(depth, w, h, g, unit) {
+  let big = 0;
+  for (let i = 0; i < depth.length; i++) big = Math.max(big, Math.abs(depth[i]));
+  const L = big / LAMBDA_TO_ALPHA;
+  const target = Math.max(Math.ceil(L * 0.5 + 0.5) * g.pitch / unit, Math.ceil(L / Math.sqrt(3) + 0.5));
+  let r = 1;
+  while (r < target && r < Math.max(w, h)) r = r * 2 + 1;
+  return r;
+}
+
 function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
   let far = Infinity;
   const near = opts.nearest;
@@ -493,7 +507,7 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
     // RayTraceRegion reads the depth map at the texel the ray falls in (no interpolation)
     const d = (near ? nearestDepth(D, lw, lh, lx - a * rdu, ly - a * rdv) : sampleDepth(D, lw, lh, lx - a * rdu, ly - a * rdv)) / LAMBDA_TO_ALPHA;
     if (Math.abs(d - lam) < opts.tolA) return d;
-    if (d < lam && far !== Infinity && far - d < opts.tolB) {
+    if (d < lam && far !== Infinity && far > lam && far - d < opts.tolB) {
       const t = far - (lam - opts.step);
       return ((d - far) * t) / ((lam - d) + t) + far;
     }
@@ -584,8 +598,9 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       zMap[j * W + k] = sampleDepth(depth, lw, lh, sx / scale - 0.5, sy / scale - 0.5) / LAMBDA_TO_ALPHA;
     }
   }
-  const lo = depthFilter(depth, lw, lh, opts.reach, Math.min);
-  const hi = depthFilter(depth, lw, lh, opts.reach, Math.max);
+  const reach = opts.reach === 'engine' ? minMaxRadius(depth, lw, lh, g, unit) : opts.reach;
+  const lo = depthFilter(depth, lw, lh, reach, Math.min);
+  const hi = depthFilter(depth, lw, lh, reach, Math.max);
   const acc = new Float32Array(W * H * 4);
   const rgb = [0, 0, 0];
   const r2 = radius * radius;
@@ -599,6 +614,16 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       if (au > apothem || av > 2 * hexRise || (av > hexRise && av + au / Math.sqrt(3) > 2 * hexRise)) return;
     } else if (u * u + v * v > r2) return;
     if (dm ? !(plane[i] === plane[i] && dm.at(x, y, rgb)) : !rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
+    if (globalThis.__diagBins) {
+      const dg = globalThis.__diagBins;
+      const cxm = x - (cosR * u - sinR * v);
+      const cym = y - (sinR * u + cosR * v);
+      if (cxm > cam.width * 0.4 && cxm < cam.width * 0.6 && cym > cam.height * 0.4 && cym < cam.height * 0.6) {
+        const rr = Math.min(dg.n - 1, Math.floor((Math.hypot(u, v) / g.pitch) * dg.n * 2));
+        dg.sum[rr] += rgb[1];
+        dg.cnt[rr]++;
+      }
+    }
     let lx = (lensX - xMin) / unit;
     let ly = (lensY - yMin) / unit;
     let ru = u;
