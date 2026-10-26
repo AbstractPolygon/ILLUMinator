@@ -722,6 +722,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   const { W, H } = superResParams(sampler, { scale });
   const cs = colorState(color);
   const dbg = globalThis.__lytro || {};
+  if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
+  if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
   progress('Splatting the rays', 0);
   const sp = lytroSplat({
     raw: lf.raw, cam: lf.cam, dev, grid: lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
@@ -1199,6 +1201,7 @@ async function ensureDepth(id) {
     if (globalThis.__finalDepthDump) globalThis.__finalDepthDump(state.depthRaw.alpha, centerView(), outW, outH);
     applyDepthSmoothing();
   }
+  if (globalThis.__depthOverride && state.depth) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
   return true;
 }
 

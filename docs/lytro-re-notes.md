@@ -226,3 +226,14 @@ MRF smoothness: +0x8c = 6.0 (truncation in label steps) and +0x90 = 0.1 (slope p
 +0x94 edge-adaptive smoothness on, +0x98 colour threshold 0.2, +0x9c edge weight 0.5 (BuildEdgeAdaptiveSmoothnessCost: weight = 1 where
 |dR| + 2|dG| + |dB| <= 0.2 between the two pixels, else 0.5, one weight image for horizontal and one for vertical pairs); +0xa0 median filter on.
 Config rows still to read: plane fitting (+0xa4, +0xa8, +0xac, +0xb0, +0xb4, +0xb8, +0xbc) and the cost volume (DepthMapCreateDataCostSimpleSubset::Run).
+
+### Where the app and the engine differ (measured against `tnt`, photo b4-1, sharpening and noise reduction off)
+- The depth the app really uses there is Lytro Desktop's own (from stack.lfp): mean difference from the engine's own depth map is 1.2 lambda; fence edges are
+  smoother and a little thicker in the app, and the engine's are jagged (the engine does not smooth them).
+- Local shift between the app's render and the engine's, regressed on the engine's depth: dx = -0.097 px/lambda * lambda - 0.33 px (dy slope -0.018): the
+  app's reference viewpoint is offset from the engine's, so near objects (the fence wire) land 1-3 px away. Largest error region of the photo.
+- The photo metadata carries `lens.opticalCenterOffset` (x -2.5e-5 m, y -4.8e-5 m = -18 px, -34 px at the 1.4 um pitch), `lens.exitPupilOffset.z`, `lens.infinityLambda`,
+  `focalLength`, `zoomStep`, `focusStep`. The app reads only infinityLambda. The engine builds its disc geometry from them:
+  `HexMicrolensArrayModel::DiskCenter(i, j, MainLensModel, SensorModel, scale)` = lattice centre, rotated by the MLA rotation, with the pitch scaled by
+  (exitPupil + mlaZ / c) / exitPupil, and the sensor offset added; `HexDiskArrayModel(CameraModel)` fills the lattice basis from it.
+- My `lytroEdof` port (filter bank, hole fill) is not better than the app's EDOF: MAE 7.6 and gradient ratio 0.64 against 4.6 and 1.03, with colour fringes.
