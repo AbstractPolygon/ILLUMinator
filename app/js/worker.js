@@ -29,7 +29,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable } from './core/geometrytable.js';
-import { lytroSplat, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
+import { lytroSplat, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -752,7 +752,23 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     }
   }
   let out = img;
-  if (!dbg.noBank && lf.reconFilter) {
+  if (!dbg.noBank && dbg.bank !== 'photo') {
+    progress('Reconstructing with the filter bank', 0);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let p = 0; p < W * H; p++) {
+      const z = sp.zMap[p];
+      if (z < lo) lo = z;
+      if (z > hi) hi = z;
+    }
+    // the standardized lightfield: 14 px disks
+    const imgW = (lf.cam.width * 14) / lf.grid.pitch;
+    const imgH = (lf.cam.height * 14) / lf.grid.pitch;
+    const bank = buildEngineBank(W, H, imgW, imgH, lo, hi);
+    const r = applyBank(img, sp.zMap, W, H, bank);
+    out = r.rgb;
+    for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
+  } else if (!dbg.noBank && lf.reconFilter) {
     progress('Reconstructing with the filter bank', 0);
     if (!state.reconSource) state.reconSource = bankKernels(await decodePngRgb(new Uint8Array(lf.reconFilter.png)), lf.reconFilter.meta);
     const bank = buildBank(state.reconSource, W, H, { ...LYTRO_BANK, ...(dbg.bank || {}) });

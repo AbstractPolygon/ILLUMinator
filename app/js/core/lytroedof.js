@@ -4,6 +4,7 @@
 // reconstructionFilterRef) reconstructs the picture from the splat.
 
 import { lensWarp } from './lens.js';
+import { FILTER_DESCRIPTORS } from './lytrofilters.js';
 
 // ---- the photo's reconstruction filter bank --------------------------------
 
@@ -225,6 +226,101 @@ export function buildBank(src, W, H, opts = BANK) {
     out.push(rank1(c, nw, nh));
   }
   return { filters: out, tiles, tilesX: meta.numKernelsX, tilesY: meta.numKernelsY, lambdas: meta.lambdas };
+}
+
+
+// ---- the engine's own reconstruction filters (RefocusEdof::computeReconstructionFilterBank) ----
+//
+// For every lambda step (0.25) and axis the engine builds a 1D filter: the two descriptors around lambda (InitializeFilterDescriptorsBlitzenVersion1_1)
+// each give a magnitude response sampled at frequencies hf / size (cycles per pixel, up to Nyquist), designed by SpecifiedBandsFilter::DesignFilter
+// (linear phase, the inverse DFT of the sampled response, N = 2^ceil(log2(cell)) + 1 taps with cell = (|lambda| + disk pitch) / (image size / output
+// size)) and blended linearly by the distance of lambda to their thresholds.
+
+const PI32 = 3.1415927410125732;
+
+function designTaps(freqs, mags, size, taps) {
+  const N = Math.max(3, taps);
+  const M = 2 ** Math.ceil(Math.log2(N)) + 1;
+  // the sparse response: points (f / size, mag) while f <= size / 2, linear between them, 0 outside
+  const px = [];
+  const py = [];
+  for (let i = 0; i < freqs.length; i++) {
+    if (size * 0.5 < freqs[i]) break;
+    px.push(Math.fround(freqs[i] / size));
+    py.push(mags[i]);
+  }
+  const resp = (f) => {
+    if (!px.length || f < px[0] || f > px[px.length - 1]) return 0;
+    let j = 0;
+    while (j + 1 < px.length - 1 && px[j + 1] <= f) j++;
+    if (px.length === 1) return py[0];
+    const t = (f - px[j]) / (px[j + 1] - px[j]);
+    return py[j] * (1 - t) + py[j + 1] * t;
+  };
+  const n = 2 * M - 2;
+  const re = new Float64Array(n);
+  const im = new Float64Array(n);
+  const phase = Math.trunc((1 - N) / 2) * PI32;
+  for (let i = 0; i < M; i++) {
+    const f = (i / (M - 1)) * 0.5;
+    const mag = resp(f);
+    const th = 2 * f * phase;
+    re[i] = Math.cos(th) * mag;
+    im[i] = Math.sin(th) * mag;
+    if (i > 0 && i < M - 1) {
+      re[n - i] = re[i];
+      im[n - i] = -im[i];
+    }
+  }
+  // inverse DFT (angle +2 pi j k / n, scaled by 1 / n), the real part of the first N samples
+  const out = new Float64Array(N);
+  for (let k = 0; k < N; k++) {
+    let sum = 0;
+    for (let j = 0; j < n; j++) {
+      const a = (2 * PI32 * j * k) / n;
+      sum += Math.cos(a) * re[j] - Math.sin(a) * im[j];
+    }
+    out[k] = sum / n;
+  }
+  return out;
+}
+
+// the descriptors around lambda: [lower, upper, weight of lower]
+function bracket(lam) {
+  const D = FILTER_DESCRIPTORS;
+  let up = 0;
+  while (up < D.length - 1 && !(lam <= D[up].lambda)) up++;
+  let lo = D.length - 1;
+  while (lo > 0 && !(D[lo].lambda <= lam)) lo--;
+  if (up === lo) return [D[lo], D[up], 1];
+  const du = Math.abs(lam - D[up].lambda);
+  const dl = Math.abs(lam - D[lo].lambda);
+  return [D[lo], D[up], du / (dl + du)];
+}
+
+// Filter taps along one axis: size is the output picture size on that axis, cell the projected disk pitch in output pixels.
+function engineAxisFilter(lam, axis, size, cell) {
+  const taps = 2 ** Math.ceil(Math.log2(cell)) + 1;
+  const [lo, up, w] = bracket(lam);
+  const f = axis === 0 ? ['hf', 'hm'] : ['vf', 'vm'];
+  const a = designTaps(lo[f[0]], lo[f[1]], size, taps);
+  if (lo === up) return a;
+  const b = designTaps(up[f[0]], up[f[1]], size, taps);
+  return Float64Array.from(a, (v, i) => v * w + b[i] * (1 - w));
+}
+
+// A bank for applyBank: one filter per lambda step, no tiles. imgW, imgH: size of the standardized lightfield, diskPitch its disk pitch (14).
+export function buildEngineBank(W, H, imgW, imgH, lamMin, lamMax, { diskPitch = 14, step = 0.25 } = {}) {
+  const lo = Math.floor(lamMin / step) * step;
+  const hi = Math.ceil(lamMax / step) * step;
+  const lambdas = [];
+  const filters = [];
+  for (let l = lo; l <= hi + 1e-9; l += step) {
+    lambdas.push(l);
+    const cell = Math.max(((Math.abs(l) + diskPitch) * W) / imgW, ((Math.abs(l) + diskPitch) * H) / imgH);
+    filters.push({ row: engineAxisFilter(l, 0, W, cell), col: engineAxisFilter(l, 1, H, cell) });
+  }
+  return { filters, tiles: 1, tilesX: 1, tilesY: 1, lambdas };
 }
 
 // ---- the splat ---------------------------------------------------------------

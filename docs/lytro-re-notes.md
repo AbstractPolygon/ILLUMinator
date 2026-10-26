@@ -316,3 +316,16 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
   at +0x24 of HexMicrolensArrayModel and the `a` argument of LightfieldLogic are metadata-derived; one of them, or DiskMaxPitch, differs from my reading).
 - HotPixelCorrectionImage::SimpleCorrection (ported in `correctedPlane`): for each listed hot pixel, est = 0.5 * (sum of the two same-colour neighbours along the axis with the smaller
   |far difference| + |near difference|); the pixel is replaced when 1.2 * est < value (cfg 0xa30) or value > 0.99. No measurable change on b4-1 (6.59 both).
+
+## The engine's reconstruction filters (RefocusEdof::computeReconstructionFilterBank), ported as `buildEngineBank`
+- For every lambda step (kLambdaStep 0.25) and each axis: `LightfieldLogic::ReconstructionFilter(config, size, aperture, lambda, 1.0, subsampling 0, axis)`.
+  It takes the descriptor list at config 0x4b0 (scale >= 0.5; the list at 0x4d8 is for the subsampled case): 27 `SpecifiedBandsFilterDescriptor`s from
+  `InitializeFilterDescriptorsBlitzenVersion1_1`, thresholds -34 -30 -28 -27 -21 -19 -17 -13 -10 -8 -6 -3 -2 -1 0 1 2.05 2.5 3.5 4 6 8.61 10 15 18 21 30, each with a magnitude
+  response hm (x) and vm (y) at 17 frequencies hf, vf (multiples of 64.75 cycles per picture width, designed for a 2072 px picture); tables in `app/js/core/lytrofilters.js`.
+  The filter at lambda is the lower descriptor (last threshold <= lambda) and the upper one (first threshold >= lambda) blended w * lower + (1 - w) * upper with
+  w = |lambda - upper| / (|lambda - lower| + |lambda - upper|); a single descriptor outside the range or on a threshold.
+- `SpecifiedBandsFilter::DesignFilter`: N = 2^ceil(log2(cell)) + 1 taps, cell = max over axes of (|lambda| + disk pitch) / (standardized image size / output size), disk pitch 14.
+  Magnitude points (hf / size, hm) while hf <= size / 2, linear between, 0 outside; M = 2^ceil(log2 N) + 1 samples at f = i / (M - 1) / 2 with the linear phase
+  exp(i 2 pi f * trunc((1 - N) / 2)), Hermitian mirror to 2M - 2 points, inverse DFT (+ angle, 1 / n), tap k (centre N / 2) = the real part at k. No window, no normalisation
+  (the depth masked passes divide by the weighted kernel sum).
+- Against the engine on b4-1 (engine depth): MAE 6.58 with these kernels, 6.59 with the photo's own 8 bit kernel bank, so the two agree and the remaining softness is elsewhere.
