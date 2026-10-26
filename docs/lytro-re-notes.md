@@ -299,3 +299,15 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
 - The standardized image is the processed sensor image scaled (Catmull-Rom ScaleImage) by 14/pitch to 7574 x 5264; lens pitch is about 14 std px.
 - ILLUM effective config: ProductID 2, ConfigVersion 1 -> GetBlitzenVersion1_1Configuration; ToneMap::Apply is off.
 - Port: `lytroSplat({ rayWarp })` takes the table evaluator (`parseRayWarp(..., { tilt: false })`), corrects each ray's lens position and direction, and skips the post-hoc lens warp. `__lytro.noTable` turns it off.
+
+## Saturation recovery and the EDOF aperture (Mach-O `tnt`), ported in lytroedof.js
+- `SaturationState::Init`: mask = mosaic value > cfg 0xfd8 (0.98 on ILLUM). `SaturationRecoveryDiffusion` (ILLUM config mode 1, run on the Color1<float> mosaic
+  before ProcessRawImage; mode 0 would run it after the demosaic): 20 in-place raster sweeps over x, y = 2 .. size-3; a masked pixel becomes
+  max(own, mean of 4 same-colour neighbours) with the diagonals at green sites and the pixels two away (up, down, left, right) at red and blue (weight 0.25).
+  The optional clamp to the Color4 limits is off (cfg 0x1068 = 0). Our port: saturated pixels keep their gained value and are diffused (`diffuseSaturation`).
+- The EDOF aperture is `HexAperture(value, rotation, mlaAligned)` with value = `LightfieldLogic::NominalApertureFraction` =
+  min(clamp(FNumberMicrolens / f), clamp(2 - FNumberMicrolens / f - K / DiskMaxPitch)), K = 2.0 for ILLUM (ProductID 2). On the 14 px standardized
+  lightfield that is 1 - 2/14 = 0.857 when the f-numbers match. The shape is a hexagon, flat sides at |u| = 0.5 * value (lens pitches, row direction), corners
+  on the v axis: inside if (|u| <= s and |v| <= s/sqrt3) or (|v| <= 2s/sqrt3 and |u| <= s and |v| + |u|/sqrt3 <= 2s/sqrt3), s = 0.5 * value.
+  The earlier port used a full circle of radius 0.5 pitch. Against the engine on b4-1 (engine depth with exact lambda): MAE 7.26 -> 6.59, gradient ratio 0.70 -> 0.73.
+- Still unread: the main lens f-number argument of LightfieldLogic (a metadata value), so 0.857 assumes micro f-number = main f-number.

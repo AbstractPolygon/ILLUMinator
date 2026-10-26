@@ -233,7 +233,10 @@ import { forEachLensPixel, tileWeights, isDefect, sampleDepth, depthFilter } fro
 import { LAMBDA_TO_ALPHA } from './recipe.js';
 import { createLfDemosaic } from './lfdemosaic.js';
 
-export const SPLAT = { aperture: 1.0, tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine' };
+// aperture: the engine's HexAperture value, LightfieldLogic::NominalApertureFraction = min(micro f-number / main f-number, 2 - that - 2 / pitch)
+// clamped to 0..1, which is 1 - 2/14 on the 14 px standardized lightfield; 'hex' is HexAperture's shape (apothem 0.5 * value lens pitches),
+// 'circle' the earlier disc of radius 0.5 * value.
+export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine' };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -374,7 +377,11 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const { width } = cam;
   const unit = g.rowStep;
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
-  const radius = g.pitch * opts.aperture * 0.5;
+  const hex = opts.shape !== 'circle';
+  const apothem = g.pitch * opts.aperture * 0.5;
+  // the pixels to read reach the hexagon's corners
+  const radius = hex ? (apothem * 2) / Math.sqrt(3) : apothem;
+  const hexRise = apothem / Math.sqrt(3);
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2);
   const dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   // With the camera's ray table every ray carries the distortion correction itself (as in the engine), so there is no picture warp afterwards.
@@ -400,7 +407,12 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   let count = 0;
   let accepted = 0;
   forEachLensPixel(g, cam, radius, (i, x, y, u, v, lensX, lensY) => {
-    if (u * u + v * v > r2) return;
+    if (hex) {
+      // HexAperture::operator()(u, v): flat sides at |u| = apothem, corners on the v axis (u, v are in the lens array's own frame)
+      const au = Math.abs(u);
+      const av = Math.abs(v);
+      if (au > apothem || av > 2 * hexRise || (av > hexRise && av + au / Math.sqrt(3) > 2 * hexRise)) return;
+    } else if (u * u + v * v > r2) return;
     if (dm ? !(plane[i] === plane[i] && dm.at(x, y, rgb)) : !rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
     let lx = (lensX - xMin) / unit;
     let ly = (lensY - yMin) / unit;
