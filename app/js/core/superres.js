@@ -185,16 +185,19 @@ function sampleBilinear(img, w, h, x, y) {
 //    lens, so every depth is sharp (base should then be a single view).
 // Output size and splat settings of a full resolution render (shared with
 // the GPU version in gpu/renderer.js).
+// Share of each lens disc whose samples are used.
+export const DISC = { fraction: 0.45, sigma: null, bilinear: false };
+
 export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, sigma, aperture } = {}) {
   // At higher output scales there are fewer samples per output pixel; wider
   // splats keep them covering evenly.
-  sigma ??= 0.6 * Math.max(1, scale / 3);
+  sigma ??= DISC.sigma ?? 0.6 * Math.max(1, scale / 3);
   // 0.45 of each lens disc: measured against Lytro Desktop's pictures, much
   // more of the fine detail they show than 0.36 (a third of the detail
   // energy gone at 0.36 on the wall photo) and less noise; the price is a
   // faint dotted pattern with the lens spacing on smooth surfaces, which
   // the lattice and edge smoothing steps hold down.
-  aperture ??= 0.45;
+  aperture ??= DISC.fraction;
   const { grid: g, outW, outH, detail } = sampler;
   const rUse = g.pitch * aperture;
   return {
@@ -592,8 +595,13 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       for (let k = 0; k < taps; k++) {
         const ex = px - reach + k - ox;
         const ey = py - reach + k - oy;
-        wx[k] = Math.exp(-ex * ex * inv2s2);
-        wy[k] = Math.exp(-ey * ey * inv2s2) * conf;
+        if (DISC.bilinear) {
+          wx[k] = Math.max(0, 1 - Math.abs(ex));
+          wy[k] = Math.max(0, 1 - Math.abs(ey)) * conf;
+        } else {
+          wx[k] = Math.exp(-ex * ex * inv2s2);
+          wy[k] = Math.exp(-ey * ey * inv2s2) * conf;
+        }
       }
       for (let j = 0; j < taps; j++) {
         let o = (py - reach + j) * W + px - reach;
