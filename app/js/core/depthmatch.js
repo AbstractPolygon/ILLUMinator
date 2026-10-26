@@ -304,7 +304,8 @@ export function measureMatch(views, w, h, { onProgress } = {}) {
   const n = w * h;
   const c = Math.floor(views.length / 2);
   const colors = viewColors(views, n, w, h);
-  const count = Math.floor((P.top - P.first) / P.step) + 1;
+  // The label list is padded to a multiple of four with further labels (FUN_1809b0060).
+  const count = Math.ceil((Math.floor((P.top - P.first) / P.step) + 1) / 4) * 4;
   const alphas = Array.from({ length: count }, (_, i) => (P.first + i * P.step) * P.lambda);
   const refs = P.refs ?? views.map((_, k) => k);
   if (!refs.includes(c)) refs.push(c);

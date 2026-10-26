@@ -756,7 +756,8 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
   const V = views.length;
   if (V > MAX_VIEWS) throw new Error('Too many views for the GPU depth');
   const c = Math.floor(V / 2);
-  const count = Math.floor((P.top - P.first) / P.step) + 1;
+  // The label list is padded to a multiple of four with further labels (FUN_1809b0060).
+  const count = Math.ceil((Math.floor((P.top - P.first) / P.step) + 1) / 4) * 4;
   const fineCount = P.adapt.on ? P.adapt.fine : count;
   if (Math.max(count, fineCount) > MAX_LABELS) throw new Error('Too many depth labels for the GPU');
   const alphas = Array.from({ length: count }, (_, i) => (P.first + i * P.step) * P.lambda);
