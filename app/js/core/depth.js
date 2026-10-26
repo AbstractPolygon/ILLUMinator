@@ -1001,7 +1001,7 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
     });
     if (DEPTH_TRWS.on) {
       const cv = views[Math.floor(views.length / 2)];
-      return bestDepth(trwsVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_TRWS), alphas, n);
+      return bestDepth(trwsVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_TRWS), alphas, n, DEPTH_MATCH.dataParabola ? scores : null);
     }
     if (DEPTH_MRF.on) {
       const cv = views[Math.floor(views.length / 2)];
@@ -1047,7 +1047,11 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
 
 // From the scores (higher = better) of each trial depth: the best depth per
 // pixel (sub-step by a parabola through the peak), its cost and the mean cost.
-export function bestDepth(scores, alphas, n) {
+// With `dataScores` (the aggregated match scores the smoothing started from),
+// the maker's tool takes the whole label from the smoothed volume and then
+// moves it by a parabola through the three match costs around that label
+// (only where the costs curve upward, and by less than one step).
+export function bestDepth(scores, alphas, n, dataScores = null) {
   const steps = alphas.length;
   const alpha = new Float32Array(n);
   const cost = new Float32Array(n);
@@ -1071,6 +1075,17 @@ export function bestDepth(scores, alphas, n) {
     }
     alpha[i] = alphas[best] + offset * step;
     cost[i] = -scores[best][i];
+    if (dataScores && best > 0 && best < steps - 1) {
+      // costs are the negated scores
+      const cm = -dataScores[best - 1][i];
+      const c0 = -dataScores[best][i];
+      const cp = -dataScores[best + 1][i];
+      const den = cp + cm - 2 * c0;
+      if (den > 0) {
+        const o = ((cp - cm) / (den * 2)) * step;
+        if (Math.abs(o) < step) alpha[i] = alphas[best] - o;
+      }
+    }
   }
   return { alpha, cost, meanCost };
 }
@@ -1270,7 +1285,7 @@ export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confide
 // default clean-up chain).
 // The match style's depth labels: whole steps of one lambda unit
 // (LAMBDA_ALPHA alpha each) from -35 up to `top` lambda.
-export const DEPTH_MATCH = { subLabel: false, first: -35, top: 8, lambda: 0.0814, adapt: { on: true, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 } };
+export const DEPTH_MATCH = { dataParabola: true, subLabel: false, first: -35, top: 8, lambda: 0.0814, adapt: { on: true, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 } };
 const SEARCH_CLASSIC = { ...DEPTH_SEARCH };
 const STYLE_CLASSIC = { lcost: { on: false }, cbca: { on: false }, trws: { on: false }, direct: { on: false }, coarse: null };
 export function setDepthStyle(style) {

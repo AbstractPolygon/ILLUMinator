@@ -29,3 +29,20 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
 - stack.lfp holds Lytro's own EDOF renders (edofWarp acceleration): seven perspective images plus edof_preview.jpg, 2022x1404 with suggestedOverscan (43, 57), and a 541x376 lambda depth map. pitchRatio (3.7429 x, 3.7337 y) is output pixels per lens pitch.
 - Our render at ideal scale (0.81042 of our scale-4 grid, i.e. pitchRatio.x / (4 / rowStep) / pitch) overlays edof_preview.jpg within about 1 px and 0.1-0.3 % scale on all photos tried (zoom -483 to 477): the geometry (with our default lens correction) is not the main error. The per-photo scale differences seen against full_lytro.npy come from that capture's own crop.
 - edof_preview is a cleaner target than full_lytro: no unknown crop, same pixel grid for every photo.
+
+## Depth finishing and solver (decompiled, checked against our code)
+
+- Smoothness weights (`FUN_1809ae5a0`): for the right and lower neighbour,
+  `|dR| + 2|dG| + |dB| <= 0.2` gives weight 1.0, otherwise 0.5 (presets 0x2f40/0x2f70). Same as `trwsVolume`.
+- Multiview depth uses `MRFSolverTRWS` (the `MRFSolverBP` constructor is called from another class). Slot 1 runs
+  the iteration loop (10 iterations, direction alternates on odd iterations); slot 4 is the per-pixel message update:
+  belief = data + four incoming messages, message = truncated-linear transform (slope = p[0x2ee0] x weight,
+  cap = 6 x slope) of 0.5 x belief minus the message back. Same as `trwsVolume`.
+- Finishing after the solver (presets 0x3128 and 0x30c8 are on in all six presets):
+  1. `FUN_1809b3c40`: parabola through the three aggregated data costs around the chosen label,
+     applied only where the second difference is positive and the shift is under one label step.
+     The chosen label comes from the smoothed result; the data volume, not the belief, supplies the parabola.
+  2. `FUN_1809b2120`: 3x3 median of the depth, borders untouched.
+- Plane prior (`FUN_1809b0b90` RANSAC plane per superpixel + `FUN_1809b3e90` cost term) is behind 0x3860, which is
+  off in every preset; it is not part of the shipped pipeline.
+- Port: `bestDepth(..., dataScores)` with `DEPTH_MATCH.dataParabola` (on). Not yet scored against Lytro's depth maps.
