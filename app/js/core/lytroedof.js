@@ -323,6 +323,65 @@ export function buildEngineBank(W, H, imgW, imgH, lamMin, lamMax, { diskPitch = 
   return { filters, tiles: 1, tilesX: 1, tilesY: 1, lambdas };
 }
 
+
+// ---- the engine's lens lattice (HexMicrolensArrayModel::DiskPitch / DiskCenter) ----------------------------
+//
+// The disks are not the lenses: the engine scales the lens pitch by (exit pupil + sensor offset z / 1000) / exit pupil (all in millimetres / micrometres as
+// the metadata reader converts them), anchors the lattice so that disk (0, 0) is the one containing the sensor centre plus the mla's sensor offset, rotates it
+// by the mla rotation and applies the mla's x and y scale factors. Returns a grid object like the app's own (pitch, rowStep, rotation, ox, oy).
+export function engineGrid(metadata, width, height, near = null) {
+  const f = Math.fround;
+  const dev = metadata.devices;
+  const mla = dev.mla;
+  const lens = dev.lens;
+  const pp = f(dev.sensor.pixelPitch * 1e6);
+  const E = f(lens.exitPupilOffset.z * 1000);
+  const P = f(mla.lensPitch * 1e6);
+  const ox = f(mla.sensorOffset.x * 1e6);
+  const oy = f(mla.sensorOffset.y * 1e6);
+  const oz = f(mla.sensorOffset.z * 1e6);
+  const sx = f(mla.scaleFactor.x);
+  const sy = f(mla.scaleFactor.y);
+  const th = f(mla.rotation);
+  const S3 = 0.8660254;
+  const dp = f(f(f(f(oz / 1000) + E) * P) / E);
+  const cx0 = f(f(f(width * pp) * 0.5) + ox);
+  const cy0 = f(f(f(height * pp) * 0.5) + oy);
+  const c = f(Math.cos(-th));
+  const s = f(Math.sin(-th));
+  const rowUm = f(f(dp * S3) * sy);
+  const rowIdx = Math.floor(cy0 / rowUm);
+  const off = rowIdx & 1 ? f(0.5 * dp * sx) : 0;
+  const x9 = f(f(cx0 * c - s * cy0) + off);
+  const dpx = f(sx * dp);
+  const col = Math.floor(x9 / dpx);
+  const x = f(f(x9 - f(col * dpx)) / pp);
+  const y = f(f(f(c * cy0 + cx0 * s) - f(f(f(rowIdx * S3) * dp) * sy)) / pp);
+  const ct = Math.cos(th);
+  const st = Math.sin(th);
+  const grid = {
+    pitch: f(dpx / pp),
+    rowStep: f(f(dp / pp) * S3 * sy),
+    rotation: th,
+    ox: ct * x - st * y,
+    oy: ct * y + st * x,
+  };
+  // the same lattice, anchored at the disk nearest `near` (the app's lens rows and columns count from its own origin)
+  if (near) {
+    const dx = near.ox - grid.ox;
+    const dy = near.oy - grid.oy;
+    const lx = ct * dx + st * dy;
+    const ly = -st * dx + ct * dy;
+    const r = Math.round(ly / grid.rowStep);
+    const c = Math.round((lx - (r & 1) * grid.pitch * 0.5) / grid.pitch);
+    const px = c * grid.pitch + (r & 1) * grid.pitch * 0.5;
+    const py = r * grid.rowStep;
+    grid.ox += ct * px - st * py;
+    grid.oy += st * px + ct * py;
+  }
+  return grid;
+}
+
 // ---- the splat ---------------------------------------------------------------
 
 import { forEachLensPixel, tileWeights, isDefect, sampleDepth, depthFilter } from './superres.js';
@@ -662,7 +721,7 @@ function reduce(src, w, h) {
   return { data: out, w: nw, h: nh };
 }
 
-export const FILL = { full: 1, scale: 1, small: 1, minSize: 20, levels: 10, sweeps: 3 };
+export const FILL = { full: 0.99, scale: 1000, small: 1, minSize: 20, levels: 10, sweeps: 3 };
 
 // The premultiplied splat as a picture (alpha 1 wherever anything reached it).
 export function fillHoles(acc, W, H, o = FILL) {
