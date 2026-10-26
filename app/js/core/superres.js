@@ -186,7 +186,7 @@ function sampleBilinear(img, w, h, x, y) {
 // Output size and splat settings of a full resolution render (shared with
 // the GPU version in gpu/renderer.js).
 // Share of each lens disc whose samples are used.
-export const DISC = { fraction: 0.45, sigma: null, bilinear: false };
+export const DISC = { fraction: 0.45, sigma: null, bilinear: false, flat: false };
 
 export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, sigma, aperture } = {}) {
   // At higher output scales there are fewer samples per output pixel; wider
@@ -499,7 +499,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       }
       const du = u - u0;
       const dv = v - v0;
-      const conf = (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
+      const conf = DISC.flat ? (u * u + v * v < rUse * rUse ? 1 : 0) : (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
       if (conf < 1e-3) return;
       let lx = (lensX - xMin) / unit;
       let ly = (lensY - yMin) / unit;
@@ -754,6 +754,18 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     sumUp += upY[p];
     sumSharp += sharpY[p];
   }
+  if (allInFocus && depth && EDGE_ARTIFACT.on) {
+    // Lytro's edge artifact reduction, on the depth of every output pixel in focus units.
+    const D = new Float32Array(W * H);
+    for (let j = 0; j < H; j++) {
+      for (let k = 0; k < W; k++) {
+        const [sx, sy] = warp ? warp.source(k + 0.5, j + 0.5) : [k + 0.5, j + 0.5];
+        D[j * W + k] = sampleDepth(rayDepth, bw, bh, (sx / scale) * detail, (sy / scale) * detail) / LAMBDA_TO_ALPHA;
+      }
+    }
+    if (globalThis.__earStats) { let m = 0; let dsteps = 0; for (let p = 0; p < W * H; p++) { m += sharpY[p]; if (p + 1 < W * H && Math.abs(D[p + 1] - D[p]) > EDGE_ARTIFACT.depth) dsteps++; } globalThis.__earStats.meanY = m / (W * H); globalThis.__earStats.depthSteps = dsteps; }
+    edgeArtifactReduce(sharpY, W, H, D);
+  }
   const pattern = removeLatticePattern(sharpY, upY, focus, wsum, W, H, lattice);
   if (bestDis) {
     if (globalThis.__disStats) { const a = Float32Array.from(bestDis).sort(); globalThis.__disStats = [0.5, 0.75, 0.9, 0.95, 0.99].map((q) => a[Math.floor(q * (a.length - 1))]); }
@@ -807,6 +819,13 @@ export const TAP_DEPTH = { on: false, sigma: 0.1 };
 // Per-ray depth match at depth edges: a ray that could belong to a nearer or a
 // farther surface lands where its own color agrees with the picture.
 export const RAY_MATCH = { on: true, radius: 3, gap: 0.5, margin: 0.7 };
+// Lytro Desktop's edge artifact reduction (FUN_180bcd480; thresholds are its
+// presets' values: depth step 3, image step 0.5, second difference 0.1). Along
+// rows, then columns, where the depth steps by more than `depth` between two
+// pixels but the picture does not show a real edge there (a small step and a
+// smooth ramp on both sides: a halo from rays that took the wrong depth), the
+// pair is replaced by its cubic interpolation, a clean two-pixel transition.
+export const EDGE_ARTIFACT = { on: true, depth: 3, image: 0.5, curve: 0.1 };
 export const ROBUST_EDGE = { on: false, tol: 0.25, minCount: 4, sigma: 0.0177, cut: 1.0, radius: 4, step: 0.3, capacity: 40 };
 export const RAY_MARCH = { on: true };
 export const DITHER_FIX = { on: true, low: 0.06, high: 0.35, sigma: 0.6 };
@@ -817,6 +836,86 @@ export const BACK_PROJECTION_EDGE = { on: true, step: 0.3, radius: 4 };
 
 // 1 within `radius` depth pixels of a step between neighbors (right or below)
 // of at least `step` lambda, softened by a 3 x 3 mean; 0 elsewhere.
+
+export function edgeArtifactReduce(a, W, H, D, { depth = EDGE_ARTIFACT.depth, image = EDGE_ARTIFACT.image, curve = EDGE_ARTIFACT.curve } = {}) {
+  const A = 0.5625;
+  const B = 0.1875;
+  const pass = (src, dst, count, lines, at, along) => {
+    for (let l = 3; l < lines - 3; l++) {
+      let flagged = false;
+      for (let i = 3; i < count - 3; i++) {
+        const p = at(l, i);
+        if (!(Math.abs(D[p + along] - D[p]) > depth)) continue;
+        const c4 = src[p];
+        const c5 = src[p - along];
+        const c6 = src[p - 2 * along];
+        const c7 = src[p + along];
+        const c8 = src[p + 2 * along];
+        const c9 = src[p + 3 * along];
+        let step = Math.abs(c7 - c4);
+        let bend = Math.abs(c9 - 2 * c8 + c7) + Math.abs(c6 - 2 * c5 + c4);
+        if (flagged) {
+          step *= 0.5;
+          bend *= 0.5;
+        }
+        if (bend >= curve || step >= image) {
+          flagged = false;
+          continue;
+        }
+        const v = (c7 - c4) * A - (c8 - c5) * B;
+        if (globalThis.__earStats) globalThis.__earStats.n++;
+        dst[p] += v;
+        dst[p + along] -= v;
+        if (bend < curve * 0.2) {
+          dst[p - along] += ((c6 + c4) * 0.5 - c5 + v) * 0.5;
+          dst[p + 2 * along] += ((c9 + c7) * 0.5 - c8 - v) * 0.5;
+        }
+        flagged = true;
+      }
+    }
+  };
+  // Rows read the picture as it was and add their changes to it.
+  const rows = Float32Array.from(a);
+  pass(a, rows, W, H, (l, i) => l * W + i, 1);
+  // Columns read the result of the rows and replace.
+  const cols = Float32Array.from(rows);
+  const passCols = () => {
+    for (let x = 3; x < W - 3; x++) {
+      let flagged = false;
+      for (let y = 3; y < H - 3; y++) {
+        const p = y * W + x;
+        if (!(Math.abs(D[p + W] - D[p]) > depth)) continue;
+        const c4 = rows[p];
+        const c5 = rows[p - W];
+        const c6 = rows[p - 2 * W];
+        const c7 = rows[p + W];
+        const c8 = rows[p + 2 * W];
+        const c9 = rows[p + 3 * W];
+        let step = Math.abs(c7 - c4);
+        let bend = Math.abs(c9 - 2 * c8 + c7) + Math.abs(c6 - 2 * c5 + c4);
+        if (flagged) {
+          step *= 0.5;
+          bend *= 0.5;
+        }
+        if (bend >= curve || step >= image) {
+          flagged = false;
+          continue;
+        }
+        const v = (c7 - c4) * A - (c8 - c5) * B;
+        cols[p] = c4 + v;
+        cols[p + W] = c7 - v;
+        if (bend < curve * 0.2) {
+          cols[p - W] = ((c6 + c4) * 0.5 - c5 + v) * 0.5 + c5;
+          cols[p + 2 * W] = ((c9 + c7) * 0.5 - c8 - v) * 0.5 + c8;
+        }
+        flagged = true;
+      }
+    }
+  };
+  passCols();
+  a.set(cols);
+}
+
 export function depthEdgeMask(depth, w, h, { step = BACK_PROJECTION_EDGE.step, radius = BACK_PROJECTION_EDGE.radius } = {}) {
   const jump = new Float32Array(w * h);
   const limit = step * LAMBDA_TO_ALPHA;
