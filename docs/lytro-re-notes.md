@@ -86,3 +86,69 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
   app compares linear light with 1.0 at the sensor's clip level, no gamma.
 - Scored on 09eba2d6 and batch4-1 against the stack's depth map: gamma 0.5 + 3x3 box + brightest-value scaling 1.86 lambda mean error,
   linear + no smoothing + clip-level scale 1.45 (share off by more than 3 lambda 12.4% to 9.3%).
+
+## ILLUM all-in-focus (EDOF) image: what the shipped tool actually does (Middleware.dll)
+Function addresses are Ghidra's image-based names. Preset column index 3 = ILLUM latest (ProductID 2, ConfigVersion 2).
+
+### Class map
+- ProjectEdofSlave (vtable 181635d70, run 180bc76d0): mode 0, the per-lens-lambda splat the app already ports.
+- ProjectEdofMultiViewSlave (vtable 181636488, run 180bcf980): the same splat for up to 8 views at once.
+  Orchestrator FUN_180bcecb0 (called from FUN_1809caae0); worker FUN_180bd0250 (or FUN_180bd1d60 when the lens
+  has a per-ray correction image). Splits rows over a thread pool and sums per-thread buffers (class 1816364a0).
+- RefocusEdofMultiViewSlave: FUN_1809cd730 = post-processing of one view (below), not the projection.
+
+### Multi-view splat (FUN_180bd0250), per ray
+- Per-lens lambda lr is read from the depth map (image 1 of the depth holder), the second image is only used by
+  the depth-provider variant. Per view k with viewpoint (u_k, v_k) (param_6[k]) and offset o_k (param_7[k]):
+  position = P_k + (x - lr * (u - u_k) * lensScale) * zoom, 2x2 bilinear, weight = aperture table value * bilinear weight.
+- Aperture table is the same 256x256 raster of an IAperture (index = int(c * 127.5 + 127.5)) used in mode 0.
+- Occlusion test per touched pixel: accept when lr - zbuf_k[pixel] < tol, tol = config +0x28; zbuf_k are per-view
+  float images prepared before this pass (smaller lambda = nearer, so zbuf holds the minimum). Rays more than tol behind are dropped.
+- Output is premultiplied (RGB * w, alpha = sum w). FUN_180bc3060 un-premultiplies afterwards: rgb / a when a > eps,
+  otherwise a constant fill colour (holes are later filled by FUN_1809c86f0 from the lambda = 0 pinhole view).
+
+### Perspective view without depth (FUN_1809c8340 -> FUN_180bbffc0 / FUN_180bc03c0 / FUN_180bc0910)
+- Not a refocus. The projector is constructed with lambda = 0 in all four slots (the 4th register argument is 0):
+  position = x * scale + offset, i.e. the view is a pinhole-like image from (u, v); u, v only shift the output origin
+  (-lensScale * u * zoom * width) and move the aperture window in the table lookup.
+  Aperture inner = CircularAperture(0.15 on ILLUM; 0.12 in the depth view preparation FUN_1809b02f0), outer = 1.0.
+- With ILLUM master flags 0x408 = 0 (depth provider), 0x438 = 0, 0x710 = 0 the writer is FUN_180bc2750 (2x2 bilinear
+  accumulate of rgb and weight into float4). 0x6b0 = 1: per-lens table FUN_180b576e0; 0x4d08 = 1: ray correction image
+  (aberration correction) is added to each ray before the table lookup.
+
+### Post filters on the projected view (FUN_1809c8c30, in order)
+1. FUN_1809c8340 (pinhole) or FUN_1809c86f0 (hole fill from a precomputed projection).
+2. FUN_180bc6200 when master 0x468 (b1 in all presets): type from enum 0x498, 0 = FUN_180c5ecc0 with (0x4d0, 0x500),
+   1 = FUN_180c5fa10 with (0x530, 0x560, 0x590, 0x5c0).
+3. FUN_180bcc0d0 filter provider, switch on enum 0x3f80: ILLUM columns 1..4 = 10, F01 = 1. When the type is 7..10 and
+   there is no depth holder (+0xe8) while 0x3fb8 = b1 it falls back to enum 0x3fe8 (= 2 on ILLUM).
+   Type 10 = FUN_180c651c0 (depth-aware tiled filter bank, below). Type 2 = FUN_180b9e870 (same bank, no depth).
+4. FUN_180bc3060 un-premultiply, FUN_180bcd480 (master 0x4058 = b1): depth-edge correction (below),
+   FUN_180bc3650 (master 0x4df8, b1 only in column 4).
+5. FUN_1809bd440 colour develop (CCT matrix, Noise Ninja, tone LUT, Lab unsharp) as in grid_edof_outline.
+
+### Depth-aware reconstruction filter (FUN_180c651c0 -> FUN_180c65f10 -> FUN_180c66710 + FUN_180c67290)
+- The input image's alpha channel is replaced with the per-pixel depth (lambda). The image is cut into a tile grid
+  (the 3x3 regions of the reconstruction-filter bank) with linear-ramp windows; the overlap is
+  ((height * f + 1) * 0.5) px where f is the float at +0x10 of the filter context. Each tile's result is weighted by
+  the product of the horizontal and vertical ramp and accumulated.
+- Filter lookup FUN_180c64360(bank, tileX, tileY, lambda): the bank holds one entry per sorted lambda list value
+  (24 values) and per tile; the entry is the nearest list value (ties go to the lower one when
+  (lambda - L[i-1]) * 2 <= L[i] - L[i-1]). A pixel without depth (sentinel _DAT_1821f022c) uses lambda 0.
+- Each entry is a sum of separable terms: pass 1 (horizontal) runs every term r over the tile, pass 2 (vertical)
+  convolves the result with the term's column vector and adds it with a per-term RGB gain. Both passes are normalised
+  weighted averages, sum(k * w * I) / sum(k * w), set to 0 when sum(k * w) <= 0.
+- Depth range weight w: LUT[clamp(int(lambda_neighbour - (lambda_centre - off)), 0, N - 1)] with off = float at +0x58 and
+  N = int at +0x54: neighbours nearer than the centre by more than off get LUT[0], so foreground does not bleed
+  into background. LUT contents not yet recovered.
+- Where this matters for the app: the output of the splat is blurred/noisy at the 0.5-lens-pitch aperture and the
+  bank corrects it per depth and image region; the app has no equivalent, which is the likely cause of the
+  fine-detail mismatch next to the denoise/sharpen differences.
+
+### Depth-edge correction (FUN_180bcd480, master 0x4058)
+- Works on the develop-pipeline colour space image with a 3-pixel border; a pixel row is processed when the depth
+  difference to the next pixel exceeds t0 = master 0x42b0 (3 on ILLUM). With a = |I[x+1] - I[x]|,
+  b = |I[x+2] - 2 I[x+1] + I[x]|-style second-difference sum over the four taps, the correction is applied when
+  b < t1 = master 0x4310... (thresholds 0x42b0 = 3, 0x42e0 = 0.5, 0x4310 = 0.1 on ILLUM) and the step is moved by
+  (I[x+1] - I[x]) * c1 - (I[x+2] - I[x-1]) * c2 on the two sides of the edge (it sharpens the colour step at depth edges
+  horizontally, then vertically). Constants c1, c2 at 1816361cc/1816361c8 not yet read.
