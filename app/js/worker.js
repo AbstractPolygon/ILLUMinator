@@ -439,6 +439,7 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     // Off until its meaning is settled: applied as a direction shift it made the picture worse against the engine's (MAE 4.62 -> 4.96).
     state.geoTable = state.lf.geometryBytes && globalThis.__useGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
     state.rayWarpEdof = null;
+    state.modulation = undefined;
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
     state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
@@ -720,7 +721,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
   if (!state.vignetting) {
     progress('Measuring lens vignetting', 0);
-    state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
+    const vt = (globalThis.__lytro || {}).vigTiles;
+    state.vignetting = vt ? estimateVignetting(lf.raw, lf.cam, dev, lf.grid, { tilesX: vt[0], tilesY: vt[1], lensStride: 1, selfRef: true }) : estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
   }
   if (!(await ensureDepth(id))) return { cancelled: true };
   const { W, H } = superResParams(sampler, { scale });
@@ -729,7 +731,9 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
   if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
   progress('Splatting the rays', 0);
+  if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
   const sp = lytroSplat({
+    modulation: dbg.noModulation ? null : state.modulation,
     raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),

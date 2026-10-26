@@ -406,11 +406,26 @@ export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
-export function correctedPlane(raw, cam, dev, g, vg, radius) {
+export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
   // SaturationState: pixels at the sensor's white keep their (clipped) value and are raised later by the diffusion.
   plane.sat = new Uint8Array(width * height);
+  plane.mod = new Float32Array(width * height);
+  // The camera's white image, as the engine uses it: every pixel is divided by its modulation relative to the same colour at the lens centre.
+  let centres = null;
+  if (modulation) {
+    centres = new Map();
+    forEachLensPixel(g, cam, 2.3, (i, x, y, u, v, lensX, lensY) => {
+      if (u * u + v * v > 5.3) return;
+      const ch = dev.cfa[y & 1][x & 1];
+      const key = lensX + lensY * 1e6;
+      let c = centres.get(key);
+      if (!c) centres.set(key, (c = new Float64Array(6)));
+      c[ch] += Math.max(0, modulation[i] - dev.black[ch]);
+      c[3 + ch]++;
+    });
+  }
   const binScale = vg.bins / (2 * vg.rMax);
   const binsSq = vg.bins * vg.bins;
   let lastLens = NaN;
@@ -423,7 +438,14 @@ export function correctedPlane(raw, cam, dev, g, vg, radius) {
     const ch = dev.cfa[y & 1][x & 1];
     const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
     let gain = 0;
-    for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
+    if (centres) {
+      const c = centres.get(lastLens);
+      const m = Math.max(0, modulation[i] - dev.black[ch]);
+      const ref = c && c[3 + ch] ? c[ch] / c[3 + ch] : 0;
+      gain = m > ref * 0.15 ? ref / m : 0;
+    } else {
+      for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
+    }
     if (!(gain > 0)) return;
     let value = raw[i];
     if (isDefect(raw, width, i)) {
@@ -437,6 +459,8 @@ export function correctedPlane(raw, cam, dev, g, vg, radius) {
       else return;
     }
     if (value >= dev.saturated[ch]) plane.sat[i] = 1;
+    if (globalThis.__radialFix) gain *= globalThis.__radialFix(Math.hypot(u, v) / g.pitch);
+    plane.mod[i] = 1 / gain;
     plane[i] = Math.max(0, value - dev.black[ch]) * dev.scale[ch] * gain;
   });
   return plane;
@@ -572,7 +596,7 @@ function diffuseSaturation(a, sat, W, H, cfa) {
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
-export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null }, opts = SPLAT) {
+export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null }, opts = SPLAT) {
   const { width } = cam;
   const unit = g.rowStep;
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
@@ -581,7 +605,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // the pixels to read reach the hexagon's corners
   const radius = hex ? (apothem * 2) / Math.sqrt(3) : apothem;
   const hexRise = apothem / Math.sqrt(3);
-  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2);
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation);
   const dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   // With the camera's ray table every ray carries the distortion correction itself (as in the engine), so there is no picture warp afterwards.
   const warp = rayWarp ? null : lensWarp(lens, W, H);
@@ -652,6 +676,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     const lamR = marchRay(lx, ly, ru, rv, lam0, lam1, depth, lw, lh, opts);
     count++;
     if (!(lamR === lamR)) return;
+    const rayWeight = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;
     const a = lamR * LAMBDA_TO_ALPHA;
     let qx = (lx - a * ru) * scale;
     let qy = (ly - a * rv) * scale;
@@ -667,7 +692,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
         if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
         const p = yy * W + xx;
         if (lamR - zMap[p] >= opts.tolerance) continue;
-        const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy);
+        const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy) * rayWeight;
         acc[4 * p] += rgb[0] * w;
         acc[4 * p + 1] += rgb[1] * w;
         acc[4 * p + 2] += rgb[2] * w;

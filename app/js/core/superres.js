@@ -78,7 +78,7 @@ export const VIGNETTING = { floor: 0.3 };
 // From the picture itself use a single tile: the scene averages out over
 // ~200k lenses, but per-tile normalization would also flatten the scene.
 // From a white image use several tiles so main lens vignetting is corrected.
-export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1, lensStride } = {}) {
+export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1, lensStride, selfRef = false } = {}) {
   const rMax = g.pitch * 0.5;
   const tiles = tilesX * tilesY;
   const size = tiles * BINS * BINS * 3;
@@ -109,7 +109,7 @@ export function estimateVignetting(source, cam, dev, g, { tilesX = 1, tilesY = 1
         const k = (t * BINS * BINS + b) * 3 + ch;
         const center = mean[(t * BINS * BINS + midBin) * 3 + ch];
         // Bins darker than this share of their lens center are lens borders: unusable.
-        gain[k] = mean[k] > center * VIGNETTING.floor ? ref[ch] / mean[k] : 0;
+        gain[k] = mean[k] > center * VIGNETTING.floor ? (selfRef ? center : ref[ch]) / mean[k] : 0;
       }
     }
   }

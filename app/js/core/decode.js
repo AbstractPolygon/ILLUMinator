@@ -69,6 +69,18 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     // Not a sensor image we understand (e.g. a processed file); show stacks only.
     return result;
   }
+  // The camera's white image stored with the photo (what the engine divides out: DemodulationAlgorithm), read on demand.
+  if (picture && picture.frame && picture.frame.modulationDataRef) {
+    const ref = picture.frame.modulationDataRef;
+    result.readModulation = async () => {
+      try {
+        const bytes = await picture.container.readSection(ref);
+        return bytes && bytes.length >= packedSize(cam.width, cam.height, cam.bits) ? unpackRaw(bytes, cam.width, cam.height, cam.bits) : null;
+      } catch {
+        return null;
+      }
+    };
+  }
   onProgress('Unpacking sensor data', 0.1);
   result.cam = cam;
   result.raw = unpackRaw(rawBytes, cam.width, cam.height, cam.bits);
