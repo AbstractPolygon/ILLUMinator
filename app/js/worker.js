@@ -1192,6 +1192,13 @@ function measureLytro(progress) {
   const { outW, outH } = state.sampler;
   setDepthStyle('match');
   DEPTH_PASSES.on = true;
+  // The maker's tool measures whole lambda labels from -35 up to three past the whole part of the lens's
+  // infinity lambda (the stack's maxLambda is that rounded up to a multiple of four). The GPU holds 64.
+  const infinity = state.lf && state.lf.cam && state.lf.cam.capture && state.lf.cam.capture.infinityLambda;
+  const top = Number.isFinite(infinity) ? Math.min(100, Math.floor(infinity) + 3) : 8;
+  DEPTH_PASSES.top = Math.max(top, DEPTH_PASSES.first + 8);
+  DEPTH_PASSES.step = Math.max(1, Math.ceil((DEPTH_PASSES.top - DEPTH_PASSES.first + 1) / 64));
+  Object.assign(DEPTH_SEARCH, { min: DEPTH_PASSES.first * DEPTH_PASSES.lambda, max: DEPTH_PASSES.top * DEPTH_PASSES.lambda });
   let measured = null;
   if (state.gpu) {
     try {

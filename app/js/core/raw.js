@@ -149,6 +149,8 @@ export function cameraInfo(metadata, fallbackLayout) {
       focalLength: lens.focalLength,
       zoomStep: lens.zoomStep,
       focusStep: lens.focusStep,
+      // The lambda of an object at infinity: the depth labels reach three beyond its whole part.
+      infinityLambda: lens.infinityLambda,
       dcfFile: get(md, 'picture', 'dcfFile'),
       // Color temperature the camera's white balance was set for (kelvin).
       cct: first(get(md, 'algorithms', 'awb', 'computed', 'cct'), get(md, 'settings', 'whiteBalance', 'cct')),

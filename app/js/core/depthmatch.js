@@ -13,6 +13,7 @@ export const DEPTH_PASSES = {
   // Trial depths: whole lambda steps (LAMBDA_ALPHA alpha each) from `first` to `top`.
   first: -35,
   top: 8,
+  step: 1,
   lambda: 0.0814,
   // The views measured as references in pass 1 (null: all of them).
   refs: null,
@@ -27,13 +28,14 @@ export const DEPTH_PASSES = {
   iterations: 3,
   slope: 1,
   trunc: 10,
-  // Fine labels over the depth range the first measurement found (pass 2).
+  // Off: pass 2 uses the same labels as pass 1, as the maker's tool does. On: fine labels over the depth
+  // range the first measurement found.
   stats: [],
   // Match every view's mean and spread to the center view's: 'gamma', 'linear' or off.
   matchColor: 'gamma',
   // Box smoothing radius of each view before the cost (0: none).
   blur: 1,
-  adapt: { on: true, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 },
+  adapt: { on: false, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 },
 };
 
 // Moves each view's per-channel mean and spread onto the center view's (the
@@ -302,8 +304,8 @@ export function measureMatch(views, w, h, { onProgress } = {}) {
   const n = w * h;
   const c = Math.floor(views.length / 2);
   const colors = viewColors(views, n, w, h);
-  const count = P.top - P.first + 1;
-  const alphas = Array.from({ length: count }, (_, i) => (P.first + i) * P.lambda);
+  const count = Math.floor((P.top - P.first) / P.step) + 1;
+  const alphas = Array.from({ length: count }, (_, i) => (P.first + i * P.step) * P.lambda);
   const refs = P.refs ?? views.map((_, k) => k);
   if (!refs.includes(c)) refs.push(c);
   // Pass 1: every view as the reference.

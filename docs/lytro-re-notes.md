@@ -63,3 +63,8 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
 - Solver smoothness slope p[12000] = 0.1 in every preset (it prints in decimal, so the preset table missed it).
 - Passes: pass 0 (all views as reference) and pass 1 (last); parabola on the aggregated data costs only in the last
   pass, the 3x3 median after each.
+
+## Depth labels (FUN_180891550, FUN_1809affd0)
+- Whole lambda labels from p[0x28f0] = -35 up to min(p[0x2920] = 100, floor(lens infinityLambda) + 3 (p[0x3e00], 3 in five of the six presets)),
+  step p[0x2950] = 1. The stack's maxLambda is that rounded up to a multiple of four (checked on 15 photos).
+- Both passes use this one label list; the fine relabelling over the found range (DEPTH_PASSES.adapt) is ours, not the tool's.
