@@ -28,6 +28,7 @@ import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
+import { lytroSplat, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -702,6 +703,58 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const rgb = await withDepthOfField(id, sr.rgb, sr.width, sr.height, alpha, dof, scale / state.settings.detail, bokeh);
   const pixels = toPixels(rgb, sr.width, sr.height, { focus: alpha, overrides: masks, view: viewOf(u, v) }, cs, sr.distortionCorrected);
   post({ id, type: 'result', width: sr.width, height: sr.height, pixels: pixels.buffer }, [pixels.buffer]);
+  return undefined;
+}
+
+// Lytro Desktop's all in focus picture (core/lytroedof.js): the rays
+// splatted with a depth each, holes filled, and the depth aware filter bank of
+// the photo applied.
+async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
+  requireRaw();
+  state.jobs.superres = job;
+  const { lf, dev, sampler } = state;
+  const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
+  if (!state.vignetting) {
+    progress('Measuring lens vignetting', 0);
+    state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
+  }
+  if (!(await ensureDepth(id))) return { cancelled: true };
+  const { W, H } = superResParams(sampler, { scale });
+  const cs = colorState(color);
+  const dbg = globalThis.__lytro || {};
+  progress('Splatting the rays', 0);
+  const sp = lytroSplat({
+    raw: lf.raw, cam: lf.cam, dev, grid: lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
+    onProgress: (p) => progress('Splatting the rays', p),
+  }, { ...LYTRO_SPLAT, ...(dbg.splat || {}) });
+  if (state.jobs.superres !== job) return { cancelled: true };
+  progress('Filling holes', 0);
+  const filled = dbg.noFill ? null : fillHoles(sp.acc, W, H);
+  const img = new Float32Array(W * H * 3);
+  for (let p = 0; p < W * H; p++) {
+    if (filled) {
+      img[3 * p] = filled[4 * p];
+      img[3 * p + 1] = filled[4 * p + 1];
+      img[3 * p + 2] = filled[4 * p + 2];
+    } else {
+      const a = sp.acc[4 * p + 3] || 1;
+      img[3 * p] = sp.acc[4 * p] / a;
+      img[3 * p + 1] = sp.acc[4 * p + 1] / a;
+      img[3 * p + 2] = sp.acc[4 * p + 2] / a;
+    }
+  }
+  let out = img;
+  if (!dbg.noBank && lf.reconFilter) {
+    progress('Reconstructing with the filter bank', 0);
+    if (!state.reconSource) state.reconSource = bankKernels(await decodePngRgb(new Uint8Array(lf.reconFilter.png)), lf.reconFilter.meta);
+    const bank = buildBank(state.reconSource, W, H, { ...LYTRO_BANK, ...(dbg.bank || {}) });
+    const r = applyBank(img, sp.zMap, W, H, bank);
+    out = r.rgb;
+    for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
+  }
+  globalThis.__lytroStats = sp.stats;
+  const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
+  post({ id, type: 'result', width: W, height: H, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
 
@@ -1608,7 +1661,7 @@ async function setLut({ lut }) {
   return null;
 }
 
-const handlers = { setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, lytroEdof, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

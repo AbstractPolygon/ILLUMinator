@@ -19,7 +19,7 @@ import { LAMBDA_TO_ALPHA } from './recipe.js';
 
 const BINS = 17;
 
-function tileWeights(table, x, y) {
+export function tileWeights(table, x, y) {
   const fx = Math.min(table.tilesX - 1, Math.max(0, (x / table.width) * table.tilesX - 0.5));
   const fy = Math.min(table.tilesY - 1, Math.max(0, (y / table.height) * table.tilesY - 0.5));
   const x0 = Math.min(table.tilesX - 2, Math.floor(fx));
@@ -38,7 +38,7 @@ function tileWeights(table, x, y) {
 // fn(index, x, y, u, v, lensX, lensY, lensR, lensC), with (u, v) the offset
 // from the lens center along the grid axes and (lensX, lensY) the grid-local
 // lens position.
-function forEachLensPixel(g, cam, radius, fn, onProgress, lensStride = 1, win = null) {
+export function forEachLensPixel(g, cam, radius, fn, onProgress, lensStride = 1, win = null) {
   const { width, height } = cam;
   const range = lensRange(g, width, height, g.pitch);
   // `win`: only the lenses of this range (rows r0..r1, columns c0..c1).

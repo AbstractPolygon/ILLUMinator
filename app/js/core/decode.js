@@ -44,6 +44,16 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
       result.rayWarpBytes = null;
     }
   }
+  // The photo's reconstruction filter bank (core/lytroedof.js).
+  if (picture && picture.frame && picture.frame.reconstructionFilterRef && picture.frame.reconstructionFilterMetadataRef) {
+    try {
+      const png = await picture.container.readSection(picture.frame.reconstructionFilterRef);
+      const meta = await picture.container.readSection(picture.frame.reconstructionFilterMetadataRef);
+      result.reconFilter = { png, meta: JSON.parse(new TextDecoder().decode(meta)) };
+    } catch {
+      result.reconFilter = null;
+    }
+  }
   if (!rawBytes) return result;
   const cam = cameraInfo(result.metadata, layout);
   if (!cam.width || !cam.height || rawBytes.length < packedSize(cam.width, cam.height, cam.bits)) {

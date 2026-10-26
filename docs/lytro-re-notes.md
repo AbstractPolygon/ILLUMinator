@@ -178,3 +178,28 @@ its metadata JSON (targetWidth 2560, targetHeight 1778, numKernelsX/Y 3, zoomSte
   normalised averages with the depth-range weight. Range weight spline FUN_1809c62d0: trapezoid through (-4, 0), (-2, 1), (2, 1), (4, 0)
   in lambda difference, sampled into the LUT.
 - Result accumulates out += G[r][c] * (vertical result) * tileWindow, with alpha channel 1.
+
+## Lytro's own engine is available: Power Tools `tnt` (symbols, and it runs)
+Source: github.com/rgon/lytro-power-tools (`lpt/resources/bin/tnt` Mach-O, `tnt.exe` PE). It is the LFE ("TNT 2.0, LFE 21") command-line engine.
+- The Mach-O build keeps its full symbol table (25k names: `LFE::RefocusEdof`, `ProjectEdofMultiView`, `GridFilterImage1DDepthMasked`,
+  `JointAdaptiveFilter`, `EdgeArtifactReduction`, ...). Import it in Ghidra to read the real names.
+- `tnt.exe` runs under Wine (apt `wine64`): `tnt.exe --lfp-in raw.lfp --calibration-in <dir with unitdata/> --recipe-in rec.json --image-out out.png
+  --depth-out d.png --depthrep png` takes about 45 s per photo. `--recipe-out` writes the default recipe; `viewFocusSpread = 100` gives the
+  all-in-focus picture. `scripts/re/run_tnt_edof.sh` wraps it; `scripts/re/score_gt.py` scores an app render against it (registered MAE, fitted MAE,
+  gradient ratio).
+
+### RefocusEdof pipeline as named in the engine (RefocusEdof::operator())
+ComputeOutputDepthMap (forward-warps the depth to the output grid keeping the nearer value, then medianFilterDepthMap) -> createDepthEdgeMap
+(tolerance cfg 0x1f10) -> ProjectEdof / ProjectEdofMultiView::projection (up to 8 views) -> computeFilterBank + computeFilterIndexMap ->
+reconstructProjectedImage: [disocclusionFilling | reconstructionHoleFilling (iterative 4-neighbour average of the filled neighbours, in
+raster order, alpha <= 0 marks a hole) | InpaintImage (pyramid)] -> JointAdaptiveFilter (AdaptiveFilterMethod 7..10 = grid filter bank:
+2D, 2D depth masked, separable 1D, separable 1D depth masked) -> InpaintImage + NormalizeImage (rgb / alpha) -> EdgeArtifactReduction ->
+CorrectChromaticAberration -> setVariablySharpenImage / setUSMImage (per-lambda unsharp mask) -> finalImagePipeline.
+- computeFilterIndexMap: index = clamp(int((lambda + L) / 0.25 + 0.5), 0, 2L / 0.25) with L = cfg 0x2c88 (kLambdaStep = 0.25, occlusion value counts as 0).
+- GridFilterImage1DDepthMasked (horizontal and vertical pass): out = sum(w * k * c) / sum(w * k) with w the depth-range LUT, 0 when the
+  sum is not positive, depth taken from the fourth channel. The kernel gain therefore cancels. Multiplying by the rank-1 gain made our port
+  about 35 % too dark (MAE 30.4 against the engine); without it 8.4.
+
+### Scores against the engine (photo b4-1, sharpening and noise reduction off in the engine)
+app EDOF (B0): MAE 4.62, gradient ratio 1.03. lytroEdof port (L2): MAE 7.61, gradient ratio 0.64 (too soft). The B0 error is on the near thin
+fence and the frame edges (the halo region).
