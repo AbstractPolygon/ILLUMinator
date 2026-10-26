@@ -734,6 +734,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
   const sp = lytroSplat({
     modulation: dbg.noModulation ? null : state.modulation,
+    geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
     raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),

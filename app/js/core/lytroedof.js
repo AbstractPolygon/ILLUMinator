@@ -245,8 +245,9 @@ function designTaps(freqs, mags, size, taps) {
   const px = [];
   const py = [];
   for (let i = 0; i < freqs.length; i++) {
-    if (size * 0.5 < freqs[i]) break;
-    px.push(Math.fround(freqs[i] / size));
+    const fs = globalThis.__bankFS || 1;
+    if (size * 0.5 < freqs[i] * fs) break;
+    px.push(Math.fround((freqs[i] * fs) / size));
     py.push(mags[i]);
   }
   const resp = (f) => {
@@ -384,6 +385,7 @@ export function engineGrid(metadata, width, height, near = null) {
 
 // ---- the splat ---------------------------------------------------------------
 
+import { geometryAt } from './geometrytable.js';
 import { forEachLensPixel, tileWeights, isDefect, sampleDepth, depthFilter } from './superres.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
 import { createLfDemosaic } from './lfdemosaic.js';
@@ -402,7 +404,8 @@ export function nominalAperture(cam) {
   return Math.min(clamp01(ratio), clamp01(2 - ratio - k / 14));
 }
 
-export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
+// aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1: 0.5 -> MAE 3.93, 0.857 -> 4.52); the nominal fraction read from the metadata is wider.
+export const SPLAT = { aperture: 0.5, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -596,7 +599,7 @@ function diffuseSaturation(a, sat, W, H, cfa) {
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
-export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null }, opts = SPLAT) {
+export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null }, opts = SPLAT) {
   const { width } = cam;
   const unit = g.rowStep;
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
@@ -612,6 +615,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const cosR = Math.cos(g.rotation);
   const sinR = Math.sin(g.rotation);
   const warpOut = [0, 0, 0, 0];
+  const geoOut = [0, 0];
   let cell = null;
   let lastCell = NaN;
   // z of every output pixel, in lambda
@@ -637,6 +641,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       const av = Math.abs(v);
       if (au > apothem || av > 2 * hexRise || (av > hexRise && av + au / Math.sqrt(3) > 2 * hexRise)) return;
     } else if (u * u + v * v > r2) return;
+    if (opts.inner && Math.hypot(u, v) / g.pitch < opts.inner) return;
     if (dm ? !(plane[i] === plane[i] && dm.at(x, y, rgb)) : !rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
     if (globalThis.__diagBins) {
       const dg = globalThis.__diagBins;
@@ -668,9 +673,19 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       const sy = warpOut[1] * cam.height;
       lx += (cosR * sx + sinR * sy) / unit;
       ly += (-sinR * sx + cosR * sy) / unit;
-      ru += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch;
-      rv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch;
+      const dus = opts.duScale ?? 1;
+      ru += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch * dus;
+      rv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch * dus;
     }
+    if (geoTable && opts.geoSign) {
+      // GeometryErrorTable::CorrectLightfieldPoint: the cell's (u, v) is taken off the ray's direction (lens pitches, lens array axes).
+      const gx = x - (cosR * u - sinR * v);
+      const gy = y - (sinR * u + cosR * v);
+      geometryAt(geoTable, gx / cam.width - 0.5, gy / cam.height - 0.5, geoOut);
+      ru -= opts.geoSign * geoOut[0] * g.pitch;
+      rv -= opts.geoSign * geoOut[1] * g.pitch;
+    }
+    if (opts.vScale) rv *= opts.vScale;
     const lam0 = sampleDepth(lo, lw, lh, lx, ly) / LAMBDA_TO_ALPHA;
     const lam1 = sampleDepth(hi, lw, lh, lx, ly) / LAMBDA_TO_ALPHA + 1;
     const lamR = marchRay(lx, ly, ru, rv, lam0, lam1, depth, lw, lh, opts);
