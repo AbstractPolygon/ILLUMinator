@@ -203,3 +203,17 @@ CorrectChromaticAberration -> setVariablySharpenImage / setUSMImage (per-lambda 
 ### Scores against the engine (photo b4-1, sharpening and noise reduction off in the engine)
 app EDOF (B0): MAE 4.62, gradient ratio 1.03. lytroEdof port (L2): MAE 7.61, gradient ratio 0.64 (too soft). The B0 error is on the near thin
 fence and the frame edges (the halo region).
+
+### Depth algorithm as named in the engine (DepthMapAlgorithmSimple, tnt Mach-O)
+Why it matters: the engine's depth map has crisp fence edges, ours is blurred and streaks along them (that is where the EDOF halos come from;
+see `scripts/re/score_gt.py` and the engine's `--depth-out` for any photo).
+computeDepthmap order: createDataCostVolume (DepthMapCreateDataCostSimpleSubset over sub-aperture images) -> ConfidenceByDataCostAnalysis (flag 0xd8)
+-> AdjustImportanceByImageContent (0xc0) -> Optimization = MRF solver chosen by int at +0x48: 0 TRW-S (MRFSolverTRWS), 1 BP-M, 2 hierarchical BP
+(MRFSolverHBP), with smoothness weights from BuildEdgeAdaptiveSmoothnessCost(image, ...) -> optional PlaneFitting (flag 0xa2: mean-shift segmentation
+SegmentImageMeanShift, DepthMapPlaneFitting per segment, UpdateDataCostByFittingError) and a second Optimization -> CrossBasedDataCostAggregation
+(unless 0x6d) -> SubPixelEstimate -> MedianFilter (0xa0) -> DecreaseDepthEdgeImportance (0xc1). Output depth is resampled with DmResampler
+(boundary chains / line segments, LineIsectSubpixEvaluator) and RefocusEdof::scaleAndWarpDepthMap / BackProjectDepthMap::UpscaleMaps.
+computeEnergyFunction = sum data[label] + sum over 4-neighbour pairs of min(|label_i - label_j| * s, T) * edgeWeight, with T = p[0x23] * s
+(truncated linear smoothness). Config offsets (+0x48 solver, +0x58, +0x5c iterations, +0x94 edge-adaptive flag, +0x98/+0x9c edge params) still to be matched
+with the preset values. Next: read BuildEdgeAdaptiveSmoothnessCost, the cost volume (DepthMapCreateDataCostSimpleSubset::Run), the MRF solvers and
+the plane fitting, implement in the worker, and score the depth against `tnt --depth-out`.
