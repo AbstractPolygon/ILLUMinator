@@ -731,8 +731,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   progress('Splatting the rays', 0);
   const sp = lytroSplat({
     raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
-    // The engine keeps the table's defocus term in (no chief ray removal), so its depth maps apply as they are.
-    rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false })),
+    // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
+    rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),
     onProgress: (p) => progress('Splatting the rays', p),
   }, { ...LYTRO_SPLAT, ...(dbg.splat || {}) });
   if (state.jobs.superres !== job) return { cancelled: true };

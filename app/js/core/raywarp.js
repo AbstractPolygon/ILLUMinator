@@ -31,7 +31,7 @@ const MAGIC = 0xaf0990fa;
 // The field curvature of the rays as a change of the depth map (see focusAt).
 export const FOCUS_FIELD = { on: false, gain: 1, across: 24, down: 16, own: true };
 
-export function parseRayWarp(bytes, width, height, { tilt = true } = {}) {
+export function parseRayWarp(bytes, width, height, { tilt = true, chief = false } = {}) {
   if (!bytes || bytes.length < 104) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0, true) !== MAGIC || view.getInt32(4, true) !== 3) return null;
@@ -59,7 +59,7 @@ export function parseRayWarp(bytes, width, height, { tilt = true } = {}) {
   const table = { na, nb, nc, A, B, maskA, maskB, stepA, stepB, stepC };
   const n = [0, 1, 2, 3].map((k) => Math.trunc(1 + (1 / step[k]) * ext[k] + 2 * border));
   const dense = buildDense(table, { mins, step, n, border }, width, height);
-  return makeEvaluator(dense, n, mins, step, border, tilt);
+  return makeEvaluator(dense, n, mins, step, border, tilt, chief);
 }
 
 // Trilinear lookup in one of the radial tables, normalized by the nodes that are valid.
@@ -142,7 +142,7 @@ function buildDense(table, grid, width, height) {
 
 // Reads the grid at a ray: the sum of the 16 surrounding nodes' values and the
 // sum of their weights where covered (the shift is the first over the second).
-function makeEvaluator(dense, n, mins, step, border, removeTilt) {
+function makeEvaluator(dense, n, mins, step, border, removeTilt, removeChief) {
   const { values, covered } = dense;
   const strideV = 1;
   const strideU = n[3];
@@ -180,6 +180,43 @@ function makeEvaluator(dense, n, mins, step, border, removeTilt) {
     return w;
   };
   const tmp = [0, 0, 0, 0];
+  // RemoveChiefRayAngle (the engine runs it when loading the table): at every
+  // image position the direction shift of the central ray (u = v = 0, read by
+  // bilinear interpolation over the covered nodes) is taken out of all the
+  // directions there.
+  if (removeChief) {
+    const i0 = Math.min(n[2] - 2, Math.max(0, Math.floor(border - mins[2] / step[2])));
+    const j0 = Math.min(n[3] - 2, Math.max(0, Math.floor(border - mins[3] / step[3])));
+    const fu = border - mins[2] / step[2] - i0;
+    const fv = border - mins[3] / step[3] - j0;
+    for (let ix = 0; ix < n[0]; ix++) {
+      for (let iy = 0; iy < n[1]; iy++) {
+        let du = 0;
+        let dv = 0;
+        let w = 0;
+        for (let c = 0; c < 4; c++) {
+          const a = c & 1;
+          const b = c >> 1;
+          const node = ix * strideX + iy * strideY + (i0 + a) * strideU + (j0 + b);
+          if (!covered[node]) continue;
+          const k = (a ? fu : 1 - fu) * (b ? fv : 1 - fv);
+          du += k * values[4 * node + 2];
+          dv += k * values[4 * node + 3];
+          w += k;
+        }
+        if (!(w > 0)) continue;
+        du /= w;
+        dv /= w;
+        for (let iu = 0; iu < n[2]; iu++) {
+          for (let iv = 0; iv < n[3]; iv++) {
+            const node = ix * strideX + iy * strideY + iu * strideU + iv;
+            values[4 * node + 2] -= du;
+            values[4 * node + 3] -= dv;
+          }
+        }
+      }
+    }
+  }
   // The grid shows the size the center view's image comes out at after the
   // correction; the correction is scaled so that picture fills the frame again.
   const wx = sample([0.5, 0, 0, 0], tmp) && tmp[0] + 0.5;
