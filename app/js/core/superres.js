@@ -583,6 +583,28 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       const value = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
       let yEst = value * Math.min(8, upY[lp] / c);
       if (estimate) yEst -= sampleBilinear(estimate, W, H, ox, oy);
+      if (probe && probe.deltas) {
+        // Depth probe (test tool): how well the sample agrees with `est` when its
+        // lens takes depth lensAlpha + delta, for each delta.
+        if (lens < 0) return;
+        const { deltas, est, err, pos } = probe;
+        pos[2 * lens] = lensX;
+        pos[2 * lens + 1] = lensY;
+        for (let k = 0; k < deltas.length; k++) {
+          const a = lensAlpha + deltas[k];
+          let qx = (lx - a * rdu) * scale;
+          let qy = (ly - a * rdv) * scale;
+          if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
+          const qi = Math.round(qy) * W + Math.round(qx);
+          if (!(qx >= reach && qy >= reach && qx < W - reach && qy < H - reach)) continue;
+          const cc = up[3 * qi + ch];
+          if (!(cc > 1e-5)) continue;
+          const yk = value * Math.min(8, upY[qi] / cc);
+          const e = yk - sampleBilinear(est, W, H, qx, qy);
+          err[lens * deltas.length + k] += conf * e * e;
+        }
+        return;
+      }
       if (probe) {
         if (lens < 0) return;
         const { cand, est, err } = probe;
@@ -703,6 +725,16 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     lensOffsets = chooseLensOffsets(table, cand, err);
     const r = splat(null, 0);
     for (let p = 0; p < W * H; p++) sharpY[p] = (r.accY[p] + upY[p] * lambda) / (r.wsum[p] + lambda);
+  }
+  if (globalThis.__depthProbe && allInFocus && depth) {
+    const hook = globalThis.__depthProbe;
+    const table = lensTable(g, cam);
+    const est = hook.makeEst(W, H, sharpY, upY);
+    const deltas = hook.deltas;
+    const err = new Float64Array(table.dx.length * deltas.length);
+    const pos = new Float32Array(table.dx.length * 2);
+    splatOnCpu(null, null, { table, deltas, est, err, pos });
+    hook.result = { table: { rows: table.rows, cols: table.cols, r0: table.r0, c0: table.c0 }, deltas, err, pos, W, H };
   }
   let bestDis = null;
   if (allInFocus && depth && EDGE_SNAP.on) {
