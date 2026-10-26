@@ -152,3 +152,29 @@ Function addresses are Ghidra's image-based names. Preset column index 3 = ILLUM
   b < t1 = master 0x4310... (thresholds 0x42b0 = 3, 0x42e0 = 0.5, 0x4310 = 0.1 on ILLUM) and the step is moved by
   (I[x+1] - I[x]) * c1 - (I[x+2] - I[x-1]) * c2 on the two sides of the edge (it sharpens the colour step at depth edges
   horizontally, then vertically). Constants c1, c2 at 1816361cc/1816361c8 not yet read.
+
+### Reconstruction filter bank, decoded (FUN_180bf08a0 ctor, FUN_180be3700 scale, FUN_180be3e90 SVD, FUN_180c64360 lookup)
+Source data: the photo's reconstructionFilterRef PNG (8-bit RGB, 65 wide, 14040 tall = 24 lambdas x 3 x 3 tiles x 65 rows) and
+its metadata JSON (targetWidth 2560, targetHeight 1778, numKernelsX/Y 3, zoomStep, focusStep, lambdas
+-45,-40,-35,-30,-25,-20,-18,-16,-14,-12,-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3).
+- Entry index e = lambdaIndex * 9 + tile (tile = tileY * 3 + tileX; the generator indexes lambda by e / (tilesX * tilesY)).
+  Entry rows start at e * 65. Each kernel pixel = PNG / 255 - 0.5 (signed, mid gray = 0), then divided by the per-channel sum of the
+  65x65 entry (FUN_180826a10 is a sum, FUN_18082bfd0 a max).
+- Settings come from the master params: mono flag 0x4340 (b0 on ILLUM, so green is copied into red and blue after scaling),
+  sparsify threshold 0x4370 = 0.01, 0x43d0 = 0.1 (stored, role not found), rank count 0x43a0 = 1 (ILLUM), lambda scale spline from the point list
+  at master 0x4408 (empty in all presets, so the scale function is unset/constant; scale factors below use it as 1).
+- Scaling to the output size W x H (FUN_180bf4500): kernel scale (sx, sy) = s(lambda) * (W / targetWidth, H / targetHeight). New size =
+  round-up(w * sx) forced odd. Larger than the source: bilinear resample; smaller: each source tap is splatted onto the
+  new grid (FUN_18086ed80 1-D weights) and the result is divided by its alpha. Then entries with |value| <= 0.01 * (per-channel max) are zeroed
+  (only when 0x4370 > 0), green copied to all three channels when mono, and FUN_180bf36e0 crops to the smallest centred
+  window holding all non-zero taps.
+- Rank-1 form (FUN_180bf3b90, SVD of the double-precision matrix, flags 0x28): for channel c and term r < rank,
+  column vector = U[:, r], row vector = V[:, r], each divided by its own sum; gain G[r][c] = sum(row) * S[r] * sum(column) (before the divisions).
+  Kernel = sum_r G[r] * column_r (x) row_r.
+- Application (type 10, FUN_180c651c0): described above. Tile layout for an image W x H with 3 x 3 tiles: tile (i, j) covers
+  [W*i/3, W*(i+1)/3) x [H*j/3, H*(j+1)/3) grown by m = int((H * f + 1) * 0.5) on interior sides, where f is the float at context +0x10; the
+  window weight across a tile is a linear ramp (1/(n+1) steps) over the m-wide overlap on each interior side and 1 inside. Per pixel the entry is chosen
+  by that pixel's depth lambda (nearest bank lambda) and the tile; horizontal pass uses the row vector, vertical pass the column vector, both as
+  normalised averages with the depth-range weight. Range weight spline FUN_1809c62d0: trapezoid through (-4, 0), (-2, 1), (2, 1), (4, 0)
+  in lambda difference, sampled into the LUT.
+- Result accumulates out += G[r][c] * (vertical result) * tileWindow, with alpha channel 1.
