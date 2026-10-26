@@ -231,8 +231,9 @@ export function buildBank(src, W, H, opts = BANK) {
 
 import { forEachLensPixel, tileWeights, isDefect, sampleDepth, depthFilter } from './superres.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
+import { createLfDemosaic } from './lfdemosaic.js';
 
-export const SPLAT = { aperture: 1.0, tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1 };
+export const SPLAT = { aperture: 1.0, tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine' };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -310,6 +311,38 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
   return far !== Infinity ? far : NaN;
 }
 
+
+// The engine demosaics the whole sensor, so every pixel needs a value: those
+// not under a usable lens get the plain black level and white balance, and
+// unusable ones (saturated, defect) the mean of their valid same colour
+// neighbours (the engine's hot pixel and saturation recovery stages are not
+// ported yet).
+function completePlane(plane, raw, cam, dev) {
+  const { width, height } = cam;
+  const out = Float32Array.from(plane);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (plane[i] === plane[i]) continue;
+      const ch = dev.cfa[y & 1][x & 1];
+      let s = 0;
+      let n = 0;
+      for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+        const v = plane[yy * width + xx];
+        if (v === v) {
+          s += v;
+          n++;
+        }
+      }
+      out[i] = n ? s / n : Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch];
+    }
+  }
+  return out;
+}
+
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
 export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress }, opts = SPLAT) {
   const { width } = cam;
@@ -317,6 +350,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
   const radius = g.pitch * opts.aperture * 0.5;
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2);
+  const dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   const warp = lensWarp(lens, W, H);
   // z of every output pixel, in lambda
   const zMap = new Float32Array(W * H);
@@ -335,7 +369,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   let accepted = 0;
   forEachLensPixel(g, cam, radius, (i, x, y, u, v, lensX, lensY) => {
     if (u * u + v * v > r2) return;
-    if (!rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
+    if (dm ? !(plane[i] === plane[i] && dm.at(x, y, rgb)) : !rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
     const lx = (lensX - xMin) / unit;
     const ly = (lensY - yMin) / unit;
     const lam0 = sampleDepth(lo, lw, lh, lx, ly) / LAMBDA_TO_ALPHA;

@@ -249,3 +249,22 @@ Tested and refuted as the cause of the near-object shift: applying the table as 
 app's image-fitted lens centres already contain, so applying it again double counts. Kept behind `globalThis.__useGeo`. The depth-proportional shift between the
 app and the engine (about -0.097 px per lambda in x, -0.018 in y on b4-1) is therefore still unexplained; next: the engine's ray-to-image mapping
 (`HexLightfieldGeometry::Project`, `Trace`, `SensorAlignedRefocusingEquationRatios`).
+
+### Engine demosaic (StandardizeLightfield::commonPipeline -> ProcessRawImage -> DemosaicImageLF)
+- ProcessRawImage(RawInfo, bool): the bool is cfg 0x1478 (default true, never overridden in the presets read so far). True = DemosaicImageLF::processImage
+  on the whole sensor image (HexLightfield::Img), false = DemosaicImageAHD (DemosaicOneTile). The sensor is demosaiced before any ray is taken.
+- processImage = processBorder (all pixels outside [4, W-4) x [4, H-4)) + Process (the interior, line by line through a 9 row ring buffer:
+  initializeLine, interpolateGofBRLine, interpolateRBofBRLine, interpolateRBofGLine, processBufferBorder). The scalar `*_Gold<float>` functions
+  compute the same thing pass by pass; constants verified identical in the SSE Line versions. Flags +0x120 (clamp >= 0) and +0x121 (median filter
+  of colour differences) are 0 in the constructor, margin (+0x124) = 4, shift (+0x128) = 4.
+- processBorder: 3x3 neighbourhood (clamped to the image) mean per colour; a green site keeps its raw value for G.
+- init: zeros with alpha 1, raw value in its own channel; at green sites the channel of the horizontal neighbours' colour = mean of x-1, x+1, the other
+  = mean of y-1, y+1 (raw).
+- G at red/blue sites: 12 directions (h1 = -1 0 1 0 -2 -1 1 2 2 1 -1 -2, v1 = 0 -1 0 1 -1 -2 -2 -1 1 2 2 1, scale S = 1 x4, 0.5 x8):
+  d_k = (|c - raw(x+2h, y+2v)| + |raw(x+h, y+v) - raw(x-h, y-v)|) * S_k; idx_k = trunc(clamp(d_k * (192 / sum d) - 1, 0, 64)) (idx 0 when sum = 0);
+  w_k = EXPFLUT[idx_k] (65 floats at 0x100a0e6e0, first 0.9602, last 1e-5); G = c + sum w_k (raw_G(x+h, y+v) - X(x+h, y+v)) / sum w_k where X is the
+  green site's initialised value of c's own colour.
+- red at blue / blue at red sites: 4 diagonals (h2 = -1 1 1 -1, v2 = -1 -1 1 1), no S, scale 64: X = G - sum w (G(nb) - raw(nb)) / sum w.
+- red and blue at green sites: the 12 directions again with the G scheme (scale 192): R = g - sum w (G(nb) - R(nb)) / sum w, B likewise.
+- Ported in app/js/core/lfdemosaic.js (banded, window rows y0-5..y1+5; independent of the band size). Not ported yet: HotPixelCorrectionImage,
+  SaturationState / SaturationRecoveryDiffusion and the ColorMosaic gain that run before it in commonPipeline.
