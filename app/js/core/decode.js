@@ -33,6 +33,8 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     readSection: picture ? picture.container.readSection : async () => null,
     // The camera's own correction of its rays (core/raywarp.js).
     rayWarpBytes: null,
+    // The camera's geometry correction table (core/geometrytable.js).
+    geometryBytes: null,
     cam: null,
     raw: null,
   };
@@ -42,6 +44,13 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
       result.rayWarpBytes = await picture.container.readSection(picture.frame.aberrationCorrectionRef);
     } catch {
       result.rayWarpBytes = null;
+    }
+  }
+  if (picture && picture.frame && picture.frame.geometryCorrectionRef) {
+    try {
+      result.geometryBytes = await picture.container.readSection(picture.frame.geometryCorrectionRef);
+    } catch {
+      result.geometryBytes = null;
     }
   }
   // The photo's reconstruction filter bank (core/lytroedof.js).

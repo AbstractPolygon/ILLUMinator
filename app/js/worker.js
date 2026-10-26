@@ -28,6 +28,7 @@ import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
+import { parseGeometryTable } from './core/geometrytable.js';
 import { lytroSplat, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
@@ -435,6 +436,7 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     state.rawFixed = null;
     if (state.settings.hotPixels !== false) useHotPixelFix(true);
     state.dev = makeDevelopParams(state.lf.cam);
+    state.geoTable = state.lf.geometryBytes && !globalThis.__noGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
     state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
@@ -780,7 +782,7 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
   const sr = renderSuperRes(lf.raw, lf.cam, dev, sampler, {
     alpha, allInFocus, u0: u, v0: v, apertureSigma: sigma,
     scale, passes, vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha,
-    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus, lens, rayWarp: activeRayWarp(),
+    onProgress, lensOffsets: state.lensOffsets, calibrate: allInFocus, lens, rayWarp: activeRayWarp(), geoTable: state.geoTable,
     gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
   });
   state.lensOffsets = sr.lensOffsets;

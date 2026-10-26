@@ -13,6 +13,7 @@
 // by the offset under the lens: estimated from the picture itself, or (more
 // accurately, including main lens vignetting) from a white image.
 
+import { geometryAt } from './geometrytable.js';
 import { lensWarp } from './lens.js';
 import { lensRange, lensCenter } from './lenslet.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
@@ -219,7 +220,7 @@ export function superResParams(sampler, { scale = 3, apertureSigma = Infinity, s
 export function renderSuperRes(raw, cam, dev, sampler, options) {
   const {
     alpha = 0, allInFocus = false, u0 = 0, v0 = 0, apertureSigma = Infinity, scale = 3, vignetting: vg, base, depth,
-    depthTolerance = 0.12, onProgress, passes = 0, calibrate = false, lens = null, rayWarp = null,
+    depthTolerance = 0.12, onProgress, passes = 0, calibrate = false, lens = null, rayWarp = null, geoTable = null,
   } = options;
   let lensOffsets = options.lensOffsets || null;
   // The depth map the rays follow (edge snapping tries others).
@@ -468,6 +469,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     let cell = null;
     const warpOut = [0, 0, 0, 0];
     const centreOut = [0, 0, 0, 0];
+    const geoOut = [0, 0];
+    let geoU = 0;
+    let geoV = 0;
     const cosR = Math.cos(g.rotation);
     const sinR = Math.sin(g.rotation);
 
@@ -475,6 +479,14 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       if (lensX + lensY * 1e6 !== lastLens) {
         lastLens = lensX + lensY * 1e6;
         tw = tileWeights(vg, x, y);
+        if (geoTable) {
+          // Where this lens sits on the sensor: the camera's geometry correction moves its rays' directions (core/geometrytable.js).
+          const gx = x - (cosR * u - sinR * v);
+          const gy = y - (sinR * u + cosR * v);
+          geometryAt(geoTable, gx / width - 0.5, gy / height - 0.5, geoOut);
+          geoU = geoOut[0] * g.pitch;
+          geoV = geoOut[1] * g.pitch;
+        }
         if (rayWarp && RAY_WARP.on && allInFocus) {
           // This lens's place on the sensor, for the camera's ray correction.
           const cx = x - (cosR * u - sinR * v);
@@ -496,6 +508,10 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       if (lensOffsets && lens >= 0) {
         u -= lensOffsets.dx[lens];
         v -= lensOffsets.dy[lens];
+      }
+      if (geoTable) {
+        u -= geoU;
+        v -= geoV;
       }
       const du = u - u0;
       const dv = v - v0;

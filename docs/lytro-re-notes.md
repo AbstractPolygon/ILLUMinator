@@ -237,3 +237,10 @@ Config rows still to read: plane fitting (+0xa4, +0xa8, +0xac, +0xb0, +0xb4, +0x
   `HexMicrolensArrayModel::DiskCenter(i, j, MainLensModel, SensorModel, scale)` = lattice centre, rotated by the MLA rotation, with the pitch scaled by
   (exitPupil + mlaZ / c) / exitPupil, and the sensor offset added; `HexDiskArrayModel(CameraModel)` fills the lattice basis from it.
 - My `lytroEdof` port (filter bank, hole fill) is not better than the app's EDOF: MAE 7.6 and gradient ratio 0.64 against 4.6 and 1.03, with colour fringes.
+
+### Geometry correction table (photo section `geometryCorrectionRef`), decoded (LFE::GeometryErrorTable)
+Layout, little endian: magic 0xAF0880FA, version 2, 15, 0, byte size, width, height (60 x 60 on this camera), then height rows of width (u, v) floats from byte 28.
+CorrectLightfieldPoint: cell = (floor(w * (x + 0.5) + 0.5), floor(h * (y + 0.5) + 0.5)) clamped (nearest, no interpolation) for the lens's normalized
+sensor place; the cell's (u, v) is subtracted from the ray's direction (lens pitches, lens-array axes) before the projection. The field on b4-1 runs
+u -0.21..0.16, v -0.12..0.12 with mean (-0.0186, -0.0063): a viewpoint shift of the whole picture that the app's own per-lens offsets drop
+(`whiteOffsets` subtracts the mean; the picture-fitted offsets are relative too), so near objects were 1-3 px off the engine's. `core/geometrytable.js` applies it.
