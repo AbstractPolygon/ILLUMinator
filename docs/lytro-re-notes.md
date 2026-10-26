@@ -24,3 +24,8 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
 ## Measured on photo 7 (fence), our render vs Lytro Desktop output, mean abs error 0..255
 - baseline 7.64 (after per-ray colour depth match). Lytro's recipe as decoded (per-lens depth, 2-unit z-test, flat disc, bilinear) is worse: 8.07 to 8.59.
 - Larger lens-disc share raises the bright excess beside the wire; smaller share lowers it but loses detail.
+
+## Ground truth in every library photo
+- stack.lfp holds Lytro's own EDOF renders (edofWarp acceleration): seven perspective images plus edof_preview.jpg, 2022x1404 with suggestedOverscan (43, 57), and a 541x376 lambda depth map. pitchRatio (3.7429 x, 3.7337 y) is output pixels per lens pitch.
+- Our render at ideal scale (0.81042 of our scale-4 grid, i.e. pitchRatio.x / (4 / rowStep) / pitch) overlays edof_preview.jpg within about 1 px and 0.1-0.3 % scale on all photos tried (zoom -483 to 477): the geometry (with our default lens correction) is not the main error. The per-photo scale differences seen against full_lytro.npy come from that capture's own crop.
+- edof_preview is a cleaner target than full_lytro: no unknown crop, same pixel grid for every photo.
