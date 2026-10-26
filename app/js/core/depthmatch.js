@@ -19,6 +19,11 @@ export const DEPTH_PASSES = {
   // Visible / hidden choice: cost of a hole, of choosing hidden, and its smoothing.
   hole: 2,
   hidden: 0.05,
+  // Cost of a view's own pixel being hidden from the reference (per hidden view, over the view count), the
+  // brightness above which a pixel is blown out, and the cost spread under which it is flat.
+  behind: 1.2,
+  satur: 0.95,
+  flat: 0.15,
   iterations: 3,
   slope: 1,
   trunc: 10,
@@ -135,83 +140,115 @@ function sample3(img, w, h, x, y, out) {
   return true;
 }
 
-// Mean over the views of the capped color difference to reference `r` at
-// trial depth `alpha`; `weights[k]` (1: counts, 0: left out) per pixel or null.
-function costSlice(colors, views, r, alpha, w, h, weights) {
-  const n = w * h;
-  const rc = colors[r];
-  const sum = new Float32Array(n);
-  const cnt = new Float32Array(n);
-  const tmp = [0, 0, 0];
-  const cap = DEPTH_LCOST.tc;
-  views.forEach((view, k) => {
-    if (k === r) return;
-    const sx = alpha * (view.u - views[r].u) * view.detail;
-    const sy = alpha * (view.v - views[r].v) * view.detail;
-    const wt = weights ? weights[k] : null;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const d = y * w + x;
-        const q = wt ? wt[d] : 1;
-        if (q <= 0 || !sample3(colors[k], w, h, x + sx, y + sy, tmp)) continue;
-        const cd = Math.abs(tmp[0] - rc[3 * d]) + Math.abs(tmp[1] - rc[3 * d + 1]) + Math.abs(tmp[2] - rc[3 * d + 2]);
-        sum[d] += q * (cd < cap ? cd : cap);
-        cnt[d] += q;
-      }
+// Bilinear sample of `img` (3 channels) at (x, y) the way the maker's tool does it: every corner
+// outside the picture simply adds nothing (no renormalising). `maps` (1 channel) likewise.
+function sampleOpen(img, ch, w, h, x, y, out) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  for (let k = 0; k < ch; k++) out[k] = 0;
+  for (let j = 0; j < 2; j++) {
+    const yy = y0 + j;
+    if (yy < 0 || yy >= h) continue;
+    for (let i = 0; i < 2; i++) {
+      const xx = x0 + i;
+      if (xx < 0 || xx >= w) continue;
+      const wt = (i ? fx : 1 - fx) * (j ? fy : 1 - fy);
+      for (let k = 0; k < ch; k++) out[k] += img[ch * (yy * w + xx) + k] * wt;
     }
-  });
-  const floor = 0.05 * (views.length - 1);
-  for (let i = 0; i < n; i++) sum[i] = cnt[i] >= floor ? sum[i] / cnt[i] : cap;
-  return sum;
+  }
 }
 
-// One reference view's depth (labels in `alphas`), views left out per `weights`.
-function measureView(colors, views, r, alphas, w, h, weights, refine = false) {
+// The match cost of every trial depth for reference `r` (FUN_18088bea0), in units of the mean over
+// the other views (the maker's tool's cost is ten times that). Per view the capped color difference
+// (L1 over the three channels, `tc`) at the shifted spot; `hidden[k]` (1: reference pixel hidden from
+// view k) leaves a view out and the rest is scaled up to the full count; `behind[k]` (1: the view's own
+// pixel at the shifted spot is hidden from the reference) adds `DEPTH_PASSES.behind` / count.
+// A pixel is set to zero cost at every depth where the shifted views are on average brighter than
+// `satur` in some channel (blown out) and where the costs hardly differ (`flat`, in tool units).
+function costVolume(colors, views, r, alphas, w, h, hidden, behind) {
+  const n = w * h;
+  const P = DEPTH_PASSES;
+  const rc = colors[r];
+  const others = views.length - 1;
+  const cap = DEPTH_LCOST.tc;
+  const K = alphas.length;
+  const cost = alphas.map(() => new Float32Array(n));
+  const blown = new Uint8Array(n);
+  const acc0 = new Float32Array(n);
+  const accH = new Float32Array(n);
+  const accB = new Float32Array(n);
+  const sum = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
+  const tmp = [0, 0, 0];
+  const one = [0];
+  for (let k = 0; k < K; k++) {
+    acc0.fill(0);
+    accH.fill(0);
+    accB.fill(0);
+    for (const s of sum) s.fill(0);
+    views.forEach((view, v) => {
+      if (v === r) return;
+      const sx = alphas[k] * (view.u - views[r].u) * view.detail;
+      const sy = alphas[k] * (view.v - views[r].v) * view.detail;
+      const hid = hidden ? hidden[v] : null;
+      const bh = behind ? behind[v] : null;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const d = y * w + x;
+          sampleOpen(colors[v], 3, w, h, x + sx, y + sy, tmp);
+          const cd = Math.abs(tmp[0] - rc[3 * d]) + Math.abs(tmp[1] - rc[3 * d + 1]) + Math.abs(tmp[2] - rc[3 * d + 2]);
+          const a = hid ? hid[d] : 0;
+          acc0[d] += (1 - a) * (cd < cap ? cd : cap);
+          accH[d] += a;
+          if (bh) {
+            sampleOpen(bh, 1, w, h, x + sx, y + sy, one);
+            accB[d] += one[0];
+          }
+          sum[0][d] += tmp[0];
+          sum[1][d] += tmp[1];
+          sum[2][d] += tmp[2];
+        }
+      }
+    });
+    const c = cost[k];
+    for (let i = 0; i < n; i++) {
+      let a0 = acc0[i];
+      if (accH[i] > 0 && accH[i] < others) a0 = (a0 * others) / (others - accH[i]);
+      c[i] = (a0 + (P.behind * accB[i]) / others) / others;
+      if (Math.max(sum[0][i], sum[1][i], sum[2][i]) > P.satur * others) blown[i] = 1;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let k = 0; k < K; k++) {
+      const v = cost[k][i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    if (blown[i] || (hi - lo) * 10 < P.flat) for (let k = 0; k < K; k++) cost[k][i] = 0;
+  }
+  return cost;
+}
+
+// One reference view's depth (labels in `alphas`), views left out per `weights`
+// (1 visible, 0 hidden) and `behind` (1 where the other view's pixel is hidden from the reference).
+function measureView(colors, views, r, alphas, w, h, weights, refine = false, behind = null) {
   const n = w * h;
   const guide = depthColorGuide(Float32Array.from(views[r].rgb, (x) => x * views[r].gain));
   const arms = crossArms(guide, w, h, DEPTH_CBCA);
   const flat = DEPTH_EDGE.on ? flatness(guide, w, h, DEPTH_EDGE) : null;
-  const scores = alphas.map((a) => {
-    const cost = costSlice(colors, views, r, a, w, h, weights);
+  const hidden = weights ? weights.map((m) => (m ? Float32Array.from(m, (x) => 1 - x) : null)) : null;
+  const volume = costVolume(colors, views, r, alphas, w, h, hidden, behind);
+  const scores = volume.map((cost) => {
     const agg = aggregateCross(cost, arms, DEPTH_CBCA.iterations);
-    for (let i = 0; i < n; i++) cost[i] = -(flat ? (1 - flat[i]) * cost[i] + flat[i] * agg[i] : agg[i]);
-    return cost;
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = -(flat ? (1 - flat[i]) * cost[i] + flat[i] * agg[i] : agg[i]);
+    return out;
   });
   const beliefs = trwsVolume(scores, guide, w, h, DEPTH_TRWS);
-  return refine ? refinedLabels(beliefs, alphas, n) : bestDepth(beliefs, alphas, n);
-}
-
-// The final pass puts each depth between its labels: a parabola through the
-// beliefs of the neighboring labels, kept when it moves less than one step.
-function refinedLabels(beliefs, alphas, n) {
-  const K = alphas.length;
-  const step = alphas[1] - alphas[0];
-  const alpha = new Float32Array(n);
-  const cost = new Float32Array(n);
-  const meanCost = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    let best = 0;
-    let sum = 0;
-    for (let k = 0; k < K; k++) {
-      sum -= beliefs[k][i];
-      if (beliefs[k][i] > beliefs[best][i]) best = k;
-    }
-    let value = alphas[best];
-    if (best > 0 && best < K - 1) {
-      const a = -beliefs[best - 1][i];
-      const b = -beliefs[best][i];
-      const c = -beliefs[best + 1][i];
-      const curve = a + c - 2 * b;
-      if (Math.abs(curve) > 0) {
-        const shift = ((c - a) / (2 * curve)) * step;
-        if (Math.abs(shift) < step) value -= shift;
-      }
-    }
-    alpha[i] = value;
-    cost[i] = -beliefs[best][i];
-    meanCost[i] = sum / K;
-  }
-  return { alpha, cost, meanCost };
+  return bestDepth(beliefs, alphas, n, refine ? scores : null);
 }
 
 // Where view `v` sees the pixels of reference `c`: 1 visible, 0 hidden.
@@ -290,6 +327,11 @@ export function measureMatch(views, w, h, { onProgress } = {}) {
     labels = Array.from({ length: P.adapt.fine }, (_, i) => lo + ((hi - lo) * i) / (P.adapt.fine - 1));
   }
   if (onProgress) onProgress(0.85);
-  const measured = measureView(colors, views, c, labels, w, h, weights, true);
+  // And which pixels of each other view the center cannot see (they are hidden from it).
+  const behind = views.map(() => null);
+  refs.forEach((v) => {
+    if (v !== c) behind[v] = Float32Array.from(seenBy(colors, views, v, c, depths[v], depths[c], w, h), (x) => 1 - x);
+  });
+  const measured = measureView(colors, views, c, labels, w, h, weights, true, behind);
   return measured;
 }

@@ -46,3 +46,20 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
 - Plane prior (`FUN_1809b0b90` RANSAC plane per superpixel + `FUN_1809b3e90` cost term) is behind 0x3860, which is
   off in every preset; it is not part of the shipped pipeline.
 - Port: `bestDepth(..., dataScores)` with `DEPTH_MATCH.dataParabola` (on). Not yet scored against Lytro's depth maps.
+
+## Data cost, as FUN_18088bea0 computes it (all six presets)
+- Per reference view r and trial depth: for each other view v, the capped colour difference
+  `min(0.2, |dR| + |dG| + |dB|)` at the bilinear sample of view v's colours (corners outside the picture add
+  nothing: the sample is not renormalised, and the view still counts). No gradient or interval term (0x2c50 = 0).
+- Costs are ten times the mean over the V-1 other views (0x2cb0 = 10).
+- Last pass only: the pairwise visibility maps from the occlusion task. A[r][v] (1: reference pixel hidden from
+  v) leaves v out and the rest is scaled by n / (n - sum A) when 0 < sum A < n; B[v][r] sampled at the shifted spot
+  (1: v's own pixel hidden from the reference) adds 1.2 / (V-1) per view (0x32d8).
+- A pixel whose shifted views average above 0.95 (0x2ce0) in any channel at any trial depth is blown out: all its
+  costs are zeroed and it is flagged. Where largest minus smallest cost is under 0.15 (0x2d40, tool units) the
+  costs are zeroed too (flag value 1 - 0.5 x range / 0.15).
+- Occlusion task pair problem (FUN_180891d60): two labels per pixel, visible = 2 x hole + capped colour cost,
+  hidden = 2 x (1 - hole) + 0.05 (0x3278, 0x32a8), TRWS 3 iterations, weight 1.
+- Solver smoothness slope p[12000] = 0.1 in every preset (it prints in decimal, so the preset table missed it).
+- Passes: pass 0 (all views as reference) and pass 1 (last); parabola on the aggregated data costs only in the last
+  pass, the 3x3 median after each.

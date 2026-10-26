@@ -1001,7 +1001,7 @@ export function estimateDepth(views, width, height, { min = DEPTH_SEARCH.min, ma
     });
     if (DEPTH_TRWS.on) {
       const cv = views[Math.floor(views.length / 2)];
-      return bestDepth(trwsVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_TRWS), alphas, n, DEPTH_MATCH.dataParabola ? scores : null);
+      return bestDepth(trwsVolume(scores, depthColorGuide(Float32Array.from(cv.rgb, (x) => x * cv.gain)), width, height, DEPTH_TRWS), alphas, n);
     }
     if (DEPTH_MRF.on) {
       const cv = views[Math.floor(views.length / 2)];
@@ -1285,7 +1285,7 @@ export function smoothDepth(alpha, width, height, guide, { amount = 0.3, confide
 // default clean-up chain).
 // The match style's depth labels: whole steps of one lambda unit
 // (LAMBDA_ALPHA alpha each) from -35 up to `top` lambda.
-export const DEPTH_MATCH = { dataParabola: true, subLabel: false, first: -35, top: 8, lambda: 0.0814, adapt: { on: true, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 } };
+export const DEPTH_MATCH = { subLabel: false, first: -35, top: 8, lambda: 0.0814, adapt: { on: true, fine: 48, lowQ: 0.005, highQ: 0.995, pad: 1 } };
 const SEARCH_CLASSIC = { ...DEPTH_SEARCH };
 const STYLE_CLASSIC = { lcost: { on: false }, cbca: { on: false }, trws: { on: false }, direct: { on: false }, coarse: null };
 export function setDepthStyle(style) {
