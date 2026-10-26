@@ -121,6 +121,8 @@ export function cameraInfo(metadata, fallbackLayout) {
     offsetX: first(get(mlaMd, 'sensorOffset', 'x'), 0) / pixelPitch,
     offsetY: first(get(mlaMd, 'sensorOffset', 'y'), 0) / pixelPitch,
     tiling: first(mlaMd.tiling, 'hexUniformRowMajor'),
+    // HexMicrolensArrayModel's f-number: the mla's distance to the sensor over the lens pitch (the engine reads both in micrometres).
+    fNumberMicrolens: first(get(mlaMd, 'sensorOffset', 'z'), 0) / lensPitch,
   };
 
   const lens = get(md, 'devices', 'lens') || {};

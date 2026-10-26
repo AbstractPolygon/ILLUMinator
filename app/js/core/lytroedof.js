@@ -236,6 +236,17 @@ import { createLfDemosaic } from './lfdemosaic.js';
 // aperture: the engine's HexAperture value, LightfieldLogic::NominalApertureFraction = min(micro f-number / main f-number, 2 - that - 2 / pitch)
 // clamped to 0..1, which is 1 - 2/14 on the 14 px standardized lightfield; 'hex' is HexAperture's shape (apothem 0.5 * value lens pitches),
 // 'circle' the earlier disc of radius 0.5 * value.
+// LightfieldLogic::NominalApertureFraction on the 14 px standardized lightfield (K: 2 for the ILLUM, 4 for the first generation).
+export function nominalAperture(cam) {
+  const fm = cam.mla && cam.mla.fNumberMicrolens;
+  const fn = cam.capture && cam.capture.fNumber;
+  if (!(fm > 0) && !(fn > 0)) return SPLAT.aperture;
+  const ratio = fm / fn;
+  const k = cam.bits === 12 ? 4 : 2;
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  return Math.min(clamp01(ratio), clamp01(2 - ratio - k / 14));
+}
+
 export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine' };
 
 // The raw picture corrected for the lens (black level, white balance,
