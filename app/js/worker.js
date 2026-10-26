@@ -1186,6 +1186,19 @@ function measureClassic(id, fast, progress) {
   });
 }
 
+// The views the maker's tool measures depth from (read off its stack files: the seven perspective images
+// sit at the center and at six points 0.4 of a lens pitch away, at 30, 90 ... 330 degrees; its u and v are in
+// lens pitches, checked against the parallax of those images). The center is the middle one.
+function depthViews() {
+  const pitch = state.lf.grid.pitch;
+  const place = (deg) => (deg === null ? { u: 0, v: 0 } : { u: 0.4 * pitch * Math.cos((deg * Math.PI) / 180), v: 0.4 * pitch * Math.sin((deg * Math.PI) / 180) });
+  return [210, 150, 270, null, 90, 330, 30].map((deg) => {
+    const { u, v } = place(deg);
+    const raw = render(u, v);
+    return { u, v, rgb: state.gpu ? raw : equalize(raw), gain: 1, detail: state.settings.detail };
+  });
+}
+
 // The Lytro-style depth (core/depthmatch.js): on the GPU when there is one,
 // and on the CPU if the GPU cannot do it. Returns the finished, unsmoothed depth.
 function measureLytro(progress) {
@@ -1202,12 +1215,12 @@ function measureLytro(progress) {
   let measured = null;
   if (state.gpu) {
     try {
-      measured = measureMatchGpu(state.gpu, state.gpu.readViewsRect(0, 0, outW, outH), outW, outH, { onProgress: progress });
+      measured = measureMatchGpu(state.gpu, depthViews(), outW, outH, { onProgress: progress });
     } catch (e) {
       console.warn('GPU depth match failed; using the CPU', e);
     }
   }
-  if (!measured) measured = measureMatch(state.gpu ? state.gpu.readViewsRect(0, 0, outW, outH) : state.refocusViews, outW, outH, { onProgress: progress });
+  if (!measured) measured = measureMatch(depthViews(), outW, outH, { onProgress: progress });
   return finishDepth(measured, outW, outH, null, { refine: false, min: DEPTH_SEARCH.min, max: DEPTH_SEARCH.max });
 }
 

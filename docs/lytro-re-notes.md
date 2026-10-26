@@ -68,3 +68,12 @@ Read from the decompiled code (Ghidra) and the preset tables inside the DLL.
 - Whole lambda labels from p[0x28f0] = -35 up to min(p[0x2920] = 100, floor(lens infinityLambda) + 3 (p[0x3e00], 3 in five of the six presets)),
   step p[0x2950] = 1. The stack's maxLambda is that rounded up to a multiple of four (checked on 15 photos).
 - Both passes use this one label list; the fine relabelling over the found range (DEPTH_PASSES.adapt) is ours, not the tool's.
+
+## Views the depth is measured from
+- The stack's seven EDOF perspective images (perImage[].perspective) are the centre plus six points at radius 0.4 and
+  angles 30, 90 ... 330 degrees. Their parallax against the stack's own depth map (63 textured patches of constant lambda,
+  photo batch4-1): 1.684 output px (2022 px wide render) per lambda for a 0.4 offset, i.e. 0.451 lens pitches per lambda,
+  which equals 0.0814 x offset in sensor pixels only if the offset unit is one lens pitch (13.85 px). So u, v are in lens pitches.
+- View preparation (FUN_1809b02f0) builds each view with ProjectPerspective(CircularAperture(0.12), u, v, CircularAperture(1.0)).
+- Ring vectors p[0x2e38], p[0x2e78] (radius, angle step) are not in the presets; the 7 views follow from the stack files.
+- The app now measures the Lytro-style depth from these seven views (worker.js depthViews) instead of the 37-view disc.
