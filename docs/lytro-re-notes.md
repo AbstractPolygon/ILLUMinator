@@ -329,3 +329,21 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
   exp(i 2 pi f * trunc((1 - N) / 2)), Hermitian mirror to 2M - 2 points, inverse DFT (+ angle, 1 / n), tap k (centre N / 2) = the real part at k. No window, no normalisation
   (the depth masked passes divide by the weighted kernel sum).
 - Against the engine on b4-1 (engine depth): MAE 6.58 with these kernels, 6.59 with the photo's own 8 bit kernel bank, so the two agree and the remaining softness is elsewhere.
+
+## EDOF reconstruction as the engine runs it (RefocusEdof::reconstructProjectedImage), ILLUM config; what the port now does
+- Order: ProjectEdof (premultiplied splat, per-ray lambda from BackProjectDepthMap::RayTraceDepthMap) -> disocclusionFilling (a no-op for the centre view) ->
+  InpaintImage::Apply (cfg 0x258 = 1, InpaintMethod 1 = DiffusionInterpolateImage = MultilevelDiffuse) -> JointAdaptiveFilter method 10 (GridFilterImage1DDepthMasked,
+  separable, input already normalised, output alpha 1; so no NormalizeImage after it) -> EdgeArtifactReduction (cfg 0x1fc8) -> cfg 0x26d8 stage.
+- DiffusionInterpolateImage (cfg 0x2c0 = 1, 0x2d8 = 0.99, 0x2f0 = 1000, 0x308 = 3 sweeps): every pixel with alpha >= 0.99 is scaled to colour * 1000 / alpha with weight
+  1000, the others stay as they are (x 1.0); then MultilevelDiffuse (Downsample = 3 x 3 binomial 1 2 1 / 4, skipping missing samples; RelaxRedBlack = (A + sum of the 4 B
+  neighbours) / summed alpha, 3 sweeps per level; levels while a side >= 20, at most 10). The port had weight 1 for data (it smoothed the data itself); with 0.99 / 1000
+  the MAE against the engine on b4-1 went 6.58 -> 5.95, the gradient ratio 0.735 -> 0.876 and the edge rise in the focal region 5.8 -> 4.2 px (engine 3.0).
+- RayTraceRegion (BackProjectDepthMap, method 1 from cfg 0x1a00): per std pixel ray, Project at lambda 0, optional GeometryErrorTable (cfg 0x380) and ray warp table (0x2660),
+  walks lambda from the min filtered depth to max + 1 in steps of 1 reading the depth map at the nearest texel, tolerances 1.0 and 2.0 (cfg 0x1a40, 0x1a58), min/max maps on
+  (0x1a70). The depth map is first upscaled x5 (cfg 0x1ab8) with DmResampler (edge preserving, cfg 0x1aa0 on): not ported.
+- HexLightfield disk model (HexMicrolensArrayModel::DiskPitch / DiskCenter, ported as `engineGrid`): disk pitch = lens pitch * (exit pupil[mm] + sensor offset z[um] / 1000) /
+  exit pupil = 14.2899 px on b4-1 (the metadata's lens pitch / pixel pitch is 14.2857), so the lattices drift 2 px apart at the picture edge. Using it (E8) did not
+  improve the score, so the app keeps its own lattice until the geometry is verified against the engine's tiles.
+- Splat: ProjectGold: every std pixel p with confidence > 0: weight = aperture(u, v) times the bilinear weights of OutputPoint - 0.5; rgba * weight accumulates (alpha = sum).
+- Not applied for the engine's picture (sharpening off): the per-lambda unsharp mask (cfg 0x5d8, amounts vs lambda and gain, `SmoothlyVaryingUnsharpMaskImage`) is only
+  applied when the recipe's own sharpening is on (finalImagePipeline needs the recipe's USM amount > 0); `SharpenFilter` bank (cfg 0x100 = 0) is off.

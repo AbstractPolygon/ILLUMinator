@@ -402,7 +402,7 @@ export function nominalAperture(cam) {
   return Math.min(clamp01(ratio), clamp01(2 - ratio - k / 14));
 }
 
-export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine' };
+export const SPLAT = { aperture: 1 - 2 / 14, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 1, step: 1, demosaic: 'engine', nearest: true };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -476,14 +476,22 @@ function rgbAt(plane, width, cfa, x, y, out) {
   return out[0] === out[0] && out[1] === out[1] && out[2] === out[2];
 }
 
+function nearestDepth(D, w, h, x, y) {
+  const xi = Math.min(w - 1, Math.max(0, Math.round(x)));
+  const yi = Math.min(h - 1, Math.max(0, Math.round(y)));
+  return D[yi * w + xi];
+}
+
 // Lytro's per ray depth (FUN_1809b8280): walk the ray's depth from the
 // lowest to the highest depth near its lens and stop where the depth map at
 // the ray's landing place agrees. Returns lambda, or NaN for none.
 function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
   let far = Infinity;
+  const near = opts.nearest;
   for (let lam = lam0; lam <= lam1; lam += opts.step) {
     const a = lam * LAMBDA_TO_ALPHA;
-    const d = sampleDepth(D, lw, lh, lx - a * rdu, ly - a * rdv) / LAMBDA_TO_ALPHA;
+    // RayTraceRegion reads the depth map at the texel the ray falls in (no interpolation)
+    const d = (near ? nearestDepth(D, lw, lh, lx - a * rdu, ly - a * rdv) : sampleDepth(D, lw, lh, lx - a * rdu, ly - a * rdv)) / LAMBDA_TO_ALPHA;
     if (Math.abs(d - lam) < opts.tolA) return d;
     if (d < lam && far !== Infinity && far - d < opts.tolB) {
       const t = far - (lam - opts.step);
