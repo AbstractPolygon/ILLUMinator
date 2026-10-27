@@ -731,11 +731,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   const { W, H } = superResParams(sampler, { scale });
   const cs = colorState(color);
   const dbg = globalThis.__lytro || {};
-  // The camera's ray table moves a depth that was measured with the plain rays (shift, field); Lytro's own depth maps (and the picture the engine makes from them) already include it,
-  // so the engine's path reads them as they are, the way the upscaled map (depth5) below does.
-  const engineDepth = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain && !dbg.shiftedDepth ? state.depthPlain : state.depth.alpha;
   if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
-  if (globalThis.__depthFinal) globalThis.__depthFinal(engineDepth, state.sampler.outW, state.sampler.outH);
+  if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
   // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
   let depth5 = null;
   if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
@@ -744,6 +741,34 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
       state.depth5 = { key, src: state.userDepth, map: userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8) };
     }
     depth5 = state.depth5.map;
+    // state.depth carries the app's ray table shift and field (rayWarpShift, rayWarpField); the upscaled map has to move with it or the march range (from state.depth) and the depth it reads disagree
+    // (b4-2: -4.6 lambda off, the picture came out as a smeared wall).
+    if (state.depthPlain && state.depth.alpha !== state.depthPlain) {
+      const { outW: ow, outH: oh } = state.sampler;
+      const key2 = `${state.gen}`;
+      if (!state.depth5.shifted || state.depth5.shiftedKey !== key2) {
+        const dd = new Float32Array(ow * oh);
+        for (let i = 0; i < dd.length; i++) dd[i] = state.depth.alpha[i] - state.depthPlain[i];
+        const m = state.depth5.map;
+        const data = new Float32Array(m.data.length);
+        for (let y = 0; y < m.height; y++) {
+          const fy = Math.min(oh - 1.001, Math.max(0, (y + 0.5) / m.factor - 0.5));
+          const y0 = Math.floor(fy);
+          const ty = fy - y0;
+          for (let x = 0; x < m.width; x++) {
+            const fx = Math.min(ow - 1.001, Math.max(0, (x + 0.5) / m.factor - 0.5));
+            const x0 = Math.floor(fx);
+            const tx = fx - x0;
+            const q = y0 * ow + x0;
+            const add = (dd[q] * (1 - tx) + dd[q + 1] * tx) * (1 - ty) + (dd[q + ow] * (1 - tx) + dd[q + ow + 1] * tx) * ty;
+            data[y * m.width + x] = m.data[y * m.width + x] + add;
+          }
+        }
+        state.depth5.shifted = { ...m, data };
+        state.depth5.shiftedKey = key2;
+      }
+      depth5 = state.depth5.shifted;
+    }
   }
   progress('Splatting the rays', 0);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
@@ -751,7 +776,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
-    raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: globalThis.__depthOverride ? state.depth.alpha : engineDepth, scale, lens: cs.lens, W, H,
+    raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),
     onProgress: (p) => progress('Splatting the rays', p),

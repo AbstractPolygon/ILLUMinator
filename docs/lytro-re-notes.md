@@ -466,12 +466,13 @@ region 4.08 -> 3.85, whole 3.56 -> 3.44. The opposite sign is clearly worse (3.7
 and `uRayShift` in the GPU shader (`opts.geoMean !== false`). The dotted band beside the near wire (binary depth) is not fixed by this: ray geometry at constant depth
 matches the engine (no dots at all), so the dots come from how a depth step is handled.
 
-### Engine path: depth without the app's ray table shift (b4-2 was garbage)
+### Engine path: the x5 depth must carry the same shift as the lens resolution depth (b4-2 was garbage)
 
 `lytroEdof` took its lens resolution depth from `state.depth`, which for Lytro depth maps carries the app's ray table shift and field term (`rayWarpShift`, `rayWarpField`: about -4.6 lambda on
-b4-2, about 0 on b4-1e), while the x5 map (`depth5`) is built from the stack depth as it is. The two disagreed by that shift, the march range (lo/hi) and the depth it reads no
-longer matched and the b4-2 picture came out as a smeared wall (MAE against the engine 35.8). The stack depth equals the engine's own depth-out for the photo (b4-2: mean abs
-difference 0.05 lambda, aligned), so the engine path now reads the plain smoothed depth (`state.depthPlain`). b4-2: 35.8 -> 5.08; b4-1e unchanged (3.24).
+b4-2, small on b4-1e and b4-3), while the x5 map (`depth5`) was built from the stack depth as it is. The march range (lo / hi, from `state.depth`) and the depth it reads disagreed by that shift and
+the b4-2 picture came out as a smeared wall (MAE against the engine's own render 35.8). First try: read the plain depth everywhere (`state.depthPlain`): b4-2 5.08 but b4-3 got worse (2.72 -> 2.79,
+gradient ratio 0.967 -> 0.879), so the shift itself is right. Final: `depth5` gets `state.depth - state.depthPlain` (shift + field, bilinear to the x5 grid) added. b4-1e 3.24 -> 3.21, b4-2 5.28, b4-3 2.72 (unchanged).
+The stack depth equals the engine's own depth-out (b4-2: mean abs difference 0.05 lambda, aligned).
 
 More oracle results on b4-1 (real depth, vs the engine with its own depth saved and fed back):
 - Reading the depth map shifted by -4 lens in x (equivalently a ray direction offset of -2.2 px used by the depth march only) removes the dotted band beside the near wire completely
