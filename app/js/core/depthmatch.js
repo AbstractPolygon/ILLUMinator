@@ -25,6 +25,8 @@ export const DEPTH_PASSES = {
   behind: 1.2,
   satur: 0.95,
   flat: 0.15,
+  // Engine rule (see costVolume, tool units 0.5 * 0.15); 0 keeps `flat`.
+  noisy: 0.075,
   iterations: 3,
   slope: 1,
   trunc: 10,
@@ -229,7 +231,14 @@ function costVolume(colors, views, r, alphas, w, h, hidden, behind) {
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
-    if (blown[i] || (hi - lo) * 10 < P.flat) for (let k = 0; k < K; k++) cost[k][i] = 0;
+    let flatPixel = (hi - lo) * 10 < P.flat;
+    if (P.noisy) {
+      // removeNoisyDataCostEntries: the cost at rank ceil((labels - 1) * 0.5) less the smallest is under 0.5 * 0.15 (tool units).
+      const rank = Math.ceil((K - 1) * 0.5);
+      const col = Float32Array.from({ length: K }, (_, k) => cost[k][i]).sort();
+      flatPixel = (col[rank] - col[0]) * 10 < P.noisy;
+    }
+    if (blown[i] || flatPixel) for (let k = 0; k < K; k++) cost[k][i] = 0;
   }
   return cost;
 }

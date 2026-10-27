@@ -110,12 +110,17 @@ uniform sampler2D uRaw;
 uniform sampler2D uFlags;
 uniform int uK;
 uniform float uFlat;
+uniform float uNoisy;
 out vec4 outColor;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   float lo = 1e30;
   float hi = -1e30;
   float blown = 0.0;
+  // The smallest costs, sorted (the engine's rule needs the one at rank ceil((labels - 1) / 2)).
+  int rank = (uK - 1 + 1) / 2;
+  float low[${MAX_LABELS / 2 + 2}];
+  for (int i = 0; i <= rank; i++) low[i] = 1e30;
   for (int k = 0; k < ${MAX_LABELS}; k++) {
     if (k >= uK) break;
     ivec2 t = at(p, k >> 2);
@@ -123,8 +128,19 @@ void main() {
     lo = min(lo, v);
     hi = max(hi, v);
     blown = max(blown, texelFetch(uFlags, t, 0)[k & 3]);
+    if (uNoisy > 0.0 && v < low[rank]) {
+      low[rank] = v;
+      for (int i = rank; i > 0; i--) {
+        if (low[i] < low[i - 1]) {
+          float tmp = low[i];
+          low[i] = low[i - 1];
+          low[i - 1] = tmp;
+        }
+      }
+    }
   }
-  outColor = vec4(blown > 0.5 || (hi - lo) * 10.0 < uFlat ? 1.0 : 0.0);
+  bool plain = uNoisy > 0.0 ? (low[rank] - low[0]) * 10.0 < uNoisy : (hi - lo) * 10.0 < uFlat;
+  outColor = vec4(blown > 0.5 || plain ? 1.0 : 0.0);
 }`;
 
 // One label's raw cost back out of its atlas tile, zeroed where uZero says so.
@@ -901,6 +917,7 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
       atlasUniforms(Q);
       gl.uniform1i(Q.u.uK, K);
       gl.uniform1f(Q.u.uFlat, P.flat);
+      gl.uniform1f(Q.u.uNoisy, P.noisy || 0);
       gpu.draw();
       for (let k = 0; k < K; k++) {
         Q = pr.pull;

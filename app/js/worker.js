@@ -1366,6 +1366,7 @@ function measureLytro(progress) {
   // The maker's tool compares the views as they are: linear light, full scale (1.0) at the sensor's clip level,
   // no brightness curve and no smoothing (its cost cap 0.2, blown-out level 0.95 and flat level 0.15 are in those units).
   Object.assign(DEPTH_LCOST, { gamma: 1, normQ: 0, fixedTop: state.dev.clip || 1 });
+  DEPTH_PASSES.noisy = (globalThis.__lytro || {}).noisy ?? 0.075;
   if ((globalThis.__lytro || {}).depthViews && globalThis.__lytro.depthViews.single) DEPTH_PASSES.refs = [4];
   let measured = null;
   if (state.gpu) {
