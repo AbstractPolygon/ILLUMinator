@@ -396,3 +396,10 @@ FirstOrderIirFilterImage (c = cfg 0x1490 = 0.7, forward and backward along rows 
 scaled to 1 at 0, zero from Y = 1); where the weight is gone only positive differences pass (clip cfg 0x14c0 = 0).
 It runs on the demosaiced sensor image before the rays are traced. Ported as `SPLAT.sharpen`; on b4-1e MAE 3.92 -> 3.52,
 gradient ratio 0.94 -> 1.01. amount 1.0 gives 5.44, c 0.5 / 0.85 give 3.63 / 3.55, so 0.25 / 0.7 is the optimum.
+
+### Bank check after the sharpen stage (b4-1e)
+
+Engine-designed bank 3.52 MAE, the photo's embedded PNG bank 3.50, designed bank with frequencies x0.8 / x1.25: 3.51 / 3.57.
+The bank is not the bottleneck any more. Spectrum ratio vs the engine in focus (lambda -5..3) is 0.87-0.95 at mid band and
+1.07-1.24 near Nyquist for both banks. The remaining error is spread over the picture (worst 10% of 64 px blocks hold 26%),
+with ours slightly darker in the 100-200 level range.
