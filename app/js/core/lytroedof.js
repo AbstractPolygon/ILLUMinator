@@ -784,6 +784,15 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
         }
         if (lamR - zMap[p] >= opts.tolerance) continue;
         const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy);
+        if (globalThis.__regionProbe) {
+          const R = globalThis.__regionProbe;
+          if (xx >= R.x0 && xx < R.x1 && yy >= R.y0 && yy < R.y1) {
+            const b = Math.max(0, Math.min(R.n - 1, Math.round((lamR - R.lo) / R.step)));
+            R.w[b] += w;
+            R.z[Math.max(0, Math.min(R.n - 1, Math.round((zMap[p] - R.lo) / R.step)))] += w;
+            R.px[(yy - R.y0) * (R.x1 - R.x0) * R.n + (xx - R.x0) * R.n + b] += w;
+          }
+        }
         // the standardized pixel's colour is demodulated and its alpha is modulation ^ 2 (ApplyReweighting, cfg 0x2470): colour sums unweighted, alpha sums the weights
         const cw = opts.alphaPow ? w : w * rayWeight;
         const aw = opts.alphaPow ? w * Math.pow(plane.mod[i], opts.alphaPow) : w * rayWeight;

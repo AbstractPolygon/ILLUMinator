@@ -17,6 +17,12 @@ import { bufferReader, readLightFieldPicture } from './lfp.js';
 import { decodeDepth } from './processed.js';
 
 const FIT = { kx: 1, ky: 0.995, dx: -1 / 2022, dy: -1 / 1404 };
+// Debug: the warped path's depth map placement, texels: X = (X - W / 2) * kx + W / 2 + dx (likewise Y).
+export const DEPTH_MAP_PLACE = { kx: 1, ky: 1, dx: 0, dy: 0 };
+function place(X, Y, W, H) {
+  const P = DEPTH_MAP_PLACE;
+  return [Math.min(W - 1, Math.max(0, (X + 0.5 - W / 2) * P.kx + W / 2 + P.dx - 0.5)), Math.min(H - 1, Math.max(0, (Y + 0.5 - H / 2) * P.ky + H / 2 + P.dy - 0.5))];
+}
 
 // The lambda range from stack.userdepthmap.txt (null if unreadable).
 export function parseDepthRange(text) {
@@ -127,8 +133,7 @@ export function userDepthAlpha(map, sampler, cam, offset = 0, warp = null) {
         // Lytro's depth map is in the corrected picture: where this position
         // of the uncorrected grid lands once the lens distortion is corrected.
         const [qx, qy] = warp.forward(x + 0.5, y + 0.5);
-        X = Math.min(W - 1, Math.max(0, (qx / outW) * W - 0.5));
-        Y = Math.min(H - 1, Math.max(0, (qy / outH) * H - 0.5));
+        [X, Y] = place((qx / outW) * W - 0.5, (qy / outH) * H - 0.5, W, H);
       } else {
         X = Math.min(W - 1, Math.max(0, ((sx / cam.width - 0.5) * FIT.kx + 0.5 + FIT.dx) * W));
         Y = Math.min(H - 1, Math.max(0, ((sy / cam.height - 0.5) * FIT.ky + 0.5 + FIT.dy) * H));
@@ -168,8 +173,7 @@ export function userDepthAlphaUpscaled(map, sampler, cam, offset = 0, warp = nul
       let Y;
       if (warp) {
         const [qx, qy] = warp.forward(ox, oy);
-        X = Math.min(W - 1, Math.max(0, (qx / outW) * W - 0.5));
-        Y = Math.min(H - 1, Math.max(0, (qy / outH) * H - 0.5));
+        [X, Y] = place((qx / outW) * W - 0.5, (qy / outH) * H - 0.5, W, H);
       } else {
         const dx = ox - ax;
         const dy = oy - ay;

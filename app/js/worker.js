@@ -9,7 +9,7 @@ import {
   clipTrust,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { userDepthAlpha, userDepthAlphaUpscaled, dilateNearest } from './core/userdepth.js';
+import { userDepthAlpha, userDepthAlphaUpscaled, dilateNearest, DEPTH_MAP_PLACE } from './core/userdepth.js';
 import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
@@ -718,6 +718,10 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // splatted with a depth each, holes filled, and the depth aware filter bank of
 // the photo applied.
 const ENGINE_DEPTH_SHIFT = -1;
+// Where Lytro's depth map sits in our picture, for the engine's own picture (userdepth.js DEPTH_MAP_PLACE, texels of the depth map about its center). The engine's depth
+// map spans its picture, which is 1.6 % tighter than ours, so away from the center our nominal placement was off by up to 4 lenses (fit on the engine's binary depth oracle:
+// fence wire edge region 18.6 -> 6.4, whole picture 3.25 -> 3.17).
+const ENGINE_PLACE = { kx: 0.9844, ky: 1.005, dx: -0.5, dy: 0 };
 // texels (5 per lens) the near side of a depth step grows by in the x5 map (core/userdepth.js dilateNearest)
 const D5_GROW = 10;
 const D5_LEVEL = false;
@@ -742,12 +746,19 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
   // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
   const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? ENGINE_DEPTH_SHIFT) * LAMBDA_TO_ALPHA : 0;
-  const depthUsed = engineShift ? Float32Array.from(state.depthPlain, (x) => x + engineShift) : state.depth.alpha;
+  const place = { ...ENGINE_PLACE, ...(dbg.place || {}) };
+  const placeKey = JSON.stringify(place);
+  if (engineShift && (!state.depthEngine || state.depthEngine.key !== placeKey || state.depthEngine.src !== state.depthRaw)) {
+    const { outW, outH } = state.sampler;
+    const alpha = withPlace(place, () => userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH)));
+    state.depthEngine = { key: placeKey, src: state.depthRaw, plain: smoothedDepth(alpha, state.depthRaw.confidence) };
+  }
+  const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : state.depth.alpha;
   let depth5 = null;
   if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
-    const key = `${state.sampler.outW}x${state.sampler.outH}`;
+    const key = `${state.sampler.outW}x${state.sampler.outH}:${placeKey}`;
     if (!state.depth5 || state.depth5.key !== key || state.depth5.src !== state.userDepth) {
-      state.depth5 = { key, src: state.userDepth, map: userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
+      state.depth5 = { key, src: state.userDepth, map: withPlace(place, () => userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL)) };
     }
     depth5 = state.depth5.map;
     const grow = dbg.d5Grow ?? D5_GROW;
@@ -1436,6 +1447,24 @@ function rayWarpField(outW, outH) {
   }
   state.rayField = { key, warp, values };
   return values;
+}
+
+// Runs `fn` with the depth map placement `p` (userdepth.js DEPTH_MAP_PLACE), back to the plain one afterwards.
+function withPlace(p, fn) {
+  Object.assign(DEPTH_MAP_PLACE, p);
+  try {
+    return fn();
+  } finally {
+    Object.assign(DEPTH_MAP_PLACE, { kx: 1, ky: 1, dx: 0, dy: 0 });
+  }
+}
+
+// A depth map (alpha, the sampler's grid) smoothed by the Depth > Smoothing setting, guided by the picture.
+function smoothedDepth(alpha, confidence) {
+  const { outW, outH } = state.sampler;
+  const guide = equalize(Float32Array.from(centerView()));
+  const smooth = state.gpu ? state.gpu.smoothDepth.bind(state.gpu) : smoothDepth;
+  return smooth(alpha, outW, outH, guide, { amount: state.settings.depthSmoothing ?? 0.3, confidence, step: state.depthRaw && state.depthRaw.flat ? DEPTH_STEP : 0 });
 }
 
 function applyDepthSmoothing() {
