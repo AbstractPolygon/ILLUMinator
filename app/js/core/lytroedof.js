@@ -662,6 +662,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     rayShift[0] = (-su / cells) * g.pitch;
     rayShift[1] = (-sv / cells) * g.pitch;
   }
+  if (opts.logShift) console.log('RAYSHIFT', rayShift[0], rayShift[1], 'geoTable', !!geoTable, geoTable ? geoTable.width + 'x' + geoTable.height : '');
   let cell = null;
   let lastCell = NaN;
   // z of every output pixel, in lambda

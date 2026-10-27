@@ -828,7 +828,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
     raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
-    rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),
+    rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => progress('Splatting the rays', p),
   }, {
     ...LYTRO_SPLAT,
@@ -1416,6 +1416,7 @@ function measureLytro(progress) {
   const infinity = state.lf && state.lf.cam && state.lf.cam.capture && state.lf.cam.capture.infinityLambda;
   const top = Number.isFinite(infinity) ? Math.min(100, Math.floor(infinity) + 3) : 8;
   DEPTH_PASSES.top = Math.max(top, DEPTH_PASSES.first + 8);
+  if ((globalThis.__lytro || {}).logTop) console.log('LYTRO_TOP', infinity, top, DEPTH_PASSES.top);
   DEPTH_PASSES.step = Math.max(1, Math.ceil((DEPTH_PASSES.top - DEPTH_PASSES.first + 1) / 64));
   Object.assign(DEPTH_SEARCH, { min: DEPTH_PASSES.first * DEPTH_PASSES.lambda, max: DEPTH_PASSES.top * DEPTH_PASSES.lambda });
   // The maker's tool compares the views as they are: linear light, full scale (1.0) at the sensor's clip level,
