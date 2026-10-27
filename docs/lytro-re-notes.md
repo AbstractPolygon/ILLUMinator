@@ -490,3 +490,10 @@ More oracle results on b4-1 (real depth, vs the engine with its own depth saved 
 - Nearer-wins (min) dilation of the x5 depth map by k texels (5 texels = 1 lens): halo at the near wire 19.8 -> 15.7 (k 5) -> 8.3 (k 12) -> 6.3 (k 16), whole picture flat up to k 10 (3.93 -> 3.92)
   and +0.1 at k 16. Against the engine's own renders at k 10: b4-1 MAE 3.24 -> 3.22, b4-2 5.08 -> 5.10, b4-3 2.72 -> 2.79 with the gradient ratio 0.967 -> 0.879 (softer thin structures), so not adopted.
 - b4-2 needs a 3 px alignment shift against the engine (b4-1 0.1) also with the engine's own lens grid and table, and with or without the table mean: unexplained, probably depth proportional (its depth reaches +27).
+
+### Near side growth of the x5 depth (adopted: 10 texels = 2 lens)
+Earlier readings of the dilation results were confounded by the b4-3 depth bug (the identical 2.79 / 0.879 on b4-3 at every dilation came from the depth shift, not from the dilation, which does nothing on
+that picture). With the constant shift in place, growing the near side of every depth step in the x5 map by 10 texels (`dilateNearest`, `D5_GROW`) gives: b4-1e wire halo 19.0 -> 9.1, knot 3.95 -> 3.08, whole
+picture 3.96 -> 3.97, MAE against the engine 3.21 -> 3.22; b4-2 5.12 -> 5.14; b4-3 2.73 -> 2.73. It is empirical: Lytro's own pictures keep the near depth about two lenses past a step in the depth map, the cause is not found
+(ray geometry matches the engine at constant depth, the resampler's owner split is at the cell midpoint like ours, the engine's ProjectEdof view offsets are 0 for this recipe, the output depth z grown by r px is worse:
+r 3 -> 16.4 / whole 4.04, r 6 -> 19.4 / 4.23, r 9 -> 28.6 / 4.51). The lookup using only a fraction of the ray table's position shift (0, .5, 1.5, 2): no change in the halo.

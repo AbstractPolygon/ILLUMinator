@@ -9,7 +9,7 @@ import {
   clipTrust,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { userDepthAlpha, userDepthAlphaUpscaled } from './core/userdepth.js';
+import { userDepthAlpha, userDepthAlphaUpscaled, dilateNearest } from './core/userdepth.js';
 import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
@@ -718,6 +718,8 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // splatted with a depth each, holes filled, and the depth aware filter bank of
 // the photo applied.
 const ENGINE_DEPTH_SHIFT = -1;
+// texels (5 per lens) the near side of a depth step grows by in the x5 map (core/userdepth.js dilateNearest)
+const D5_GROW = 10;
 
 async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   requireRaw();
@@ -747,12 +749,16 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
       state.depth5 = { key, src: state.userDepth, map: userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8) };
     }
     depth5 = state.depth5.map;
+    const grow = dbg.d5Grow ?? D5_GROW;
+    if (grow) {
+      if (state.depth5.grown?.r !== grow) state.depth5.grown = { r: grow, map: dilateNearest(state.depth5.map, grow) };
+      depth5 = state.depth5.grown.map;
+    }
     // the upscaled map moves with the depth the march range comes from, or the two disagree
     if (engineShift) {
-      const key2 = `${engineShift}`;
+      const key2 = `${engineShift}:${grow}`;
       if (!state.depth5.shifted || state.depth5.shiftedKey !== key2) {
-        const m = state.depth5.map;
-        state.depth5.shifted = { ...m, data: Float32Array.from(m.data, (x) => x + engineShift) };
+        state.depth5.shifted = { ...depth5, data: Float32Array.from(depth5.data, (x) => x + engineShift) };
         state.depth5.shiftedKey = key2;
       }
       depth5 = state.depth5.shifted;
