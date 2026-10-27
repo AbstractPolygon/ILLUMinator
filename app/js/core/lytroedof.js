@@ -680,7 +680,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.plainMarch && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
@@ -692,11 +692,12 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const r2 = radius * radius;
   let count = 0;
   let accepted = 0;
-  forEachLensPixel(g, cam, radius, (i, x, y, u, v, lensX, lensY) => {
+  forEachLensPixel(g, cam, radius + 1, (i, x, y, u, v, lensX, lensY) => {
     if (hex) {
       // HexAperture::operator()(u, v): flat sides at |u| = apothem, corners on the v axis (u, v are in the lens array's own frame)
-      const au = Math.abs(u);
-      const av = Math.abs(v);
+      // opts.apShift: the engine tests the window on the direction after the geometry table (centred on the table's mean shift)
+      const au = Math.abs(u + (opts.apShift !== false ? rayShift[0] : 0));
+      const av = Math.abs(v + (opts.apShift !== false ? rayShift[1] : 0));
       if (au > apothem || av > 2 * hexRise || (av > hexRise && av + au / Math.sqrt(3) > 2 * hexRise)) return;
     } else if (u * u + v * v > r2) return;
     if (opts.inner && Math.hypot(u, v) / g.pitch < opts.inner) return;
@@ -728,7 +729,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
         const cy = y - (sinR * u + cosR * v);
         cell = rayWarp.lens(cx / cam.width - 0.5, cy / cam.height - 0.5);
       }
-      rayWarp.fromLens(cell, u / g.pitch, v / g.pitch, warpOut);
+      // opts.gctFirst: the engine looks the ray table up on the direction after the geometry table (CorrectLightfieldPoint, then the table)
+      rayWarp.fromLens(cell, (u + (opts.gctFirst !== false ? rayShift[0] : 0)) / g.pitch, (v + (opts.gctFirst !== false ? rayShift[1] : 0)) / g.pitch, warpOut);
       const sx = warpOut[0] * cam.width;
       const sy = warpOut[1] * cam.height;
       lx += (cosR * sx + sinR * sy) / unit;
@@ -769,8 +771,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       pv = (opts.perspSwap ? opts.persp[0] : opts.persp[1]) * sg[1] * g.pitch;
     }
     const aPivot = LAMBDA_TO_ALPHA * (opts.dispScale || 1) * (opts.pivot || 0);
-    let qx = (lx - a * (ru - pu) - aPivot * pu) * scale;
-    let qy = (ly - a * (rv - pv) - aPivot * pv) * scale;
+    let qx = (lx - a * (ru - pu) - aPivot * pu + (opts.posX || 0)) * scale;
+    let qy = (ly - a * (rv - pv) - aPivot * pv + (opts.posY || 0)) * scale;
     if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
     const x0 = Math.floor(qx);
     const y0 = Math.floor(qy);

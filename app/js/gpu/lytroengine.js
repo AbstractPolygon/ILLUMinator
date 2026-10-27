@@ -435,8 +435,9 @@ void main() {
   float u = lx0 - lensX;
   float v = ly0 - lensY;
   // HexAperture: flat sides at |u| = apothem, corners on the v axis
-  float au = abs(u);
-  float av = abs(v);
+  // (on the direction after the geometry table, like the engine: centred on the table's mean shift)
+  float au = abs(u + uRayShift.x);
+  float av = abs(v + uRayShift.y);
   float ap = uHex.x;
   float rise = uHex.y;
   if (au > ap || av > 2.0 * rise || (av > rise && av + au / 1.7320508 > 2.0 * rise)) return;
@@ -454,7 +455,7 @@ void main() {
   float rv = v;
   if (uRayWarp == 1) {
     vec2 centre = vec2(uOrigin.x + cosR * lensX - sinR * lensY, uOrigin.y + sinR * lensX + cosR * lensY);
-    vec4 wv = rayWarpAt(vec4(centre / uCam - 0.5, u / pitch, v / pitch));
+    vec4 wv = rayWarpAt(vec4(centre / uCam - 0.5, (u + uRayShift.x) / pitch, (v + uRayShift.y) / pitch));
     vec2 s = wv.xy * uCam;
     lens += vec2(cosR * s.x + sinR * s.y, -sinR * s.x + cosR * s.y) / uUnit;
     ru += (cosR * wv.z + sinR * wv.w) * pitch;
