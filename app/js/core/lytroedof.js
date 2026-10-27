@@ -404,8 +404,8 @@ export function nominalAperture(cam) {
   return Math.min(clamp01(ratio), clamp01(2 - ratio - k / 14));
 }
 
-// aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1: 0.5 -> MAE 3.93, 0.857 -> 4.52); the nominal fraction read from the metadata is wider.
-export const SPLAT = { aperture: 0.5, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
+// aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1 with the engine's depth: 0.3..0.5 -> 3.92, 0.6 -> 4.09, 0.857 -> 4.74); the nominal fraction read from the metadata is wider.
+export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
