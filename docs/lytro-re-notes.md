@@ -465,3 +465,18 @@ region 4.08 -> 3.85, whole 3.56 -> 3.44. The opposite sign is clearly worse (3.7
 (engine grid + full table = 3.55, engine grid alone 4.15, table with the wrong sign 4.90, so the table is the engine's own correction). `lytroSplat` applies the mean on the CPU
 and `uRayShift` in the GPU shader (`opts.geoMean !== false`). The dotted band beside the near wire (binary depth) is not fixed by this: ray geometry at constant depth
 matches the engine (no dots at all), so the dots come from how a depth step is handled.
+
+### Engine path: depth without the app's ray table shift (b4-2 was garbage)
+
+`lytroEdof` took its lens resolution depth from `state.depth`, which for Lytro depth maps carries the app's ray table shift and field term (`rayWarpShift`, `rayWarpField`: about -4.6 lambda on
+b4-2, about 0 on b4-1e), while the x5 map (`depth5`) is built from the stack depth as it is. The two disagreed by that shift, the march range (lo/hi) and the depth it reads no
+longer matched and the b4-2 picture came out as a smeared wall (MAE against the engine 35.8). The stack depth equals the engine's own depth-out for the photo (b4-2: mean abs
+difference 0.05 lambda, aligned), so the engine path now reads the plain smoothed depth (`state.depthPlain`). b4-2: 35.8 -> 5.08; b4-1e unchanged (3.24).
+
+More oracle results on b4-1 (real depth, vs the engine with its own depth saved and fed back):
+- Reading the depth map shifted by -4 lens in x (equivalently a ray direction offset of -2.2 px used by the depth march only) removes the dotted band beside the near wire completely
+  (halo score 19.8 -> 6.0, knot 4.03 -> 2.96) but costs 0.1 on the whole picture; so does the per cell table value (x2 .. x3) as that march offset (halo 6.1, whole 3.93 -> 4.06, MAE against
+  the engine's own render 3.24 -> 3.32). Not adopted: the cause of the depth-proportional offset between the engine's depth map and the rays is still unknown (the ray table's chief ray
+  and tilt terms were tried for the march only: no effect).
+- Aperture: against constant depth renders of the engine the best aperture is the metadata's 0.9025 used directly (0.8 .. 0.9), not 0.451; with the real depth the larger aperture is
+  worse (3.24 -> 3.51) because it exposes this offset. Engine's accumulate step and march (importance gate, conf > 0, tolerances) read again: identical to ours.

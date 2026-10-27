@@ -731,8 +731,11 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   const { W, H } = superResParams(sampler, { scale });
   const cs = colorState(color);
   const dbg = globalThis.__lytro || {};
+  // The camera's ray table moves a depth that was measured with the plain rays (shift, field); Lytro's own depth maps (and the picture the engine makes from them) already include it,
+  // so the engine's path reads them as they are, the way the upscaled map (depth5) below does.
+  const engineDepth = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain && !dbg.shiftedDepth ? state.depthPlain : state.depth.alpha;
   if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
-  if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
+  if (globalThis.__depthFinal) globalThis.__depthFinal(engineDepth, state.sampler.outW, state.sampler.outH);
   // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
   let depth5 = null;
   if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
@@ -748,7 +751,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
-    raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
+    raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: globalThis.__depthOverride ? state.depth.alpha : engineDepth, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),
     onProgress: (p) => progress('Splatting the rays', p),
@@ -1420,6 +1423,8 @@ function applyDepthSmoothing() {
   // Moved by the focus offset found for this photo (see superRes).
   const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA + rayWarpShift();
   const field = rayWarpField(outW, outH);
+  // Kept without the shift as well: the engine's own picture reads Lytro's depth as it is (lytroEdof).
+  state.depthPlain = smoothed;
   state.depth = { ...raw, alpha: shift || field ? Float32Array.from(smoothed, (x, i) => x + shift + (field ? field[i] : 0)) : smoothed };
   state.depthSmoothingApplied = amount;
   state.gen++;
