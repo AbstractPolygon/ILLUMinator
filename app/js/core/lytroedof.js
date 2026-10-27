@@ -412,8 +412,6 @@ export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tol
 export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
-  // SaturationState: pixels at the sensor's white keep their (clipped) value and are raised later by the diffusion.
-  plane.sat = new Uint8Array(width * height);
   plane.mod = new Float32Array(width * height);
   // The camera's white image, as the engine uses it: every pixel is divided by its modulation relative to the same colour at the lens centre.
   let centres = null;
@@ -461,7 +459,6 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null) 
       if (value - b > 1.2 * est || value > 0.99 * dev.saturated[ch]) value = est + b;
       else return;
     }
-    if (value >= dev.saturated[ch]) plane.sat[i] = 1;
     if (globalThis.__radialFix) gain *= globalThis.__radialFix(Math.hypot(u, v) / g.pitch);
     plane.mod[i] = 1 / gain;
     plane[i] = Math.max(0, value - dev.black[ch]) * dev.scale[ch] * gain;
@@ -547,12 +544,11 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
 // The engine demosaics the whole sensor, so every pixel needs a value: those
 // not under a usable lens get the plain black level and white balance, and
 // unusable ones (saturated, defect) the mean of their valid same colour
-// neighbours (the engine's hot pixel and saturation recovery stages are not
-// ported yet).
+// neighbours. (The engine's SaturationRecoveryType defaults to 2, which does not
+// diffuse; its highlight recovery is the clip rule of sharpenHighlights.)
 function completePlane(plane, raw, cam, dev) {
   const { width, height } = cam;
   const out = Float32Array.from(plane);
-  const sat = plane.sat;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
@@ -571,31 +567,9 @@ function completePlane(plane, raw, cam, dev) {
         }
       }
       out[i] = n ? s / n : Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch];
-      if (raw[i] >= dev.saturated[ch]) sat[i] = 1;
     }
   }
-  diffuseSaturation(out, sat, width, height, dev.cfa);
   return out;
-}
-
-// SaturationRecoveryDiffusion (the engine's mode 1, on the mosaic before the
-// demosaic): 20 in-place raster sweeps in which every saturated pixel becomes
-// the mean of its four same-colour neighbours (diagonals at green, two pixels
-// away at red and blue) if that is larger than its own value.
-function diffuseSaturation(a, sat, W, H, cfa) {
-  for (let it = 0; it < 20; it++) {
-    for (let y = 2; y < H - 2; y++) {
-      for (let x = 2; x < W - 2; x++) {
-        const i = y * W + x;
-        if (!sat[i]) continue;
-        const m = cfa[y & 1][x & 1] === 1
-          ? a[i - W - 1] + a[i - W + 1] + a[i + W - 1] + a[i + W + 1]
-          : a[i - 2 * W] + a[i - 2] + a[i + 2] + a[i + 2 * W];
-        const v = m * 0.25;
-        if (a[i] < v) a[i] = v;
-      }
-    }
-  }
 }
 
 // SharpenRecoverHighlightsYCbCr as read from the engine: the luma is smoothed
@@ -652,9 +626,6 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // the pixels to read reach the hexagon's corners
   const radius = hex ? (apothem * 2) / Math.sqrt(3) : apothem;
   const hexRise = apothem / Math.sqrt(3);
-  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation);
-  let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
-  if (dm && opts.sharpen) dm = sharpenHighlights(dm, width, cam.height, opts.sharpen);
   // With the camera's ray table every ray carries the distortion correction itself (as in the engine), so there is no picture warp afterwards.
   const warp = rayWarp ? null : lensWarp(lens, W, H);
   const cosR = Math.cos(g.rotation);
@@ -674,6 +645,16 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const reach = opts.reach === 'engine' ? minMaxRadius(depth, lw, lh, g, unit) : opts.reach;
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
+  // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
+  const gpuInput = { raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
+  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+    const gpuAcc = opts.gpu(gpuInput);
+    if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
+  }
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation);
+  let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
+  if (dm && opts.sharpen) dm = sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
   const rgb = [0, 0, 0];
   const r2 = radius * radius;
@@ -772,6 +753,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       }
     }
   }, onProgress);
+  if (globalThis.__dumpSplatAcc) globalThis.__dumpSplatAcc(acc);
   return { acc, W, H, zMap, stats: { rays: count, accepted } };
 }
 

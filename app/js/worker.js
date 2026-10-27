@@ -37,6 +37,7 @@ import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
+import { lytroSplatGpu } from './gpu/lytroengine.js';
 
 const state = {
   lut: null, // the photo's LUT (core/lut.js), or null
@@ -741,7 +742,21 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true })),
     onProgress: (p) => progress('Splatting the rays', p),
-  }, { ...LYTRO_SPLAT, ...(dbg.splat || {}) });
+  }, {
+    ...LYTRO_SPLAT,
+    // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
+    gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
+      try {
+        const acc = lytroSplatGpu(state.gpu, input, (p) => progress('Splatting the rays', p));
+        if (acc) state.lytroGpu = true;
+        return acc;
+      } catch (e) {
+        console.warn('GPU engine failed, using the CPU:', e);
+        return null;
+      }
+    } : null,
+    ...(dbg.splat || {}),
+  });
   if (state.jobs.superres !== job) return { cancelled: true };
   progress('Filling holes', 0);
   const filled = dbg.noFill ? null : fillHoles(sp.acc, W, H);

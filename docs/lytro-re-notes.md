@@ -403,3 +403,16 @@ Engine-designed bank 3.52 MAE, the photo's embedded PNG bank 3.50, designed bank
 The bank is not the bottleneck any more. Spectrum ratio vs the engine in focus (lambda -5..3) is 0.87-0.95 at mid band and
 1.07-1.24 near Nyquist for both banks. The remaining error is spread over the picture (worst 10% of 64 px blocks hold 26%),
 with ours slightly darker in the 100-200 level range.
+
+## The engine path on the GPU (app/js/gpu/lytroengine.js)
+
+CPU profile of the engine path (b4-1e, scale 3): the demosaic was 31% of the run, the corrected plane, plane completion and
+luma boost another ~10%, the ray march only 2%. Those sensor-side stages now run on the GPU in bands of 256 rows with an
+80 row overlap (demosaic 6 rows, luma smoothing 64): the corrected plane with the embedded flat field and hot pixel rule,
+the three demosaic passes of DemosaicImageLF, the luma smoothing as 28 recursive-doubling passes (exact up to 0.7^64), and
+the ray splat as one point per sensor pixel (hex aperture, ray table, RayTraceRegion march, 2x2 bilinear footprint with the
+per-pixel depth tolerance in the fragment shader, additive blend into RGBA32F, needs EXT_float_blend). The hole filling and
+the filter bank stay on the CPU.
+Checked against the CPU on the same inputs (SwiftShader): mean relative difference of the summed weight 0.03%, colour
+difference 4e-6, 0.05% of pixels differ by more than 5% (edge pixels where the depth march picks the other surface).
+The engine's saturation diffusion is gone from the CPU path as well: SaturationRecoveryType defaults to 2, which does not diffuse.
