@@ -720,10 +720,10 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 const ENGINE_DEPTH_SHIFT = -1;
 // Where Lytro's depth map sits in our picture, for the engine's own picture (userdepth.js DEPTH_MAP_PLACE, texels of the depth map about its center). The engine's depth
 // map spans its picture, which is 1.6 % tighter than ours, so away from the center our nominal placement was off by up to 4 lenses (fit on the engine's binary depth oracle:
-// fence wire edge region 18.6 -> 6.4, whole picture 3.25 -> 3.17).
-const ENGINE_PLACE = { kx: 0.9844, ky: 1.005, dx: -0.5, dy: 0 };
+// fence wire edge region 18.6 -> 6.4 on the binary oracle; on b4-1e the three edge blocks 8.4 7.7 7.6 -> 6.3 7.6 5.7, whole picture 3.25 -> 3.18; the fit is coordinate descent on those blocks, halo and whole; b4-2 and b4-3 do not move).
+const ENGINE_PLACE = { kx: 0.995, ky: 1.015, dx: -2, dy: -1.5 };
 // texels (5 per lens) the near side of a depth step grows by in the x5 map (core/userdepth.js dilateNearest)
-const D5_GROW = 10;
+const D5_GROW = 4;
 const D5_LEVEL = false;
 
 async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
@@ -755,7 +755,28 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   }
   const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : state.depth.alpha;
   let depth5 = null;
-  if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
+  if (!state.userDepth && !state.pp && dbg.own5) {
+    // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
+    const { outW, outH } = state.sampler;
+    const k = `own:${outW}x${outH}:${state.depthSmoothingApplied}`;
+    if (!state.depth5 || state.depth5.key !== k || state.depth5.src !== state.depthPlain) {
+      const lambda = Float32Array.from(state.depthPlain, (a) => a / LAMBDA_TO_ALPHA);
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const v of lambda) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      const data = Float32Array.from(lambda, (v) => (v - lo) / (hi - lo));
+      state.depth5 = { key: k, src: state.depthPlain, map: userDepthAlphaUpscaled({ width: outW, height: outH, data, min: lo, max: hi, identity: true }, state.sampler, state.lf.cam, 0, null, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
+    }
+    depth5 = state.depth5.map;
+    const grow = dbg.d5Grow ?? D5_GROW;
+    if (grow) {
+      if (state.depth5.grown?.r !== grow || state.depth5.grown.round !== !!dbg.d5Round) state.depth5.grown = { r: grow, round: !!dbg.d5Round, map: dilateNearest(state.depth5.map, grow, !!dbg.d5Round) };
+      depth5 = state.depth5.grown.map;
+    }
+  } else if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
     const key = `${state.sampler.outW}x${state.sampler.outH}:${placeKey}`;
     if (!state.depth5 || state.depth5.key !== key || state.depth5.src !== state.userDepth) {
       state.depth5 = { key, src: state.userDepth, map: withPlace(place, () => userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL)) };

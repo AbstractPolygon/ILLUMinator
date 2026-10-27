@@ -171,7 +171,11 @@ export function userDepthAlphaUpscaled(map, sampler, cam, offset = 0, warp = nul
       const oy = (y + 0.5) / factor;
       let X;
       let Y;
-      if (warp) {
+      if (map.identity) {
+        // a depth map measured on the sampler's own grid: pixel i is output pixel i
+        X = Math.min(W - 1, Math.max(0, ox - 0.5));
+        Y = Math.min(H - 1, Math.max(0, oy - 0.5));
+      } else if (warp) {
         const [qx, qy] = warp.forward(ox, oy);
         [X, Y] = place((qx / outW) * W - 0.5, (qy / outH) * H - 0.5, W, H);
       } else {

@@ -530,3 +530,10 @@ The cause at these steps is still open; the importance map (not available from t
 - Output depth from the x5 map (`zFrom5`): halo 4.14 / 4.55 / 3.75 with the above, no gain.
 - Not the cause of the teeth and fringe: edge artifact reduction, the filter bank, hole fill (all within 0.05 of the default).
 - Raw files: the engine path from our own depth is 3.34 (Lytro-style depth) against 3.25 with Lytro's depth; edge blocks 10.6 / 8.7 / 8.0.
+
+### Depth map placement for the engine picture (fit on the engine's binary depth oracle and on b4-1e)
+- With the engine's binary depth (`--depth-in`), a lookup shift of -1.5 .. -4 lens fixed the halo at the knot but not elsewhere: the best shift differed by place (knot -4, left wire +1.5): a scale error. The engine's depth map spans its picture, which is 1.58 % tighter than ours (the scale of the fit against its render is 1.0158 on every photo).
+  A placement of the depth map about its center (`DEPTH_MAP_PLACE`: kx, ky, dx, dy in texels) fit on the oracle: kx 0.9844 (x only) halo 18.6 -> 6.4, knot 3.75 -> 2.96. On the real photo a coordinate descent (blocks, halo, whole) gave kx 0.995, ky 1.015, dx -2, dy -1.5: blocks 8.4 7.7 7.6 -> 6.3 7.6 5.7, halo 3.18 -> 2.8, whole 3.25 -> 3.18.
+  Applies to Lytro's depth in the engine path only (`ENGINE_PLACE`); our own measured depth is in our frame already. Near-side growth is no longer needed (growth 0 .. 4 is the same); default 4.
+- The x5 resampler matches the engine's contour (`dmLevel`, see below); the importance map cannot change the picture (always 0.5 .. 1.0, never a weight): `docs/lytro-depth-spec.md` has the depth stage, the resampler spec was written to the session scratchpad.
+- The raw path (own depth) is limited by the depth edges themselves: blocks 10.6 8.7 8.0 against 6.3 7.6 5.7 with Lytro's depth. A 1 texel shift of the engine's own depth changes those blocks by 0.5 .. 1.
