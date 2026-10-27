@@ -679,7 +679,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.plainMarch && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
@@ -714,6 +714,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     let ly = (lensY - yMin) / unit;
     let ru = u;
     let rv = v;
+    const lx0 = lx;
+    const ly0 = ly;
     if (rayWarp) {
       // The engine corrects every ray with the camera's table: where it comes
       // from (dx, dy: fractions of the picture) and its direction (du, dv: lens
@@ -745,9 +747,14 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     ru += rayShift[0] + (opts.ruOff || 0);
     rv += rayShift[1] + (opts.rvOff || 0);
     if (opts.vScale) rv *= opts.vScale;
-    const lam0 = sampleDepth(lo, lw, lh, lx, ly) / LAMBDA_TO_ALPHA;
-    const lam1 = sampleDepth(hi, lw, lh, lx, ly) / LAMBDA_TO_ALPHA + 1;
-    const lamR = marchRay(lx, ly, ru, rv, lam0, lam1, depth, lw, lh, opts, depth5);
+    // opts.plainMarch: a depth measured here is in the frame of the plain rays (the lens centres and straight rays); hit it with those and splat the engine's corrected ones.
+    const mx = opts.plainMarch ? lx0 : lx;
+    const my = opts.plainMarch ? ly0 : ly;
+    const mu = (opts.plainMarch ? u : ru) + (opts.marchDu || 0);
+    const mv = (opts.plainMarch ? v : rv) + (opts.marchDv || 0);
+    const lam0 = sampleDepth(lo, lw, lh, mx, my) / LAMBDA_TO_ALPHA;
+    const lam1 = sampleDepth(hi, lw, lh, mx, my) / LAMBDA_TO_ALPHA + 1;
+    const lamR = marchRay(mx, my, mu, mv, lam0, lam1, depth, lw, lh, opts, depth5);
     count++;
     if (!(lamR === lamR)) return;
     const rayWeight = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;

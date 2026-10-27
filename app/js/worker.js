@@ -19,7 +19,7 @@ import { measureMatchGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { removePeriodicPattern } from './core/notch.js';
 import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
-import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
+import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
@@ -718,6 +718,8 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // splatted with a depth each, holes filled, and the depth aware filter bank of
 // the photo applied.
 const ENGINE_DEPTH_SHIFT = -1;
+// A depth measured here sits this far (lambda) from the engine's rays.
+const OWN_DEPTH_SHIFT = 0;
 // Where Lytro's depth map sits in our picture, for the engine's own picture (userdepth.js DEPTH_MAP_PLACE, texels of the depth map about its center). The engine's depth
 // map spans its picture, which is 1.6 % tighter than ours, so away from the center our nominal placement was off by up to 4 lenses (fit on the engine's binary depth oracle:
 // fence wire edge region 18.6 -> 6.4 on the binary oracle; on b4-1e the three edge blocks 8.4 7.7 7.6 -> 6.3 7.6 5.7, whole picture 3.25 -> 3.18; the fit is coordinate descent on those blocks, halo and whole; b4-2 and b4-3 do not move).
@@ -740,8 +742,24 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   const { W, H } = superResParams(sampler, { scale });
   const cs = colorState(color);
   const dbg = globalThis.__lytro || {};
+  if (dbg.dumpField && lf.rayWarpBytes) {
+    const rw = parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true });
+    const out = new Float64Array(4);
+    const rows = [];
+    for (let j = 0; j <= 6; j++) {
+      const row = [];
+      for (let i = 0; i <= 6; i++) {
+        const cell = rw.lens(-0.49 + (0.98 * i) / 6, -0.49 + (0.98 * j) / 6);
+        rw.fromLens(cell, 0, 0, out);
+        row.push([+(out[0] * lf.cam.width / lf.grid.rowStep).toFixed(2), +(out[1] * lf.cam.height / lf.grid.rowStep).toFixed(2)]);
+      }
+      rows.push(row);
+    }
+    console.log('RAYFIELD', JSON.stringify(rows));
+  }
   if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
   if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
+  if (globalThis.__depthOnly) return { cancelled: true };
   // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
   // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
   // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
@@ -753,14 +771,19 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     const alpha = withPlace(place, () => userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH)));
     state.depthEngine = { key: placeKey, src: state.depthRaw, plain: smoothedDepth(alpha, state.depthRaw.confidence) };
   }
-  const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : state.depth.alpha;
+  const ownPlace = !engineShift && !state.pp && state.depthPlain && dbg.ownPlace ? { kx: 1, ky: 1, dx: 0, dy: 0, ...dbg.ownPlace } : null;
+  if (ownPlace && (!state.depthOwn || state.depthOwn.key !== JSON.stringify(ownPlace) || state.depthOwn.src !== state.depthPlain)) {
+    state.depthOwn = { key: JSON.stringify(ownPlace), src: state.depthPlain, plain: placedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownPlace) };
+  }
+  const ownShift = !engineShift && !state.pp && state.depthPlain ? (dbg.ownShift ?? OWN_DEPTH_SHIFT) * LAMBDA_TO_ALPHA : 0;
+  const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
   let depth5 = null;
   if (!state.userDepth && !state.pp && dbg.own5) {
     // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
     const { outW, outH } = state.sampler;
-    const k = `own:${outW}x${outH}:${state.depthSmoothingApplied}`;
+    const k = `own:${outW}x${outH}:${state.depthSmoothingApplied}:${ownPlace ? state.depthOwn.key : ''}`;
     if (!state.depth5 || state.depth5.key !== k || state.depth5.src !== state.depthPlain) {
-      const lambda = Float32Array.from(state.depthPlain, (a) => a / LAMBDA_TO_ALPHA);
+      const lambda = Float32Array.from(ownPlace ? state.depthOwn.plain : state.depthPlain, (a) => a / LAMBDA_TO_ALPHA);
       let lo = Infinity;
       let hi = -Infinity;
       for (const v of lambda) {
@@ -1399,6 +1422,14 @@ function measureLytro(progress) {
   // no brightness curve and no smoothing (its cost cap 0.2, blown-out level 0.95 and flat level 0.15 are in those units).
   Object.assign(DEPTH_LCOST, { gamma: 1, normQ: 0, fixedTop: state.dev.clip || 1 });
   DEPTH_PASSES.noisy = (globalThis.__lytro || {}).noisy ?? 0.075;
+  {
+    // debug overrides of the estimator's constants
+    const o = globalThis.__lytro || {};
+    if (o.cbca) Object.assign(DEPTH_CBCA, o.cbca);
+    if (o.trws) Object.assign(DEPTH_TRWS, o.trws);
+    if (o.lcost) Object.assign(DEPTH_LCOST, o.lcost);
+    if (o.passes) Object.assign(DEPTH_PASSES, o.passes);
+  }
   if ((globalThis.__lytro || {}).depthViews && globalThis.__lytro.depthViews.single) DEPTH_PASSES.refs = [4];
   let measured = null;
   if (state.gpu) {
@@ -1478,6 +1509,24 @@ function withPlace(p, fn) {
   } finally {
     Object.assign(DEPTH_MAP_PLACE, { kx: 1, ky: 1, dx: 0, dy: 0 });
   }
+}
+
+// A depth map on the sampler's grid read at a placed position (userdepth.js DEPTH_MAP_PLACE form: scale about the center, then a shift, in texels), bilinear.
+function placedGrid(alpha, w, h, P) {
+  const out = new Float32Array(alpha.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const X = Math.min(w - 1.001, Math.max(0, (x + 0.5 - w / 2) * P.kx + w / 2 + P.dx - 0.5));
+      const Y = Math.min(h - 1.001, Math.max(0, (y + 0.5 - h / 2) * P.ky + h / 2 + P.dy - 0.5));
+      const x0 = Math.floor(X);
+      const y0 = Math.floor(Y);
+      const fx = X - x0;
+      const fy = Y - y0;
+      const q = y0 * w + x0;
+      out[y * w + x] = (alpha[q] * (1 - fx) + alpha[q + 1] * fx) * (1 - fy) + (alpha[q + w] * (1 - fx) + alpha[q + w + 1] * fx) * fy;
+    }
+  }
+  return out;
 }
 
 // A depth map (alpha, the sampler's grid) smoothed by the Depth > Smoothing setting, guided by the picture.
