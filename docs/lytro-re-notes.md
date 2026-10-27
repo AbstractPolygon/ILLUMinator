@@ -480,3 +480,12 @@ More oracle results on b4-1 (real depth, vs the engine with its own depth saved 
   and tilt terms were tried for the march only: no effect).
 - Aperture: against constant depth renders of the engine the best aperture is the metadata's 0.9025 used directly (0.8 .. 0.9), not 0.451; with the real depth the larger aperture is
   worse (3.24 -> 3.51) because it exposes this offset. Engine's accumulate step and march (importance gate, conf > 0, tolerances) read again: identical to ours.
+
+### More oracle results (b4-1 real depth, against the engine rendering its own saved depth)
+- Viewpoint shift (geometry table mean) is also right at the engine's own aperture 0.9025: constant wire depth, wire edge 1561.56 vs engine 1561.48 (without it 1560.08), whole picture 3.28 -> 2.99;
+  at constant background depth it costs 0.1 (2.87 -> 2.97) but halo and knot improve.
+- A depth lookup offset that vanishes at the background depth (-2.2 px ray offset with a compensating lens shift), a field dependent offset (proportional to the lens position across the sensor)
+  and the ray table's chief ray angle and tilt terms for the march only: none beats the plain constant offset; every variant costs 0.04 .. 0.2 on the whole picture. No law found.
+- Nearer-wins (min) dilation of the x5 depth map by k texels (5 texels = 1 lens): halo at the near wire 19.8 -> 15.7 (k 5) -> 8.3 (k 12) -> 6.3 (k 16), whole picture flat up to k 10 (3.93 -> 3.92)
+  and +0.1 at k 16. Against the engine's own renders at k 10: b4-1 MAE 3.24 -> 3.22, b4-2 5.08 -> 5.10, b4-3 2.72 -> 2.79 with the gradient ratio 0.967 -> 0.879 (softer thin structures), so not adopted.
+- b4-2 needs a 3 px alignment shift against the engine (b4-1 0.1) also with the engine's own lens grid and table, and with or without the table mean: unexplained, probably depth proportional (its depth reaches +27).
