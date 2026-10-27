@@ -405,7 +405,7 @@ export function nominalAperture(cam) {
 }
 
 // aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1: 0.5 -> MAE 3.93, 0.857 -> 4.52); the nominal fraction read from the metadata is wider.
-export const SPLAT = { aperture: 0.5, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
+export const SPLAT = { aperture: 0.5, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -715,11 +715,14 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
           if (dd > 5) dgn.far[rb]++;
         }
         if (lamR - zMap[p] >= opts.tolerance) continue;
-        const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy) * rayWeight;
-        acc[4 * p] += rgb[0] * w;
-        acc[4 * p + 1] += rgb[1] * w;
-        acc[4 * p + 2] += rgb[2] * w;
-        acc[4 * p + 3] += w;
+        const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy);
+        // the standardized pixel's colour is demodulated and its alpha is modulation ^ 2 (ApplyReweighting, cfg 0x2470): colour sums unweighted, alpha sums the weights
+        const cw = opts.alphaPow ? w : w * rayWeight;
+        const aw = opts.alphaPow ? w * Math.pow(plane.mod[i], opts.alphaPow) : w * rayWeight;
+        acc[4 * p] += rgb[0] * cw;
+        acc[4 * p + 1] += rgb[1] * cw;
+        acc[4 * p + 2] += rgb[2] * cw;
+        acc[4 * p + 3] += aw;
         if (j === 0 && k === 0) accepted++;
       }
     }
