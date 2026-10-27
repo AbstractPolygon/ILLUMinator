@@ -440,3 +440,12 @@ The engine's saturation diffusion is gone from the CPU path as well: SaturationR
   (3.52 -> 3.60), tolA / tolB swapped or widened (no change), depth smoothing off (no change).
 - Highlights: the engine clamps every channel of the demosaiced picture at white (1.0 = G at full scale) before the luma boost; without it red and blue (white balance
   gains 1.27 and 1.34) stay above 1 where green clips and the bright edges come out pink. `SPLAT.sharpen.clampPre = 1`.
+
+### Fence halo: engine oracle with a crisp two value depth (negative results)
+
+`tnt.exe --depth-in` fed with a binary depth (wire -22.5, background -4.2, from the engine's own depth of b4-1e) renders without any grain beside the near wire; ours,
+given the same depth, still has the dotted band (2 to 3 lenses wide) and its right wire edge sits about 0.8 lens left of the engine's. So the depth map, its x5
+upscaling (DmResampler, similarity is on depth with threshold 0.8) and the importance map are not the cause: it is in our ray march or splat. Tried on that pair with no
+fix: bilinear read of the upscaled depth, depth lookup shift of 0.25 .. 1.5 lens in x or y (x 1.0 moves the edge onto the engine's but worsens the halo region and the
+knot), ray direction scale 0.9 .. 1.1, ray direction offset +-0.4 px (-0.4 on u slightly better, +0.4 worse), output depth from the upscaled map, full depth blending across
+the step (dmSimilar 100). `tnt.exe` has no option that dumps the importance map (`TNTARG::outputImportanceMapName` is never set from an option string).
