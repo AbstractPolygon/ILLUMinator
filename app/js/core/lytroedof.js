@@ -533,6 +533,8 @@ function minMaxRadius(depth, w, h, g, unit) {
 function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts, up = null) {
   let far = Infinity;
   const near = opts.nearest;
+  lx += opts.shiftX || 0;
+  ly += opts.shiftY || 0;
   for (let lam = lam0; lam <= lam1; lam += opts.step) {
     const a = lam * LAMBDA_TO_ALPHA;
     // RayTraceRegion reads the depth map at the texel the ray falls in (no interpolation)
@@ -646,6 +648,20 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const sinR = Math.sin(g.rotation);
   const warpOut = [0, 0, 0, 0];
   const geoOut = [0, 0];
+  // GeometryErrorTable::CorrectLightfieldPoint takes the cell's (u, v) off every ray's direction. The picture-fitted lens centres already absorb how the table varies
+  // from lens to lens but not its mean, which is a viewpoint shift of the whole picture (b4-1: -0.0186, -0.0063 pitches): near objects sit 1 to 3 px off the engine's.
+  const rayShift = [0, 0];
+  if (geoTable && opts.geoMean !== false) {
+    let su = 0;
+    let sv = 0;
+    const cells = geoTable.w * geoTable.h;
+    for (let i = 0; i < cells; i++) {
+      su += geoTable.data[2 * i];
+      sv += geoTable.data[2 * i + 1];
+    }
+    rayShift[0] = (-su / cells) * g.pitch;
+    rayShift[1] = (-sv / cells) * g.pitch;
+  }
   let cell = null;
   let lastCell = NaN;
   // z of every output pixel, in lambda
@@ -661,7 +677,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
-  const gpuInput = { depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
   if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
@@ -726,6 +742,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       ru -= opts.geoSign * geoOut[0] * g.pitch;
       rv -= opts.geoSign * geoOut[1] * g.pitch;
     }
+    ru += rayShift[0] + (opts.ruOff || 0);
+    rv += rayShift[1] + (opts.rvOff || 0);
     if (opts.vScale) rv *= opts.vScale;
     const lam0 = sampleDepth(lo, lw, lh, lx, ly) / LAMBDA_TO_ALPHA;
     const lam1 = sampleDepth(hi, lw, lh, lx, ly) / LAMBDA_TO_ALPHA + 1;

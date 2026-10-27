@@ -455,3 +455,13 @@ in x). A ray direction offset of +0.4 px on u (applied to the march and to the s
 unless the lens position is moved by -0.2 lens at the same time (3.77, knot 4.44 -> 4.26); the optimum is shallow and noisy (+-0.1 changes the score by 0.05) and none of it
 removes the dotted band, so no offset was adopted. `RayTraceRegion` read again: the march (start at the min filtered depth, step 1, texel = trunc((x - du * lambda) + 0.5) * size,
 importance >= 0 gate, tolerances 1 and 2, far fallback with confidence 0.5, `far` initialised to -FLT_MAX) is identical to `marchRay`.
+
+### Viewpoint shift = geometry table mean (found with constant-depth oracle runs)
+
+With a constant depth fed to `tnt.exe --depth-in` (all -22.5, the near wire's lambda) the picture is pure ray geometry. Ours then differed from the engine by 1.4 px at
+the wire edge (and had a halo score of 9.7 there). Adding the table's mean to every ray's direction (ru += -mean(u) * pitch, rv += -mean(v) * pitch = +0.266, +0.09 px
+on b4-1) puts the edge on the engine's (1561.6 vs 1561.48) and cuts the halo score to 5.4; on the real photo (real depth) MAE against the engine 3.47 -> 3.24, knot
+region 4.08 -> 3.85, whole 3.56 -> 3.44. The opposite sign is clearly worse (3.78). The per lens variation of the table stays absorbed by the fitted lens centres
+(engine grid + full table = 3.55, engine grid alone 4.15, table with the wrong sign 4.90, so the table is the engine's own correction). `lytroSplat` applies the mean on the CPU
+and `uRayShift` in the GPU shader (`opts.geoMean !== false`). The dotted band beside the near wire (binary depth) is not fixed by this: ray geometry at constant depth
+matches the engine (no dots at all), so the dots come from how a depth step is handled.

@@ -329,6 +329,7 @@ uniform vec2 uSharpen;     // amount, clamp at white (0: off)
 uniform float uModPow;
 uniform float uTolerance;
 uniform vec2 uMarch;       // tolA, tolB
+uniform vec2 uRayShift;    // viewpoint shift of every ray (px, lens array axes)
 uniform vec2 uCam;
 uniform int uRayWarp;
 uniform highp sampler2D uRayGrid;
@@ -459,6 +460,8 @@ void main() {
     ru += (cosR * wv.z + sinR * wv.w) * pitch;
     rv += (-sinR * wv.z + cosR * wv.w) * pitch;
   }
+  ru += uRayShift.x;
+  rv += uRayShift.y;
   // BackProjectDepthMap::RayTraceRegion
   float lam0 = sampleDepth(uDepthLo, lens) / LTA;
   float lam1 = sampleDepth(uDepthHi, lens) / LTA + 1.0;
@@ -737,6 +740,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform1f(U.uModPow, P.opts.modPow || 0);
     gl.uniform1f(U.uTolerance, P.opts.tolerance);
     gl.uniform2f(U.uMarch, P.opts.tolA, P.opts.tolB);
+    gl.uniform2f(U.uRayShift, P.rayShift ? P.rayShift[0] : 0, P.rayShift ? P.rayShift[1] : 0);
     gl.uniform2f(U.uCam, cam.width, cam.height);
     gl.uniform1f(U.uFactor, d5 ? d5.factor : 1);
     gl.bindVertexArray(gpu.emptyVao);
