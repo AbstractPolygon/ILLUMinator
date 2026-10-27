@@ -386,3 +386,13 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
 - Engine bank response relative to our unfiltered splat in near-focus flat areas (amplitude): 0.99 1.02 1.06 1.10 1.09 1.04 0.92 0.79 0.61 0.52 at 2 .. 28 cycles per 64 px; ours 1.01 1.0 0.97 0.92 0.86 0.78 0.66 0.63 0.52 0.46.
   The engine's has a mid-band bump, ours only rolls off.
 - Current score with the engine's depth: MAE 3.92 (registered), 3.75 with a per-channel linear fit; with Lytro Desktop's stack depth 4.00. Most of what is left is the thin edges of the near wire and mid-band sharpness.
+
+## SharpenRecoverHighlights (sensor-level luma boost)
+
+ILLUM config enables it (0x11d8) with SaturationRecoveryType = 2 (the default, so the raw/post diffusion modes 0/1
+are not used; the diffusion we ported is a near no-op). `SharpenRecoverHighlightsYCbCr` smooths the luma with a
+FirstOrderIirFilterImage (c = cfg 0x1490 = 0.7, forward and backward along rows then columns) and sets
+`Y' = low + (Y - low) * (1 + 0.25)` (amount cfg 0x14a8). The boost fades with the weight B3(2Y) (cubic B-spline
+scaled to 1 at 0, zero from Y = 1); where the weight is gone only positive differences pass (clip cfg 0x14c0 = 0).
+It runs on the demosaiced sensor image before the rays are traced. Ported as `SPLAT.sharpen`; on b4-1e MAE 3.92 -> 3.52,
+gradient ratio 0.94 -> 1.01. amount 1.0 gives 5.44, c 0.5 / 0.85 give 3.63 / 3.55, so 0.25 / 0.7 is the optimum.

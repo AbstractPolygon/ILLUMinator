@@ -405,7 +405,7 @@ export function nominalAperture(cam) {
 }
 
 // aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1 with the engine's depth: 0.3..0.5 -> 3.92, 0.6 -> 4.09, 0.857 -> 4.74); the nominal fraction read from the metadata is wider.
-export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true };
+export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7 } };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -598,6 +598,50 @@ function diffuseSaturation(a, sat, W, H, cfa) {
   }
 }
 
+// SharpenRecoverHighlightsYCbCr as read from the engine: the luma is smoothed
+// by a first order IIR filter (coefficient c, forward and backward, along rows
+// and then columns) and becomes low + (Y - low) * (1 + amount) with a weight
+// that fades out the boost in highlights, B3(2Y) (the cubic B spline scaled to
+// 1 at 0, so 0 from Y = 1); where the weight is gone only positive differences
+// (the clip level is 0) pass. Chroma is untouched, so the change of Y is added
+// to all three channels.
+function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7 } = {}) {
+  const a = 1 - c;
+  const low = new Float32Array(W * H);
+  const rgb = [0, 0, 0];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) low[y * W + x] = dm.at(x, y, rgb) ? 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] : 0;
+  }
+  for (let y = 0; y < H; y++) {
+    const o = y * W;
+    for (let x = 1; x < W; x++) low[o + x] = a * low[o + x] + c * low[o + x - 1];
+    for (let x = W - 2; x >= 0; x--) low[o + x] = a * low[o + x] + c * low[o + x + 1];
+  }
+  for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) low[y * W + x] = a * low[y * W + x] + c * low[(y - 1) * W + x];
+  for (let y = H - 2; y >= 0; y--) for (let x = 0; x < W; x++) low[y * W + x] = a * low[y * W + x] + c * low[(y + 1) * W + x];
+  const b3 = (t) => {
+    t = Math.abs(t);
+    if (t <= 1) return 1 - 1.5 * t * t + 0.75 * t * t * t;
+    if (t <= 2) return 0.25 * (2 - t) ** 3;
+    return 0;
+  };
+  return {
+    at(x, y, out) {
+      if (!dm.at(x, y, out)) return false;
+      const Y = 0.299 * out[0] + 0.587 * out[1] + 0.114 * out[2];
+      const l = low[y * W + x];
+      const d = (Y - l) * (1 + amount);
+      const w = b3(2 * Y);
+      const nY = w * (l + d) + (1 - w) * (l + (d > 0 ? d : 0));
+      const k = nY - Y;
+      out[0] += k;
+      out[1] += k;
+      out[2] += k;
+      return true;
+    },
+  };
+}
+
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
 export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null }, opts = SPLAT) {
   const { width } = cam;
@@ -609,7 +653,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const radius = hex ? (apothem * 2) / Math.sqrt(3) : apothem;
   const hexRise = apothem / Math.sqrt(3);
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation);
-  const dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
+  let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
+  if (dm && opts.sharpen) dm = sharpenHighlights(dm, width, cam.height, opts.sharpen);
   // With the camera's ray table every ray carries the distortion correction itself (as in the engine), so there is no picture warp afterwards.
   const warp = rayWarp ? null : lensWarp(lens, W, H);
   const cosR = Math.cos(g.rotation);
