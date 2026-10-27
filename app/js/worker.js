@@ -30,7 +30,7 @@ import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable } from './core/geometrytable.js';
 import { lytroSplat, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
-import { renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
+import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
@@ -780,6 +780,15 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     const r = applyBank(img, sp.zMap, W, H, bank);
     out = r.rgb;
     for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
+  }
+  if (!dbg.noEar) {
+    // EdgeArtifactReduction (cfg 0x1fc8 on): per channel, along rows then columns, where the output depth steps.
+    const plane = new Float32Array(W * H);
+    for (let c = 0; c < 3; c++) {
+      for (let p = 0; p < W * H; p++) plane[p] = out[3 * p + c];
+      edgeArtifactReduce(plane, W, H, sp.zMap);
+      for (let p = 0; p < W * H; p++) out[3 * p + c] = plane[p];
+    }
   }
   globalThis.__lytroStats = sp.stats;
   const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
