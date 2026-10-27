@@ -449,3 +449,9 @@ upscaling (DmResampler, similarity is on depth with threshold 0.8) and the impor
 fix: bilinear read of the upscaled depth, depth lookup shift of 0.25 .. 1.5 lens in x or y (x 1.0 moves the edge onto the engine's but worsens the halo region and the
 knot), ray direction scale 0.9 .. 1.1, ray direction offset +-0.4 px (-0.4 on u slightly better, +0.4 worse), output depth from the upscaled map, full depth blending across
 the step (dmSimilar 100). `tnt.exe` has no option that dumps the importance map (`TNTARG::outputImportanceMapName` is never set from an option string).
+
+Follow up on the same oracle: the wire edge offset (about 2.3 px at lambda -22.5) is the "depth-proportional shift" noted under the geometry table (-0.097 px per lambda
+in x). A ray direction offset of +0.4 px on u (applied to the march and to the splat) puts the edge exactly on the engine's, but worsens the whole picture (3.85 -> 4.01)
+unless the lens position is moved by -0.2 lens at the same time (3.77, knot 4.44 -> 4.26); the optimum is shallow and noisy (+-0.1 changes the score by 0.05) and none of it
+removes the dotted band, so no offset was adopted. `RayTraceRegion` read again: the march (start at the min filtered depth, step 1, texel = trunc((x - du * lambda) + 0.5) * size,
+importance >= 0 gate, tolerances 1 and 2, far fallback with confidence 0.5, `far` initialised to -FLT_MAX) is identical to `marchRay`.
