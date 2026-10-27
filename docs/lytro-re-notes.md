@@ -559,3 +559,11 @@ The cause at these steps is still open; the importance map (not available from t
 A depth measured here is in the frame of the plain views; the engine's rays start where its ray table puts them (origin offset at the lens center up to +-32 lens px at the picture corners on b4-1, +-16 on b4-2, +-27 on b4-3, zero at the center, point symmetric). Reading our depth at `p - origin(p)` (`fieldPlacedGrid`, default for own depth in the engine path; the app's focus offset / field term is kept on top):
 b4-1e whole 3.35 -> 3.07 (edge blocks 10.7 8.6 8.3 -> 6.6 7.8 5.9, halo 2.9), b4-2 5.36 -> 5.33, b4-3 2.71 -> 2.72 (sharpness unchanged); the opposite sign 3.64, half the field 3.19. With the frame right the estimator constants no longer matter (3.07 .. 3.08 across the variants), and the raw path is as close to the engine's raw picture as the path with Lytro's own depth (3.10).
 (Dropping the focus offset / field term while remapping cost b4-3 9 % of its sharpness: that was the first attempt's artefact, not the field.)
+
+### Where the engine path stands against the app's default render (raw files, mean pixel difference to the engine's raw picture, lower is better)
+| photo | app default render | engine path, own depth |
+|---|---|---|
+| b4-1e (fence) | 4.56 | 3.08 (3.07 with the Lytro-style depth alone; classic 3.36) |
+| b4-2 (tonearm, zoom 11) | 5.93 | about 5.1 to 5.3 |
+| b4-3 | 3.32 | 2.72 |
+The engine path (`lytroEngine`, off by default) needs the photo's ray table and modulation frame (raw files from the camera); it is now ahead on all three. Left: the b4-2 geometry (depth proportional shift), wire-interior texture, and the owner's decision on making it the default.
