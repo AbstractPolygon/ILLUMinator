@@ -375,3 +375,14 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
 - Depth edges: dilating near objects by one depth pixel scores 3.78 against 3.87 (nearest depth). Most remaining error (14 % of pixels beside depth steps, MAE about 10) is a haze in the disoccluded band beside the near wire.
 - Spectrum in near-focus flat areas: ours / engine amplitude 1.0, 0.98, 0.91, 0.84, 0.79, 0.75, 0.72 at 2, 4, 6, 8, 10, 12, 16 cycles per 64 px with the bank, 0.92..1.0 without; raising the bank's frequencies by 1.5 flattens it
   (hook `globalThis.__bankFS`); MAE unchanged.
+
+## Test method correction (b4-1)
+- The engine's own float depth (`tnt --lfp-out`, 541 x 376) must go through the app's lens-lattice mapping (`stackDepth`, rows of lenses are offset by half a lens). A plain image resize (`DOVER`
+  files, used for most sweeps above) puts every second row half a lens off, which made the hazy, dotted band beside near objects. With the proper mapping (photo dir `b4-1e` = b4-1 with the engine's
+  stack.lfp) the band is gone and the picture matches the engine's at the wire edges. Sweeps repeated with it: aperture 0.3 / 0.4 / 0.45 / 0.5 / 0.6 / 0.7 / 0.857 -> MAE 3.93 / 3.92 / 3.94 / 3.98 / 4.09 / 4.28 / 4.74.
+  The lambda-dependent registration error against the engine is 0.005 px per lambda (dx), 0.002 (dy).
+- Highlight response of the engine (constant raw stripes, white balanced output at a lens centre): linear (G slope 48.7 / raw count, R 1.31 x, B 1.39 x) up to raw 800, then R and B stop near 47 .. 48.5 k while G is
+  raised by about 0.28 x what they lost, all three equal at raw 950 (48470) and 1000 (51518), 65535 at 1023. Not ported; it is the likely cause of the purple line on the bright wire's edge.
+- Engine bank response relative to our unfiltered splat in near-focus flat areas (amplitude): 0.99 1.02 1.06 1.10 1.09 1.04 0.92 0.79 0.61 0.52 at 2 .. 28 cycles per 64 px; ours 1.01 1.0 0.97 0.92 0.86 0.78 0.66 0.63 0.52 0.46.
+  The engine's has a mid-band bump, ours only rolls off.
+- Current score with the engine's depth: MAE 3.92 (registered), 3.75 with a per-channel linear fit; with Lytro Desktop's stack depth 4.00. Most of what is left is the thin edges of the near wire and mid-band sharpness.
