@@ -9,7 +9,7 @@ import {
   clipTrust,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { userDepthAlpha } from './core/userdepth.js';
+import { userDepthAlpha, userDepthAlphaUpscaled } from './core/userdepth.js';
 import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
@@ -29,7 +29,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable } from './core/geometrytable.js';
-import { lytroSplat, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
+import { lytroSplat, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -733,9 +733,19 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   const dbg = globalThis.__lytro || {};
   if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
   if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
+  // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
+  let depth5 = null;
+  if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
+    const key = `${state.sampler.outW}x${state.sampler.outH}`;
+    if (!state.depth5 || state.depth5.key !== key || state.depth5.src !== state.userDepth) {
+      state.depth5 = { key, src: state.userDepth, map: userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8) };
+    }
+    depth5 = state.depth5.map;
+  }
   progress('Splatting the rays', 0);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
   const sp = lytroSplat({
+    depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
     raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: state.depth.alpha, scale, lens: cs.lens, W, H,
@@ -744,6 +754,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     onProgress: (p) => progress('Splatting the rays', p),
   }, {
     ...LYTRO_SPLAT,
+    aperture: engineAperture(lf.cam),
     // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
     gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
       try {

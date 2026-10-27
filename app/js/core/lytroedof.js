@@ -404,8 +404,15 @@ export function nominalAperture(cam) {
   return Math.min(clamp01(ratio), clamp01(2 - ratio - k / 14));
 }
 
-// aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1 with the engine's depth: 0.3..0.5 -> 3.92, 0.6 -> 4.09, 0.857 -> 4.74); the nominal fraction read from the metadata is wider.
-export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7 } };
+// aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1 with the engine's depth: 0.3..0.5 -> 3.92, 0.6 -> 4.09, 0.857 -> 4.74). The engine's
+// aperture table is sampled over -1..1 (index = 127.5 * coordinate + 128, ProjectEdof::robustProjection), so HexAperture's flat sides at 0.5 * value are in units
+// of the lens disk's radius: the value 0.9025 the metadata gives is 0.451 in this parameter (apothem = aperture * pitch / 2), in the middle of that optimum.
+export function engineAperture(cam) {
+  const nominal = nominalAperture(cam);
+  return nominal === SPLAT.aperture ? nominal : nominal / 2;
+}
+
+export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 } };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -523,13 +530,14 @@ function minMaxRadius(depth, w, h, g, unit) {
   return r;
 }
 
-function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
+function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts, up = null) {
   let far = Infinity;
   const near = opts.nearest;
   for (let lam = lam0; lam <= lam1; lam += opts.step) {
     const a = lam * LAMBDA_TO_ALPHA;
     // RayTraceRegion reads the depth map at the texel the ray falls in (no interpolation)
-    const d = (near ? nearestDepth(D, lw, lh, lx - a * rdu, ly - a * rdv) : sampleDepth(D, lw, lh, lx - a * rdu, ly - a * rdv)) / LAMBDA_TO_ALPHA;
+    // with the upscaled map (DmResampler) the ray reads the finer texel it falls in: centre of texel i is at (i + 0.5) / factor - 0.5 lens map pixels
+    const d = (up ? nearestDepth(up.data, up.width, up.height, (lx - a * rdu) * up.factor + (up.factor - 1) / 2, (ly - a * rdv) * up.factor + (up.factor - 1) / 2) : near ? nearestDepth(D, lw, lh, lx - a * rdu, ly - a * rdv) : sampleDepth(D, lw, lh, lx - a * rdu, ly - a * rdv)) / LAMBDA_TO_ALPHA;
     if (Math.abs(d - lam) < opts.tolA) return d;
     if (d < lam && far !== Infinity && far > lam && far - d < opts.tolB) {
       const t = far - (lam - opts.step);
@@ -579,12 +587,16 @@ function completePlane(plane, raw, cam, dev) {
 // 1 at 0, so 0 from Y = 1); where the weight is gone only positive differences
 // (the clip level is 0) pass. Chroma is untouched, so the change of Y is added
 // to all three channels.
-function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7 } = {}) {
+function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7, clampPre = 0, clampPost = 0 } = {}) {
   const a = 1 - c;
   const low = new Float32Array(W * H);
   const rgb = [0, 0, 0];
   for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) low[y * W + x] = dm.at(x, y, rgb) ? 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] : 0;
+    for (let x = 0; x < W; x++) {
+      if (!dm.at(x, y, rgb)) { low[y * W + x] = 0; continue; }
+      if (clampPre) for (let k = 0; k < 3; k++) rgb[k] = Math.min(rgb[k], clampPre);
+      low[y * W + x] = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+    }
   }
   for (let y = 0; y < H; y++) {
     const o = y * W;
@@ -602,6 +614,7 @@ function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7 } = {}) {
   return {
     at(x, y, out) {
       if (!dm.at(x, y, out)) return false;
+      if (clampPre) for (let k = 0; k < 3; k++) out[k] = Math.min(out[k], clampPre);
       const Y = 0.299 * out[0] + 0.587 * out[1] + 0.114 * out[2];
       const l = low[y * W + x];
       const d = (Y - l) * (1 + amount);
@@ -611,13 +624,14 @@ function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7 } = {}) {
       out[0] += k;
       out[1] += k;
       out[2] += k;
+      if (clampPost) for (let q = 0; q < 3; q++) out[q] = Math.min(out[q], clampPost);
       return true;
     },
   };
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
-export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null }, opts = SPLAT) {
+export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null, depth5 = null }, opts = SPLAT) {
   const { width } = cam;
   const unit = g.rowStep;
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
@@ -639,14 +653,15 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   for (let j = 0; j < H; j++) {
     for (let k = 0; k < W; k++) {
       const [sx, sy] = warp ? warp.source(k + 0.5, j + 0.5) : [k + 0.5, j + 0.5];
-      zMap[j * W + k] = sampleDepth(depth, lw, lh, sx / scale - 0.5, sy / scale - 0.5) / LAMBDA_TO_ALPHA;
+      // opts.zFrom5: the output depth from the upscaled map as well (tried: halo 16.4 -> 19.6, so off)
+      zMap[j * W + k] = (depth5 && opts.zFrom5 ? nearestDepth(depth5.data, depth5.width, depth5.height, (sx / scale - 0.5) * depth5.factor + (depth5.factor - 1) / 2, (sy / scale - 0.5) * depth5.factor + (depth5.factor - 1) / 2) : sampleDepth(depth, lw, lh, sx / scale - 0.5, sy / scale - 0.5)) / LAMBDA_TO_ALPHA;
     }
   }
   const reach = opts.reach === 'engine' ? minMaxRadius(depth, lw, lh, g, unit) : opts.reach;
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
-  const gpuInput = { raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  const gpuInput = { depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
   if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
@@ -714,7 +729,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     if (opts.vScale) rv *= opts.vScale;
     const lam0 = sampleDepth(lo, lw, lh, lx, ly) / LAMBDA_TO_ALPHA;
     const lam1 = sampleDepth(hi, lw, lh, lx, ly) / LAMBDA_TO_ALPHA + 1;
-    const lamR = marchRay(lx, ly, ru, rv, lam0, lam1, depth, lw, lh, opts);
+    const lamR = marchRay(lx, ly, ru, rv, lam0, lam1, depth, lw, lh, opts, depth5);
     count++;
     if (!(lamR === lamR)) return;
     const rayWeight = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;

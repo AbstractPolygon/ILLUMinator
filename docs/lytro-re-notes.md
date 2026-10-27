@@ -416,3 +416,27 @@ the filter bank stay on the CPU.
 Checked against the CPU on the same inputs (SwiftShader): mean relative difference of the summed weight 0.03%, colour
 difference 4e-6, 0.05% of pixels differ by more than 5% (edge pixels where the depth march picks the other surface).
 The engine's saturation diffusion is gone from the CPU path as well: SaturationRecoveryType defaults to 2, which does not diffuse.
+
+## What the engine really runs for the EDOF picture (decompile pass, ILLUM configuration)
+
+- `RefocusEdof::operator()` -> `ComputeOutputDepthMap` (method 1 of cfg 0x1a20, centre view: `RegularSampledProjection`, which upscales the depth map with
+  `DmResampler` and reads it at the output pixels) -> `createDepthEdgeMap` (box of radius 4 around every depth step >= cfg 0x1f08 = 0.3) -> `ProjectEdof::operator()`.
+- `ProjectEdof` flags from the config: 0x1a88 on (depth projection with `BackProjectDepthMap`: the ray march is done inside the projection), 0x1ec0 and 0x1ed8 OFF
+  (so no per-pixel queues and no `robustFiltering`; the depth edge map is not used), 0x1f20 on with threshold 2.0 (rays more than 2 lambda behind the output depth
+  are dropped: the z test), 0x380 and 0x2660 on (geometry error table, ray table). `ProjectGold` is the reference version and not what runs.
+- `robustProjection`, per standardized pixel: aperture weight from a 256 x 256 table over -1..1 (index = 127.5 * c + 128), pixel alpha > 0, ray (with table), march with
+  min/max maps, then the four bilinear corners are added `weight * rgba` when `lambda - outputDepth < 2.0`. Matches the port (lytroSplat).
+- Aperture: the table is over -1..1, so HexAperture's flat sides at 0.5 * value are in units of the disk radius; the metadata's 0.9025 is 0.451 in the port's parameter.
+  `engineAperture(cam)` uses that (the empirical optimum, 0.3 .. 0.5, contains it).
+- The depth map, importance map and the min/max maps are all upscaled x5 first (`GetSourceDepthMap` -> `UpscaleMaps`: depth with `DmResampler`, the importance map
+  with `ScaleImage`; `ComputeMinMaxDepthMap` then runs on the upscaled depth with its window radius scaled by the upscale). DepthResampleConfig from cfg: 0x1aa0 on (use the
+  resampler), 0x1ae8 on (blend), 0x1ad0 = 0.8 (similarity threshold in lambda), 0x1ab8 = 5. Per lens an 8 bit similarity mask, then a Voronoi labelling of the cell
+  (`calcPerPixelModifiedVoronoiPts`), boundary chains traced through boundary cells (`walkBoundary`, `LineIsectSubpixEvaluator`), and every sub pixel takes the
+  inverse distance weighted (1 / sqrt(max(d^2, 0.01)), `calcSubpixelWeights`) mean of the lenses of its quadrant that are connected to its owner. Ported approximately
+  (`userDepthAlphaUpscaled`: weights as in the engine, "connected" = within 0.8 lambda of the nearest lens).
+- Not ported, and not available from the stack: the importance map (`DepthMapState::GetImportanceMap`, texels with importance < 0 are skipped by the ray march and the
+  hit texel's importance is the ray's confidence) and the `BlendIlluminant` stage (cfg 0x1080 on: illuminant blend with `ChromaSuppressionMap`, cfg 0x1108 .. 0x1170).
+- Tried and dropped on b4-1e: output depth from the upscaled map (halo 16.4 -> 19.6), skipping depth texels near depth steps (worse at every radius), no z test
+  (3.52 -> 3.60), tolA / tolB swapped or widened (no change), depth smoothing off (no change).
+- Highlights: the engine clamps every channel of the demosaiced picture at white (1.0 = G at full scale) before the luma boost; without it red and blue (white balance
+  gains 1.27 and 1.34) stay above 1 where green clips and the bright edges come out pink. `SPLAT.sharpen.clampPre = 1`.

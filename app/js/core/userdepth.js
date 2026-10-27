@@ -145,6 +145,63 @@ export function userDepthAlpha(map, sampler, cam, offset = 0, warp = null) {
   return alpha;
 }
 
+// The engine's depth upscaling (DmResampler, `factor` 5 and similarity 0.8 lambda in the ILLUM configuration), approximated: every sub pixel takes the
+// inverse distance weighted (1 / sqrt(max(d^2, 0.01)), calcSubpixelWeights) mean of the four lenses around it, but only those that agree with the nearest
+// lens within the threshold, so depth stays flat on a surface and steps where the surface ends instead of ramping like a bilinear resize. Returns the
+// map as focus depth (alpha) on a grid `factor` times finer than the sampler's output grid.
+export function userDepthAlphaUpscaled(map, sampler, cam, offset = 0, warp = null, factor = 5, similar = 0.8) {
+  const { outW, outH } = sampler;
+  const { width: W, height: H, data, min, max } = map;
+  const [ax, ay] = sensorToOutput(sampler, 0, 0);
+  const [bx, by] = sensorToOutput(sampler, 1, 0);
+  const [cx, cy] = sensorToOutput(sampler, 0, 1);
+  const det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+  const w5 = outW * factor;
+  const h5 = outH * factor;
+  const alpha = new Float32Array(w5 * h5);
+  const tol = similar / (max - min);
+  for (let y = 0; y < h5; y++) {
+    for (let x = 0; x < w5; x++) {
+      const ox = (x + 0.5) / factor;
+      const oy = (y + 0.5) / factor;
+      let X;
+      let Y;
+      if (warp) {
+        const [qx, qy] = warp.forward(ox, oy);
+        X = Math.min(W - 1, Math.max(0, (qx / outW) * W - 0.5));
+        Y = Math.min(H - 1, Math.max(0, (qy / outH) * H - 0.5));
+      } else {
+        const dx = ox - ax;
+        const dy = oy - ay;
+        const sx = (dx * (cy - ay) - dy * (cx - ax)) / det;
+        const sy = ((bx - ax) * dy - (by - ay) * dx) / det;
+        X = Math.min(W - 1, Math.max(0, ((sx / cam.width - 0.5) * FIT.kx + 0.5 + FIT.dx) * W));
+        Y = Math.min(H - 1, Math.max(0, ((sy / cam.height - 0.5) * FIT.ky + 0.5 + FIT.dy) * H));
+      }
+      const nx = Math.min(W - 1, Math.round(X));
+      const ny = Math.min(H - 1, Math.round(Y));
+      const dn = data[ny * W + nx];
+      const x0 = Math.min(W - 2, Math.floor(X));
+      const y0 = Math.min(H - 2, Math.floor(Y));
+      let sum = 0;
+      let wsum = 0;
+      for (let j = 0; j < 2; j++) {
+        for (let i = 0; i < 2; i++) {
+          const v = data[(y0 + j) * W + x0 + i];
+          if (Math.abs(v - dn) >= tol && !(x0 + i === nx && y0 + j === ny)) continue;
+          const ddx = X - (x0 + i);
+          const ddy = Y - (y0 + j);
+          const wgt = 1 / Math.sqrt(Math.max(ddx * ddx + ddy * ddy, 0.01));
+          sum += wgt * v;
+          wsum += wgt;
+        }
+      }
+      alpha[y * w5 + x] = (min + (sum / wsum) * (max - min) + offset) * LAMBDA_TO_ALPHA;
+    }
+  }
+  return { data: alpha, width: w5, height: h5, factor };
+}
+
 // The depth Lytro Desktop computed for a picture, from its stack.lfp (the
 // same size and placement as a user depth map; it follows the user's edits
 // when there are some). Returns a map for userDepthAlpha, or null.

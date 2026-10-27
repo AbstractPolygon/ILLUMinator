@@ -378,9 +378,11 @@ float sampleDepth(highp sampler2D t, vec2 p) {
   return mix(mix(d00, d10, a.x), mix(d01, d11, a.x), a.y);
 }
 
+// the ray march reads the nearest texel of the depth map, upscaled uFactor times (the centre of texel i is at (i + 0.5) / factor - 0.5 lens map pixels)
+uniform float uFactor;
 float nearestDepth(vec2 p) {
   ivec2 sz = textureSize(uDepth, 0);
-  ivec2 i = clamp(ivec2(floor(p + 0.5)), ivec2(0), sz - 1);
+  ivec2 i = clamp(ivec2(floor(p * uFactor + (uFactor - 1.0) * 0.5 + 0.5)), ivec2(0), sz - 1);
   return texelFetch(uDepth, i, 0).r;
 }
 
@@ -588,7 +590,8 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   const modTex = keep(upload(gpu, cam.width, cam.height, gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, P.modulation, 2));
   const refs = lensReferences(P.modulation, cam, dev, g, range);
   const refTex = keep(upload(gpu, refs.cols, refs.rows, gl.RGBA32F, gl.RGBA, gl.FLOAT, refs.data));
-  const depthTex = keep(upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.depth));
+  const d5 = P.depth5;
+  const depthTex = keep(d5 ? upload(gpu, d5.width, d5.height, gl.R32F, gl.RED, gl.FLOAT, d5.data) : upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.depth));
   const loTex = keep(upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.lo));
   const hiTex = keep(upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.hi));
   const zTex = keep(upload(gpu, W, H, gl.R32F, gl.RED, gl.FLOAT, P.zMap));
@@ -731,6 +734,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform1f(U.uTolerance, P.opts.tolerance);
     gl.uniform2f(U.uMarch, P.opts.tolA, P.opts.tolB);
     gl.uniform2f(U.uCam, cam.width, cam.height);
+    gl.uniform1f(U.uFactor, d5 ? d5.factor : 1);
     gl.bindVertexArray(gpu.emptyVao);
     const total = (y1 - y0) * cam.width;
     const chunk = 1 << 22;
