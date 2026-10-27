@@ -466,13 +466,13 @@ region 4.08 -> 3.85, whole 3.56 -> 3.44. The opposite sign is clearly worse (3.7
 and `uRayShift` in the GPU shader (`opts.geoMean !== false`). The dotted band beside the near wire (binary depth) is not fixed by this: ray geometry at constant depth
 matches the engine (no dots at all), so the dots come from how a depth step is handled.
 
-### Engine path: the x5 depth must carry the same shift as the lens resolution depth (b4-2 was garbage)
+### Engine path: Lytro's depth sits a constant -1 lambda off the plain rays (b4-2 was garbage)
 
-`lytroEdof` took its lens resolution depth from `state.depth`, which for Lytro depth maps carries the app's ray table shift and field term (`rayWarpShift`, `rayWarpField`: about -4.6 lambda on
-b4-2, small on b4-1e and b4-3), while the x5 map (`depth5`) was built from the stack depth as it is. The march range (lo / hi, from `state.depth`) and the depth it reads disagreed by that shift and
-the b4-2 picture came out as a smeared wall (MAE against the engine's own render 35.8). First try: read the plain depth everywhere (`state.depthPlain`): b4-2 5.08 but b4-3 got worse (2.72 -> 2.79,
-gradient ratio 0.967 -> 0.879), so the shift itself is right. Final: `depth5` gets `state.depth - state.depthPlain` (shift + field, bilinear to the x5 grid) added. b4-1e 3.24 -> 3.21, b4-2 5.28, b4-3 2.72 (unchanged).
-The stack depth equals the engine's own depth-out (b4-2: mean abs difference 0.05 lambda, aligned).
+`lytroEdof` took its lens resolution depth from `state.depth`, which for Lytro depth maps carries the app's ray table shift (`rayWarpShift`: constant per photo, -0.9 lambda on b4-1e, -1.1 on b4-3,
+-4.5 on b4-2), while the x5 map (`depth5`) was built from the stack depth as it is. The march range (lo / hi, from `state.depth`) and the depth it reads disagreed by that shift and the b4-2 picture
+came out as a smeared wall (MAE against the engine's own render 35.8). Reading the plain depth everywhere: b4-2 5.08, but b4-3 got worse (2.72 -> 2.79, gradient ratio 0.967 -> 0.879). Shift scale
+sweep (0, 0.5, 1, 1.5 of the estimate): b4-2 best at 0, b4-3 best at 1 .. 1.5, so the estimate is unreliable on b4-2. A constant -1 lambda (`ENGINE_DEPTH_SHIFT`, applied to the lens depth and to the
+x5 map) gives b4-1e 3.21 (was 3.24), b4-2 5.12, b4-3 2.73. The stack depth equals the engine's own depth-out (b4-2: mean abs difference 0.05 lambda, aligned).
 
 More oracle results on b4-1 (real depth, vs the engine with its own depth saved and fed back):
 - Reading the depth map shifted by -4 lens in x (equivalently a ray direction offset of -2.2 px used by the depth march only) removes the dotted band beside the near wire completely
