@@ -149,7 +149,7 @@ export function userDepthAlpha(map, sampler, cam, offset = 0, warp = null) {
 // inverse distance weighted (1 / sqrt(max(d^2, 0.01)), calcSubpixelWeights) mean of the four lenses around it, but only those that agree with the nearest
 // lens within the threshold, so depth stays flat on a surface and steps where the surface ends instead of ramping like a bilinear resize. Returns the
 // map as focus depth (alpha) on a grid `factor` times finer than the sampler's output grid.
-export function userDepthAlphaUpscaled(map, sampler, cam, offset = 0, warp = null, factor = 5, similar = 0.8) {
+export function userDepthAlphaUpscaled(map, sampler, cam, offset = 0, warp = null, factor = 5, similar = 0.8, level = false) {
   const { outW, outH } = sampler;
   const { width: W, height: H, data, min, max } = map;
   const [ax, ay] = sensorToOutput(sampler, 0, 0);
@@ -178,11 +178,46 @@ export function userDepthAlphaUpscaled(map, sampler, cam, offset = 0, warp = nul
         X = Math.min(W - 1, Math.max(0, ((sx / cam.width - 0.5) * FIT.kx + 0.5 + FIT.dx) * W));
         Y = Math.min(H - 1, Math.max(0, ((sy / cam.height - 0.5) * FIT.ky + 0.5 + FIT.dy) * H));
       }
-      const nx = Math.min(W - 1, Math.round(X));
-      const ny = Math.min(H - 1, Math.round(Y));
-      const dn = data[ny * W + nx];
+      let nx = Math.min(W - 1, Math.round(X));
+      let ny = Math.min(H - 1, Math.round(Y));
       const x0 = Math.min(W - 2, Math.floor(X));
       const y0 = Math.min(H - 2, Math.floor(Y));
+      if (level) {
+        // At a depth step the side a sub pixel belongs to is the side that holds more than half of its bilinear weight (the contour between the two depths, a straight
+        // diagonal where the step is one, not the staircase of lens sized squares that the nearest lens gives); the lens it takes its depth from is the nearest one on that side.
+        const fx0 = X - x0;
+        const fy0 = Y - y0;
+        const v00 = data[y0 * W + x0];
+        const v10 = data[y0 * W + x0 + 1];
+        const v01 = data[(y0 + 1) * W + x0];
+        const v11 = data[(y0 + 1) * W + x0 + 1];
+        const lo = Math.min(v00, v10, v01, v11);
+        const hi = Math.max(v00, v10, v01, v11);
+        if (hi - lo >= tol) {
+          const thr = (lo + hi) / 2;
+          const w00 = (1 - fx0) * (1 - fy0);
+          const w10 = fx0 * (1 - fy0);
+          const w01 = (1 - fx0) * fy0;
+          const w11 = fx0 * fy0;
+          const wNear = (v00 < thr ? w00 : 0) + (v10 < thr ? w10 : 0) + (v01 < thr ? w01 : 0) + (v11 < thr ? w11 : 0);
+          const nearSide = wNear >= 0.5;
+          // nearest lens on the chosen side
+          let best = -1;
+          let bd = Infinity;
+          const cand = [[0, 0, v00], [1, 0, v10], [0, 1, v01], [1, 1, v11]];
+          for (const [ci, cj, v] of cand) {
+            if ((v < thr) !== nearSide) continue;
+            const dd = (X - (x0 + ci)) ** 2 + (Y - (y0 + cj)) ** 2;
+            if (dd < bd) {
+              bd = dd;
+              best = (y0 + cj) * W + x0 + ci;
+            }
+          }
+          nx = best % W;
+          ny = (best / W) | 0;
+        }
+      }
+      const dn = data[ny * W + nx];
       let sum = 0;
       let wsum = 0;
       for (let j = 0; j < 2; j++) {

@@ -497,3 +497,17 @@ that picture). With the constant shift in place, growing the near side of every 
 picture 3.96 -> 3.97, MAE against the engine 3.21 -> 3.22; b4-2 5.12 -> 5.14; b4-3 2.73 -> 2.73. It is empirical: Lytro's own pictures keep the near depth about two lenses past a step in the depth map, the cause is not found
 (ray geometry matches the engine at constant depth, the resampler's owner split is at the cell midpoint like ours, the engine's ProjectEdof view offsets are 0 for this recipe, the output depth z grown by r px is worse:
 r 3 -> 16.4 / whole 4.04, r 6 -> 19.4 / 4.23, r 9 -> 28.6 / 4.51). The lookup using only a fraction of the ray table's position shift (0, .5, 1.5, 2): no change in the halo.
+
+### Edge blocks: where the remaining error is (b4-1, engine vs ours, 120 x 120 px blocks)
+The three worst blocks of b4-1 are not the wire but other crisp depth steps (near -22 against far -3, one texel wide in the engine's depth) of the rope and fence links: ours shows comb like teeth along the
+edge where the engine's edge is smooth (mean abs difference 8.4, 7.7, 7.6; the whole picture 3.2).
+- At constant depth the same blocks differ by 7 .. 10 at our aperture (0.451) but by only 3.5 .. 4.8 at the engine's own (metadata 0.9025 used directly, no halving): ray geometry, demosaic, weights and aperture
+  model are right in those blocks. At real depth the engine's aperture does not help (10.1, 7.9, 8.6): the extra error comes from how rays take their depth at the steps.
+- No effect at all on the three blocks: how the x5 map is built (similarity 0.3 / 0.8 / 3, a level set contour instead of the nearest lens for the side of a step), the march step (0.5), the search window above
+  the engine's own (31); worse with a smaller window (reach 3: 10.4 / 8.2 / 9.4), with dropping rays that hit texels near a step (k 1 .. 8: 7.8 .. 9.6), with the output depth grown (z), with the near side grown (helps the
+  wire, hurts blocks 1 and 3 by 0.5 .. 0.8), with a lookup shift (helps blocks 1 and 3 and the wire, hurts block 2: not a translation).
+- Even and odd lens rows give the same picture to 0.15 px: no row parity registration error.
+- Alpha is complete everywhere (0.07 % of pixels below 0.99), so the teeth are rays that took a wrong depth, not holes.
+- Displacement scale (0.0814 per lens map unit is 0.7 % above the 1 px per px of u and lambda the geometry gives): best 0.8 .. 0.9 at the engine's aperture (3.52 against 3.74) but still worse than 0.451 (3.22), not the cause.
+- GPU against CPU with all of the above (shift -1, x5 growth, table mean ray shift): mean alpha difference 0.02 %, 907 of 2.4 M pixels over 5 %, colour 3e-6.
+The cause at these steps is still open; the importance map (not available from the engine, no option dumps it) and the exact line segment tracing of the DmResampler remain the unported pieces.

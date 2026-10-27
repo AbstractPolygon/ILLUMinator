@@ -720,6 +720,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 const ENGINE_DEPTH_SHIFT = -1;
 // texels (5 per lens) the near side of a depth step grows by in the x5 map (core/userdepth.js dilateNearest)
 const D5_GROW = 10;
+const D5_LEVEL = false;
 
 async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   requireRaw();
@@ -746,7 +747,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
     const key = `${state.sampler.outW}x${state.sampler.outH}`;
     if (!state.depth5 || state.depth5.key !== key || state.depth5.src !== state.userDepth) {
-      state.depth5 = { key, src: state.userDepth, map: userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8) };
+      state.depth5 = { key, src: state.userDepth, map: userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
     }
     depth5 = state.depth5.map;
     const grow = dbg.d5Grow ?? D5_GROW;
