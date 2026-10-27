@@ -775,8 +775,14 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   if (ownPlace && (!state.depthOwn || state.depthOwn.key !== JSON.stringify(ownPlace) || state.depthOwn.src !== state.depthPlain)) {
     state.depthOwn = { key: JSON.stringify(ownPlace), src: state.depthPlain, plain: placedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownPlace) };
   }
+  // A depth measured here is in the frame of the plain views: the engine's rays start where the ray table puts them (up to +-32 lens pixels at the picture corners on b4-1),
+  // so the depth is read through the table's origin field (b4-1e edge blocks 10.7 8.6 8.3 -> 6.6 7.8 5.9, whole 3.35 -> 3.07; b4-2 5.36 -> 5.33, b4-3 unchanged).
+  const ownField = !engineShift && !state.pp && state.depthPlain && state.lf.rayWarpBytes ? (dbg.ownField ?? 1) : 0;
+  if (ownField && (!state.depthOwnF || state.depthOwnF.sign !== ownField || state.depthOwnF.src !== state.depthPlain)) {
+    state.depthOwnF = { sign: ownField, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField) };
+  }
   const ownShift = !engineShift && !state.pp && state.depthPlain ? (dbg.ownShift ?? OWN_DEPTH_SHIFT) * LAMBDA_TO_ALPHA : 0;
-  const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
+  const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
   let depth5 = null;
   if (!state.userDepth && !state.pp && dbg.own5) {
     // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
@@ -1519,6 +1525,40 @@ function placedGrid(alpha, w, h, P) {
     for (let x = 0; x < w; x++) {
       const X = Math.min(w - 1.001, Math.max(0, (x + 0.5 - w / 2) * P.kx + w / 2 + P.dx - 0.5));
       const Y = Math.min(h - 1.001, Math.max(0, (y + 0.5 - h / 2) * P.ky + h / 2 + P.dy - 0.5));
+      const x0 = Math.floor(X);
+      const y0 = Math.floor(Y);
+      const fx = X - x0;
+      const fy = Y - y0;
+      const q = y0 * w + x0;
+      out[y * w + x] = (alpha[q] * (1 - fx) + alpha[q + 1] * fx) * (1 - fy) + (alpha[q + w] * (1 - fx) + alpha[q + w + 1] * fx) * fy;
+    }
+  }
+  return out;
+}
+
+// A depth map on the sampler's grid moved through the ray table's origin field (where each lens's rays start in the engine's picture, at the lens center): out(p) = alpha(p - sign * origin(p)).
+function fieldPlacedGrid(alpha, w, h, sign) {
+  const rw = state.rayWarpEdof || (state.rayWarpEdof = parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height, { tilt: false, chief: true }));
+  const { cam, grid: g } = state.lf;
+  const unit = g.rowStep;
+  const { xMin, yMin } = state.sampler;
+  const cosR = Math.cos(g.rotation);
+  const sinR = Math.sin(g.rotation);
+  const out4 = new Float64Array(4);
+  const out = new Float32Array(alpha.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // sensor position of this output pixel's lens-plane point (grid axes -> sensor)
+      const lx = xMin + x * unit;
+      const ly = yMin + y * unit;
+      const sx = g.ox + cosR * lx - sinR * ly;
+      const sy = g.oy + sinR * lx + cosR * ly;
+      const cell = rw.lens(sx / cam.width - 0.5, sy / cam.height - 0.5);
+      rw.fromLens(cell, 0, 0, out4);
+      const ox = (cosR * out4[0] * cam.width + sinR * out4[1] * cam.height) / unit;
+      const oy = (-sinR * out4[0] * cam.width + cosR * out4[1] * cam.height) / unit;
+      const X = Math.min(w - 1.001, Math.max(0, x - sign * ox));
+      const Y = Math.min(h - 1.001, Math.max(0, y - sign * oy));
       const x0 = Math.floor(X);
       const y0 = Math.floor(Y);
       const fx = X - x0;

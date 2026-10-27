@@ -647,6 +647,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const cosR = Math.cos(g.rotation);
   const sinR = Math.sin(g.rotation);
   const warpOut = [0, 0, 0, 0];
+  const warp0 = new Float64Array(4);
   const geoOut = [0, 0];
   // GeometryErrorTable::CorrectLightfieldPoint takes the cell's (u, v) off every ray's direction. The picture-fitted lens centres already absorb how the table varies
   // from lens to lens but not its mean, which is a viewpoint shift of the whole picture (b4-1: -0.0186, -0.0063 pitches): near objects sit 1 to 3 px off the engine's.
@@ -680,7 +681,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
@@ -731,6 +732,12 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       }
       // opts.gctFirst: the engine looks the ray table up on the direction after the geometry table (CorrectLightfieldPoint, then the table)
       rayWarp.fromLens(cell, (u + (opts.gctFirst !== false ? rayShift[0] : 0)) / g.pitch, (v + (opts.gctFirst !== false ? rayShift[1] : 0)) / g.pitch, warpOut);
+      if (opts.posUScale !== undefined && opts.posUScale !== 1) {
+        // debug: scale the part of the table's position offset that depends on the ray direction
+        rayWarp.fromLens(cell, 0, 0, warp0);
+        warpOut[0] = warp0[0] + opts.posUScale * (warpOut[0] - warp0[0]);
+        warpOut[1] = warp0[1] + opts.posUScale * (warpOut[1] - warp0[1]);
+      }
       const sx = warpOut[0] * cam.width;
       const sy = warpOut[1] * cam.height;
       lx += (cosR * sx + sinR * sy) / unit;
