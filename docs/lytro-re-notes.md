@@ -361,3 +361,17 @@ check) with a synthetic pattern (constant, x ramp, y ramp, level stripes) so the
 - The `--eslf-out` picture is the project4d regrid of the standardized lightfield, not the lightfield itself, so its in-tile slopes (0.5 .. 0.95) say nothing about ray geometry. Stop using them.
 - Still unexplained: a smaller aperture scores better than the nominal 0.857 even after the window fix (0.45: 4.06, 0.6: 4.18, 0.75: 4.50, 0.857: 4.99). Outer rays also come out 12..20 % too bright at r > 0.4 pitch
   against the engine's calibrated flat field (radial mean over the central tiles), so the app's vignetting estimate is the next suspect, with the importance map. Error is now concentrated along the near fence wire.
+
+## Flat field, aperture, edge reduction (b4-1 against the engine, engine depth)
+- The engine's flat field is the camera's white image stored inside every `raw.lfp` (`modulationDataRef`, 7728 x 5368 10 bit, plus `modulationDataMetadataRef`), not something it derives from the picture. A constant raw
+  image gives the same bowl at raw levels 300 and 800, so the table is a fixed multiplicative model: the engine's gain at a lens's centre is 1 and rises to about 2.9 at the rim. `DemodulationAlgorithm4DDerived`
+  builds a 4D table (position x direction, smoothed over the two direction axes by `filterDimensions3And4`) from that image; the port divides every pixel by its own modulation relative to the same colour at the lens centre
+  (`correctedPlane(..., modulation)`, read by `decode.js` as `readModulation`). Radial mean of the rays over the central lenses now matches the engine's to 1 %; MAE 4.99 -> 4.52. The app's own estimate
+  (`estimateVignetting`) was 20 % too bright at the rim.
+- `ApplyReweighting` sets each standardized pixel's alpha to table^cfg 0x2470 (2.0) with the colour left demodulated (AssignInfluence is called with premultiply = false), so every ray counts equally in the numerator.
+- cfg 0x1b18 = 0.7 is the importance factor of `DecreaseDepthEdgeImportance`; importance is never zero, so the `confidence > 0` test of ProjectGold does not drop rays here.
+- Aperture: the nominal fraction from the metadata (0.9025) scores worse against the engine than a smaller hexagon (0.5: 3.93, 0.7: 4.09, 0.857: 4.52, 0.9025: 4.77). The port uses 0.5, the value measured against the engine.
+- EdgeArtifactReduction (cfg 0x1fc8) now runs after the filter bank in the EDOF path (no change in score).
+- Depth edges: dilating near objects by one depth pixel scores 3.78 against 3.87 (nearest depth). Most remaining error (14 % of pixels beside depth steps, MAE about 10) is a haze in the disoccluded band beside the near wire.
+- Spectrum in near-focus flat areas: ours / engine amplitude 1.0, 0.98, 0.91, 0.84, 0.79, 0.75, 0.72 at 2, 4, 6, 8, 10, 12, 16 cycles per 64 px with the bank, 0.92..1.0 without; raising the bank's frequencies by 1.5 flattens it
+  (hook `globalThis.__bankFS`); MAE unchanged.
