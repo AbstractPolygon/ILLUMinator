@@ -268,9 +268,11 @@ void main() {
 
 const LUMA = `${HEAD}
 uniform sampler2D uT;
+uniform float uClamp;  // every channel is clamped at white first (0: off)
 out vec4 o;
 void main() {
   vec3 t = texelFetch(uT, ivec2(gl_FragCoord.xy), 0).rgb;
+  if (uClamp > 0.0) t = min(t, vec3(uClamp));
   o = vec4(0.299 * t.r + 0.587 * t.g + 0.114 * t.b);
 }`;
 
@@ -323,7 +325,7 @@ uniform int uY0;           // first ray row
 uniform int uRows;
 uniform float uScaleOut;
 uniform ivec2 uOutSize;
-uniform vec2 uSharpen;     // amount, 0
+uniform vec2 uSharpen;     // amount, clamp at white (0: off)
 uniform float uModPow;
 uniform float uTolerance;
 uniform vec2 uMarch;       // tolA, tolB
@@ -439,6 +441,7 @@ void main() {
   if (au > ap || av > 2.0 * rise || (av > rise && av + au / 1.7320508 > 2.0 * rise)) return;
   // the colour: demosaic, then the luma boost
   vec3 rgb = texelFetch(uT, pl, 0).rgb;
+  if (uSharpen.y > 0.0) rgb = min(rgb, vec3(uSharpen.y));
   float Y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
   float low = texelFetch(uLow, pl, 0).r;
   float dl = (Y - low) * (1.0 + uSharpen.x);
@@ -669,6 +672,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     fullscreen(prog.luma, lumaA, cam.width, th, (U) => {
       common(U, t0);
       bind(0, dmB, U.uT);
+      gl.uniform1f(U.uClamp, sharp.clampPre || 0);
     });
     let src = lumaA;
     let dst = lumaB;
@@ -729,7 +733,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform1i(U.uRows, y1 - y0);
     gl.uniform1f(U.uScaleOut, P.scale);
     gl.uniform2i(U.uOutSize, W, H);
-    gl.uniform2f(U.uSharpen, sharp.amount, 0);
+    gl.uniform2f(U.uSharpen, sharp.amount, sharp.clampPre || 0);
     gl.uniform1f(U.uModPow, P.opts.modPow || 0);
     gl.uniform1f(U.uTolerance, P.opts.tolerance);
     gl.uniform2f(U.uMarch, P.opts.tolA, P.opts.tolB);
