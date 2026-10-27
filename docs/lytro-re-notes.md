@@ -511,3 +511,14 @@ edge where the engine's edge is smooth (mean abs difference 8.4, 7.7, 7.6; the w
 - Displacement scale (0.0814 per lens map unit is 0.7 % above the 1 px per px of u and lambda the geometry gives): best 0.8 .. 0.9 at the engine's aperture (3.52 against 3.74) but still worse than 0.451 (3.22), not the cause.
 - GPU against CPU with all of the above (shift -1, x5 growth, table mean ray shift): mean alpha difference 0.02 %, 907 of 2.4 M pixels over 5 %, colour 3e-6.
 The cause at these steps is still open; the importance map (not available from the engine, no option dumps it) and the exact line segment tracing of the DmResampler remain the unported pieces.
+
+### Raw files, the engine's off-centre views and its depth stage (own depth, no Lytro depth map)
+- `tnt --lfp-out` writes 7 EDOF views at perspectives (u, v) in lens pitches: (-0.3464,-0.2), (-0.3464,0.2), (0,-0.4), (0,0), (0,0.4), (0.3464,-0.2), (0.3464,0.2).
+  `lytroSplat` option `persp` ([u, v]) reproduces them: splat direction `ru - u*pitch`, u first, sign +1 (swapped or negated: MAE 12 to 19 against 4.4).
+  Against those views b4-1 scores 4.2 to 4.5 (centre 3.2), the rest is a pure translation (`pivot` lambda), so the lambda to displacement scale and the ray geometry are right over a large parallax range.
+- On raw input the engine path runs from our own depth. Classic style: MAE 3.48 against the engine render; Lytro style (`depthStyle: match`): 3.37; with Lytro's depth map: 3.22. b4-2 5.55 / 6.24 (match / classic), b4-3 2.73 / 2.72.
+  The harness has no hardware GPU, so it falls to the classic style unless `globalThis.__forceStyle` is set.
+- Our depth against the engine's depth map (`lo41.lfp` edofWarp depth, whole labels with sub-pixel): classic MAE 2.1 lambda, match 1.0, match with the engine's views 0.93. Smoothing 0.3 makes no difference.
+  The engine's views (spec in `docs/lytro-depth-spec.md`, from `GetBlitzenVersion1Configuration`): a ring of eight at radius 0.25 lens pitches, 45 degrees apart, plus the center; now the default of `measureLytro` (`depthViews`).
+- Still different: the engine's fence wires are flat plateaus with stair-stepped edges, ours have gradients and edges about 1 px (541 grid) off on one side; edge blocks 10.6 / 8.7 / 8.0 against 8.4 / 7.7 / 7.6 with Lytro's depth.
+  A viewpoint offset on the depth views only translates the whole depth map.

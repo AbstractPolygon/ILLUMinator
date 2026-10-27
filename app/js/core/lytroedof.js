@@ -536,7 +536,7 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts, up = null) {
   lx += opts.shiftX || 0;
   ly += opts.shiftY || 0;
   for (let lam = lam0; lam <= lam1; lam += opts.step) {
-    const a = lam * LAMBDA_TO_ALPHA;
+    const a = lam * LAMBDA_TO_ALPHA * (opts.dispScale || 1);
     // RayTraceRegion reads the depth map at the texel the ray falls in (no interpolation)
     // with the upscaled map (DmResampler) the ray reads the finer texel it falls in: centre of texel i is at (i + 0.5) / factor - 0.5 lens map pixels
     const d = (up ? nearestDepth(up.data, up.width, up.height, (lx - a * rdu) * up.factor + (up.factor - 1) / 2, (ly - a * rdv) * up.factor + (up.factor - 1) / 2) : near ? nearestDepth(D, lw, lh, lx - a * rdu, ly - a * rdv) : sampleDepth(D, lw, lh, lx - a * rdu, ly - a * rdv)) / LAMBDA_TO_ALPHA;
@@ -679,7 +679,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
@@ -751,9 +751,18 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     count++;
     if (!(lamR === lamR)) return;
     const rayWeight = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;
-    const a = lamR * LAMBDA_TO_ALPHA;
-    let qx = (lx - a * ru) * scale;
-    let qy = (ly - a * rv) * scale;
+    const a = lamR * LAMBDA_TO_ALPHA * (opts.dispScale || 1);
+    // viewpoint (ProjectEdof's perspective): the splat direction is taken off the view's (u, v) in lens pitches and the picture is pivoted at lambda `pivot`
+    let pu = 0;
+    let pv = 0;
+    if (opts.persp) {
+      const sg = opts.perspSign || [1, 1];
+      pu = (opts.perspSwap ? opts.persp[1] : opts.persp[0]) * sg[0] * g.pitch;
+      pv = (opts.perspSwap ? opts.persp[0] : opts.persp[1]) * sg[1] * g.pitch;
+    }
+    const aPivot = LAMBDA_TO_ALPHA * (opts.dispScale || 1) * (opts.pivot || 0);
+    let qx = (lx - a * (ru - pu) - aPivot * pu) * scale;
+    let qy = (ly - a * (rv - pv) - aPivot * pv) * scale;
     if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
     const x0 = Math.floor(qx);
     const y0 = Math.floor(qy);
