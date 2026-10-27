@@ -752,12 +752,12 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     depth5 = state.depth5.map;
     const grow = dbg.d5Grow ?? D5_GROW;
     if (grow) {
-      if (state.depth5.grown?.r !== grow) state.depth5.grown = { r: grow, map: dilateNearest(state.depth5.map, grow) };
+      if (state.depth5.grown?.r !== grow || state.depth5.grown.round !== !!dbg.d5Round) state.depth5.grown = { r: grow, round: !!dbg.d5Round, map: dilateNearest(state.depth5.map, grow, !!dbg.d5Round) };
       depth5 = state.depth5.grown.map;
     }
     // the upscaled map moves with the depth the march range comes from, or the two disagree
     if (engineShift) {
-      const key2 = `${engineShift}:${grow}`;
+      const key2 = `${engineShift}:${grow}:${!!dbg.d5Round}`;
       if (!state.depth5.shifted || state.depth5.shiftedKey !== key2) {
         state.depth5.shifted = { ...depth5, data: Float32Array.from(depth5.data, (x) => x + engineShift) };
         state.depth5.shiftedKey = key2;

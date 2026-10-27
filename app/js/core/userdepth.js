@@ -261,21 +261,35 @@ export async function stackDepth(bytes) {
 // The nearest depth (smallest lambda) within `r` texels of every texel of an upscaled depth map: near surfaces grow by r texels. Lytro's pictures treat a depth step this way:
 // the rays of a thin near object (a fence wire) beside a far background keep the near depth a couple of lenses past the step in the depth map (the engine's own
 // picture has no halo there; with the plain step the rays of the wire edge take the background depth and come out as a grainy halo).
-export function dilateNearest(map, r) {
+export function dilateNearest(map, r, round = false) {
   const { data, width: w, height: h } = map;
-  const tmp = new Float32Array(data.length);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let m = Infinity;
-      for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) m = Math.min(m, data[y * w + xx]);
-      tmp[y * w + x] = m;
+  // A round neighbourhood (a disc) gives a depth step the same shape the contour has; the square one stairs along a diagonal.
+  const half = (dy) => (round ? Math.floor(Math.sqrt(r * r + r - dy * dy + 0.25)) : r);
+  const rows = [];
+  for (let k = 0; k <= r; k++) {
+    // horizontal minimum of half width k
+    const t = new Float32Array(data.length);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let m = Infinity;
+        for (let xx = Math.max(0, x - k); xx <= Math.min(w - 1, x + k); xx++) m = Math.min(m, data[y * w + xx]);
+        t[y * w + x] = m;
+      }
     }
+    rows.push(t);
+    if (!round) break;
   }
   const out = new Float32Array(data.length);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       let m = Infinity;
-      for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++) m = Math.min(m, tmp[yy * w + x]);
+      for (let dy = -r; dy <= r; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        const t = rows[round ? Math.min(r, half(Math.abs(dy))) : 0];
+        const v = t[yy * w + x];
+        if (v < m) m = v;
+      }
       out[y * w + x] = m;
     }
   }

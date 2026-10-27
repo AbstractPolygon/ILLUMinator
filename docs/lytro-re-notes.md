@@ -522,3 +522,11 @@ The cause at these steps is still open; the importance map (not available from t
   The engine's views (spec in `docs/lytro-depth-spec.md`, from `GetBlitzenVersion1Configuration`): a ring of eight at radius 0.25 lens pitches, 45 degrees apart, plus the center; now the default of `measureLytro` (`depthViews`).
 - Still different: the engine's fence wires are flat plateaus with stair-stepped edges, ours have gradients and edges about 1 px (541 grid) off on one side; edge blocks 10.6 / 8.7 / 8.0 against 8.4 / 7.7 / 7.6 with Lytro's depth.
   A viewpoint offset on the depth views only translates the whole depth map.
+
+### Edge shape experiments on b4-1e (Lytro depth, scored against the engine render; blocks = (760,280) (460,640) (580,400) halo, whole 3.25)
+- Square near-side growth r = 10 (the default): 8.38 7.74 7.57 3.18. The wire edge shows teeth along diagonals; the knot region is cleanest.
+- Contour level (`dmLevel`) with no growth: edges clean (7.88 7.82 6.80) but the halo 4.18. Round (disc) growth with `dmLevel`: r 4 / 6 / 8 / 10 / 14 gives halo 3.83 / 3.66 / 3.44 / 3.31 / 3.02 and blocks 1 and 3 from 8.04 / 7.08 (r 4) to 8.35 / 7.62 (r 14); teeth return at large r. Whole picture 3.23 to 3.25 in all.
+  The wire edge (diagonal) wants a small growth, the knot (vertical edge) a large one: a plain dilation cannot be the engine's rule. Kept: square 10, `d5Round` and `dmLevel` as debug options.
+- Output depth from the x5 map (`zFrom5`): halo 4.14 / 4.55 / 3.75 with the above, no gain.
+- Not the cause of the teeth and fringe: edge artifact reduction, the filter bank, hole fill (all within 0.05 of the default).
+- Raw files: the engine path from our own depth is 3.34 (Lytro-style depth) against 3.25 with Lytro's depth; edge blocks 10.6 / 8.7 / 8.0.
