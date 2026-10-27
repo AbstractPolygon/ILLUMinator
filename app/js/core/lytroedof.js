@@ -540,7 +540,7 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts) {
     }
     if (lam < d) far = d;
   }
-  return far !== Infinity ? far : NaN;
+  return far !== Infinity && !opts.noFar ? far : NaN;
 }
 
 
@@ -706,6 +706,14 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
         const yy = y0 + j;
         if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
         const p = yy * W + xx;
+        if (globalThis.__rayDiag && j === 0 && k === 0) {
+          const dd = lamR - zMap[p];
+          const rb = Math.min(7, Math.floor((Math.hypot(u, v) / g.pitch) * 16));
+          const dgn = globalThis.__rayDiag;
+          dgn.n[rb]++;
+          if (dd < -5) dgn.near[rb]++;
+          if (dd > 5) dgn.far[rb]++;
+        }
         if (lamR - zMap[p] >= opts.tolerance) continue;
         const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy) * rayWeight;
         acc[4 * p] += rgb[0] * w;

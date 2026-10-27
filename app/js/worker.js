@@ -643,6 +643,8 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
 // `masks`: an animation frame's local adjustment settings (see resolveMasks).
 async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null, color = null }) {
   requireRaw();
+  // Setting lytroEngine: the all in focus picture the way Lytro's engine builds it (lytroEdof), for photos that carry its ray table and white image.
+  if (aperture <= 0 && state.settings.lytroEngine && state.lf.rayWarpBytes && state.lf.readModulation && !alpha) return lytroEdof({ id, job, scale, color, masks });
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
   const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
