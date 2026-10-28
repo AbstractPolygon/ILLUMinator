@@ -646,6 +646,114 @@ function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7, clampPre = 0, cla
   };
 }
 
+
+// BlendIlluminantSharpenGain as read from the engine (stage 1b): on the demodulated, demosaiced camera RGB (white balanced), (1) the chroma suppression map (from the black subtracted
+// raw: per colour the 3x3 maximum, v = 0.4 R + 0.4 G + 0.2 B, through the curve (0, 0) (0.6, 0) (0.75, 0.2) (0.84, 1)) takes the chroma (BT.601 Cb, Cr of the colour matrix's linear sRGB) out of
+// clipped areas in the hues of the weight w, (2) the luminance Y of the normalized Lab (linear Y, D65) is smoothed by the first order IIR filter and becomes low + 1.25 (Y - low)
+// (the highlight threshold is -infinity for the ILLUM's saturation recovery type 1), a and b kept, and the colour goes back through the matrices.
+const SRGB_XYZ = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
+const mul3 = (m, v) => [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+function inv3(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h;
+  const B = -(d * i - f * g);
+  const C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  return [A / det, -(b * i - c * h) / det, (b * f - c * e) / det, B / det, (a * i - c * g) / det, -(a * f - c * d) / det, C / det, -(a * h - b * g) / det, (a * e - b * d) / det];
+}
+const labF = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787037 * t + 0.137931);
+const labFinv = (f) => (f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037);
+const SUPPRESS_CURVE = [[0, 0], [0.6, 0], [0.75, 0.2], [0.84, 1]];
+function suppressCurve(v) {
+  if (v <= 0) return 0;
+  for (let k = 1; k < SUPPRESS_CURVE.length; k++) {
+    if (v <= SUPPRESS_CURVE[k][0]) {
+      const [x0, y0] = SUPPRESS_CURVE[k - 1];
+      const [x1, y1] = SUPPRESS_CURVE[k];
+      return y0 + ((v - x0) / (x1 - x0)) * (y1 - y0);
+    }
+  }
+  return 1;
+}
+
+function bisgFilter(dm, raw, cam, dev, W, H, { amount = 0.25, c = 0.7 } = {}) {
+  const ccm = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const ccmInv = inv3(ccm);
+  const toXyz = mul3.bind(null, SRGB_XYZ);
+  const fromXyz = inv3(SRGB_XYZ);
+  // the engine's units: raw / 1023 less the black level; ours divide by (white - black)
+  const sE = (cam.white[0] - cam.black[0]) / 1023;
+  const blackN = cam.black[1] / 1023;
+  const cap = 1 - blackN;
+  const plane = (x, y) => Math.max(0, raw[y * W + x] - cam.black[dev.cfa[y & 1][x & 1]]) / 1023;
+  const mapAt = (x, y) => {
+    if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return suppressCurve(Math.min(1, plane(x, y)));
+    const M = [0, 0, 0];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const v = plane(x + dx, y + dy);
+      const ch = dev.cfa[(y + dy) & 1][(x + dx) & 1];
+      if (v > M[ch]) M[ch] = v;
+    }
+    return suppressCurve(Math.min(1, 0.4 * Math.min(M[0], cap) + 0.4 * Math.min(M[1], cap) + 0.2 * Math.min(M[2], cap)));
+  };
+  const rgb = [0, 0, 0];
+  // the colour after the chroma suppression: linear sRGB-ish (the colour matrix's output), its XYZ
+  const suppressed = (x, y) => {
+    const s = mul3(ccm, [rgb[0] * sE, rgb[1] * sE, rgb[2] * sE]);
+    const Y = 0.299 * s[0] + 0.587 * s[1] + 0.114 * s[2];
+    let Cb = -0.168736 * s[0] - 0.331264 * s[1] + 0.5 * s[2];
+    let Cr = 0.5 * s[0] - 0.418688 * s[1] - 0.081312 * s[2];
+    let w;
+    if (Cr >= 0) {
+      const r = Cb / (Cr + 0.001);
+      w = Math.min(1, Math.max(0, (r + 0.8) / 0.5));
+    } else {
+      const r = -Cb / Cr;
+      w = Math.min(1, Math.max(0, (r - 4) / 2));
+    }
+    const k = 1 - mapAt(x, y) * w;
+    Cb *= k;
+    Cr *= k;
+    return toXyz([Y + 1.402 * Cr, Y - 0.344136 * Cb - 0.714136 * Cr, Y + 1.772 * Cb]);
+  };
+  const a = 1 - c;
+  const low = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!dm.at(x, y, rgb)) { low[y * W + x] = 0; continue; }
+      low[y * W + x] = suppressed(x, y)[1];
+    }
+  }
+  for (let y = 0; y < H; y++) {
+    const o = y * W;
+    for (let x = 1; x < W; x++) low[o + x] = a * low[o + x] + c * low[o + x - 1];
+    for (let x = W - 2; x >= 0; x--) low[o + x] = a * low[o + x] + c * low[o + x + 1];
+  }
+  for (let y = 1; y < H; y++) for (let x = 0; x < W; x++) low[y * W + x] = a * low[y * W + x] + c * low[(y - 1) * W + x];
+  for (let y = H - 2; y >= 0; y--) for (let x = 0; x < W; x++) low[y * W + x] = a * low[y * W + x] + c * low[(y + 1) * W + x];
+  return {
+    at(x, y, out) {
+      if (!dm.at(x, y, rgb)) return false;
+      const xyz = suppressed(x, y);
+      const Y = xyz[1];
+      const l = low[y * W + x];
+      const Yn = l + (1 + amount) * (Y - l);
+      const fY = labF(Y);
+      const aa = 500 * (labF(xyz[0] / 0.95047) - fY);
+      const bb = 200 * (fY - labF(xyz[2] / 1.08883));
+      const fN = labF(Yn);
+      const X2 = 0.95047 * labFinv(fN + aa / 500);
+      const Z2 = 1.08883 * labFinv(fN - bb / 200);
+      const s2 = mul3(fromXyz, [X2, Yn, Z2]);
+      const c2 = mul3(ccmInv, s2);
+      out[0] = c2[0] / sE;
+      out[1] = c2[1] / sE;
+      out[2] = c2[2] / sE;
+      return true;
+    },
+  };
+}
+
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
 export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null, depth5 = null }, opts = SPLAT) {
   const { width } = cam;
@@ -712,7 +820,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   }
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
-  if (dm && opts.sharpen) dm = sharpenHighlights(dm, width, cam.height, opts.sharpen);
+  if (dm && opts.sharpen) dm = opts.bisg ? bisgFilter(dm, raw, cam, dev, width, cam.height, opts.sharpen) : sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
   const rgb = [0, 0, 0];
   const r2 = radius * radius;

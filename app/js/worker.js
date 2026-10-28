@@ -731,11 +731,11 @@ function probeGrid(g, dbg) {
 // The engine's window is the full nominal hexagon (0.9025 on b4-1); with the engine's lattice offset, narrowing ours to 0.665 of it still scores best on all three photos (aperture 0.6 on b4-1: fitted 2.51 against
 // 2.57 at 0.5 and 2.70 at 0.9025; b4-3 2.20 / 2.20 / 2.24; b4-2 3.27 / 3.36 / 3.43), so some error that grows toward the window's edge remains in our rays.
 const ENGINE_APERTURE_FRACTION = 0.665;
-// With the engine's exact geometry and depth placement (below) the window can be wider again: 0.8 of the nominal one scores best (fitted mean difference against tnt, b4-1 / b4-3 / b4-2:
-// 1.99 / 1.70 / 2.45 at 0.8, 2.05 / 1.71 / 2.40 at 0.665, 2.12 / 1.73 at 1.0 with softer edges).
-const EXACT_APERTURE_FRACTION = 0.8;
+// With the engine's exact geometry, depth placement and highlight handling (BlendIlluminantSharpenGain) the engine's own window is the best one: against Lytro Desktop's pre-adjust pictures
+// (13 photos) the mean difference is 1.13 at the full nominal window, 1.22 at 0.9 and 1.33 at 0.8 without BlendIlluminantSharpenGain.
+const EXACT_APERTURE_FRACTION = 1;
 // Our own measured depth is less exact than the engine's (b4-1 with the app's combined depth, fitted mean difference against tnt: 2.35 at 0.5, 2.28 at 0.65, 2.32 at 0.8; with the classic depth alone 3.34 at 0.8, 2.78 at 0.5), so the window stays narrower there.
-const EXACT_APERTURE_FRACTION_OWN = 0.65;
+const EXACT_APERTURE_FRACTION_OWN = 0.8;
 // The engine's lens lattice (HexDiskArrayModel) in pixel indices: its coordinates are pixel edges (a pixel's centre is x + 0.5), the app's are pixel centres.
 function engineLatticeIdx(lf) {
   const g = engineGrid(lf.metadata, lf.cam.width, lf.cam.height);
@@ -887,6 +887,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   }, {
     ...LYTRO_SPLAT,
     exact: exactGeo,
+    bisg: exactGeo && !dbg.noBisg,
     aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, exactGeo ? (dbg.apFraction ?? (exactDepth ? EXACT_APERTURE_FRACTION : EXACT_APERTURE_FRACTION_OWN)) : ENGINE_APERTURE_FRACTION),
     // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
     gpu: state.gpu && !dbg.noGpuEngine ? (input) => {

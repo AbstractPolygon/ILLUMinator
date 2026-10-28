@@ -36,6 +36,56 @@ int colour(int x, int y) { return uCfa[((y & 1) << 1) | (x & 1)]; }
 const arr = (name, values) => `const float ${name}[${values.length}] = float[${values.length}](${Array.from(values, (v) => v.toFixed(9)).join(', ')});`;
 const iarr = (name, values) => `const int ${name}[${values.length}] = int[${values.length}](${values.join(', ')});`;
 
+
+// BlendIlluminantSharpenGain (core/lytroedof.js bisgFilter): the chroma suppression map from the raw, the suppressed colour's XYZ, and the Lab luma sharpen's inverse.
+const SRGB_XYZ_ROWS = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
+const XYZ_SRGB_ROWS = [3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252];
+const glMat = (rows) => `mat3(${[0, 3, 6, 1, 4, 7, 2, 5, 8].map((i) => rows[i].toFixed(9)).join(', ')})`;
+const BISG = `
+uniform usampler2D uRaw;
+uniform vec3 uBlack;
+uniform vec2 uBisgA;     // engine units per ours (white - black over 1023), 1 - black / 1023
+uniform mat3 uCcm;
+uniform mat3 uCcmInv;
+const mat3 SRGB_XYZ = ${glMat(SRGB_XYZ_ROWS)};
+const mat3 XYZ_SRGB = ${glMat(XYZ_SRGB_ROWS)};
+float planeAt(ivec2 p) { return max(0.0, float(texelFetch(uRaw, p, 0).r) - uBlack[colour(p.x, p.y)]) / 1023.0; }
+float suppressCurve(float v) {
+  if (v <= 0.6) return 0.0;
+  if (v <= 0.75) return (v - 0.6) / 0.15 * 0.2;
+  if (v <= 0.84) return 0.2 + (v - 0.75) / 0.09 * 0.8;
+  return 1.0;
+}
+float suppressMap(ivec2 p) {
+  if (p.x < 1 || p.y < 1 || p.x >= uSize.x - 1 || p.y >= uSize.y - 1) return suppressCurve(min(1.0, planeAt(p)));
+  vec3 M = vec3(0.0);
+  for (int dy = -1; dy <= 1; dy++) {
+    for (int dx = -1; dx <= 1; dx++) {
+      ivec2 q = p + ivec2(dx, dy);
+      int ch = colour(q.x, q.y);
+      M[ch] = max(M[ch], planeAt(q));
+    }
+  }
+  M = min(M, vec3(uBisgA.y));
+  return suppressCurve(min(1.0, 0.4 * M.r + 0.4 * M.g + 0.2 * M.b));
+}
+vec3 suppressedXyz(vec3 rgb, ivec2 p) {
+  vec3 s = uCcm * (rgb * uBisgA.x);
+  float Y = 0.299 * s.r + 0.587 * s.g + 0.114 * s.b;
+  float Cb = -0.168736 * s.r - 0.331264 * s.g + 0.5 * s.b;
+  float Cr = 0.5 * s.r - 0.418688 * s.g - 0.081312 * s.b;
+  float w;
+  if (Cr >= 0.0) w = clamp((Cb / (Cr + 0.001) + 0.8) / 0.5, 0.0, 1.0);
+  else w = clamp((-Cb / Cr - 4.0) / 2.0, 0.0, 1.0);
+  float k = 1.0 - suppressMap(p) * w;
+  Cb *= k;
+  Cr *= k;
+  return SRGB_XYZ * vec3(Y + 1.402 * Cr, Y - 0.344136 * Cb - 0.714136 * Cr, Y + 1.772 * Cb);
+}
+float labF(float t) { return t > 0.008856 ? pow(t, 1.0 / 3.0) : 7.787037 * t + 0.137931; }
+float labFinv(float f) { return f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037; }
+`;
+
 // ---- the corrected plane -----------------------------------------------------------------------------------
 
 const PLANE = `${HEAD}
@@ -268,11 +318,17 @@ void main() {
 // y[n] = a x[n] + c y[n - 1], forward then backward, along rows and then columns, by recursive doubling.
 
 const LUMA = `${HEAD}
+${BISG}
 uniform sampler2D uT;
 uniform float uClamp;  // every channel is clamped at white first (0: off)
+uniform int uBisg;
 out vec4 o;
 void main() {
   vec3 t = texelFetch(uT, ivec2(gl_FragCoord.xy), 0).rgb;
+  if (uBisg == 1) {
+    o = vec4(suppressedXyz(t, ivec2(int(gl_FragCoord.x), int(gl_FragCoord.y) + uT0)).y);
+    return;
+  }
   if (uClamp > 0.0) t = min(t, vec3(uClamp));
   o = vec4(0.299 * t.r + 0.587 * t.g + 0.114 * t.b);
 }`;
@@ -308,6 +364,8 @@ void main() {
 // ---- the rays ----------------------------------------------------------------------------------------------
 
 const SPLAT_VERTEX = `${HEAD}
+${BISG}
+uniform int uBisg;
 uniform sampler2D uT;      // demosaiced
 uniform sampler2D uLow;    // smoothed luma
 uniform sampler2D uPlane;  // plane, modulation
@@ -461,6 +519,17 @@ void main() {
   }
   // the colour: demosaic, then the luma boost
   vec3 rgb = texelFetch(uT, pl, 0).rgb;
+  if (uBisg == 1) {
+    vec3 xyz = suppressedXyz(rgb, ivec2(x, y));
+    float low = texelFetch(uLow, pl, 0).r;
+    float Yn = low + (1.0 + uSharpen.x) * (xyz.y - low);
+    float fY = labF(xyz.y);
+    float aa = 500.0 * (labF(xyz.x / 0.95047) - fY);
+    float bb = 200.0 * (fY - labF(xyz.z / 1.08883));
+    float fN = labF(Yn);
+    vec3 xyz2 = vec3(0.95047 * labFinv(fN + aa / 500.0), Yn, 1.08883 * labFinv(fN - bb / 200.0));
+    rgb = (uCcmInv * (XYZ_SRGB * xyz2)) / uBisgA.x;
+  } else {
   if (uSharpen.y > 0.0) rgb = min(rgb, vec3(uSharpen.y));
   float Y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
   float low = texelFetch(uLow, pl, 0).r;
@@ -468,6 +537,7 @@ void main() {
   float wt = b3(2.0 * Y);
   float nY = wt * (low + dl) + (1.0 - wt) * (low + (dl > 0.0 ? dl : 0.0));
   rgb += vec3(nY - Y);
+  }
   vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
   float ru = u;
   float rv = v;
@@ -658,6 +728,24 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   const c = sharp.c;
   const a = 1 - c;
 
+  const bis = !!P.opts.bisg;
+  const ccm = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const inv3 = (m) => {
+    const [a0, b0, c0, d0, e0, f0, g0, h0, i0] = m;
+    const A = e0 * i0 - f0 * h0;
+    const B = -(d0 * i0 - f0 * g0);
+    const C = d0 * h0 - e0 * g0;
+    const det = a0 * A + b0 * B + c0 * C;
+    return [A / det, -(b0 * i0 - c0 * h0) / det, (b0 * f0 - c0 * e0) / det, B / det, (a0 * i0 - c0 * g0) / det, -(a0 * f0 - c0 * d0) / det, C / det, -(a0 * h0 - b0 * g0) / det, (a0 * e0 - b0 * d0) / det];
+  };
+  const colMajor = (m) => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+  const bisgUniforms = (U) => {
+    gl.uniform1i(U.uBisg, bis ? 1 : 0);
+    gl.uniform3fv(U.uBlack, dev.black);
+    gl.uniform2f(U.uBisgA, (cam.white[0] - cam.black[0]) / 1023, 1 - cam.black[1] / 1023);
+    gl.uniformMatrix3fv(U.uCcm, false, colMajor(ccm));
+    gl.uniformMatrix3fv(U.uCcmInv, false, colMajor(inv3(ccm)));
+  };
   const common = (U, t0) => {
     gl.uniform2i(U.uSize, cam.width, cam.height);
     gl.uniform1i(U.uT0, t0);
@@ -716,6 +804,8 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
       common(U, t0);
       bind(0, dmB, U.uT);
       gl.uniform1f(U.uClamp, sharp.clampPre || 0);
+      bisgUniforms(U);
+      bind(1, rawTex, U.uRaw);
     });
     let src = lumaA;
     let dst = lumaB;
@@ -777,6 +867,8 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform1f(U.uScaleOut, P.scale);
     gl.uniform2i(U.uOutSize, W, H);
     gl.uniform2f(U.uSharpen, sharp.amount, sharp.clampPre || 0);
+    bisgUniforms(U);
+    bind(7 + 3, rawTex, U.uRaw);
     gl.uniform1f(U.uModPow, P.opts.modPow || 0);
     gl.uniform1f(U.uTolerance, P.opts.tolerance);
     gl.uniform2f(U.uMarch, P.opts.tolA, P.opts.tolB);
