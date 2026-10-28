@@ -28,7 +28,7 @@ import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
-import { parseGeometryTable } from './core/geometrytable.js';
+import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
 import { lytroSplat, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
@@ -732,6 +732,8 @@ const ENGINE_APERTURE_FRACTION = 0.665;
 // With the engine's exact geometry and depth placement (below) the window can be wider again: 0.8 of the nominal one scores best (fitted mean difference against tnt, b4-1 / b4-3 / b4-2:
 // 1.99 / 1.70 / 2.45 at 0.8, 2.05 / 1.71 / 2.40 at 0.665, 2.12 / 1.73 at 1.0 with softer edges).
 const EXACT_APERTURE_FRACTION = 0.8;
+// Our own measured depth is less exact than the engine's (b4-1 own depth, fitted mean difference: 3.34 at 0.8, 2.78 at 0.5), so the window stays narrower there.
+const EXACT_APERTURE_FRACTION_OWN = 0.5;
 // The engine's lens lattice (HexDiskArrayModel) in pixel indices: its coordinates are pixel edges (a pixel's centre is x + 0.5), the app's are pixel centres.
 function engineLatticeIdx(lf) {
   const g = engineGrid(lf.metadata, lf.cam.width, lf.cam.height);
@@ -805,8 +807,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   // A depth measured here is in the frame of the plain views: the engine's rays start where the ray table puts them (up to +-32 lens pixels at the picture corners on b4-1),
   // so the depth is read through the table's origin field (b4-1e edge blocks 10.7 8.6 8.3 -> 6.6 7.8 5.9, whole 3.35 -> 3.07; b4-2 5.36 -> 5.33, b4-3 unchanged).
   const ownField = !engineShift && !state.pp && state.depthPlain && state.lf.rayWarpBytes ? (dbg.ownField ?? 1) : 0;
-  if (ownField && (!state.depthOwnF || state.depthOwnF.sign !== ownField || state.depthOwnF.src !== state.depthPlain)) {
-    state.depthOwnF = { sign: ownField, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField) };
+  if (ownField && (!state.depthOwnF || state.depthOwnF.sign !== ownField || state.depthOwnF.exact !== exactGeo || state.depthOwnF.src !== state.depthPlain)) {
+    state.depthOwnF = { sign: ownField, exact: exactGeo, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField, exactGeo) };
   }
   const ownShift = !engineShift && !state.pp && state.depthPlain ? ((dbg.ownShift ?? OWN_DEPTH_SHIFT) === 'table' ? Math.max(0, -activeRayWarpForShift() / LAMBDA_TO_ALPHA - 1) : (dbg.ownShift ?? OWN_DEPTH_SHIFT)) * LAMBDA_TO_ALPHA : 0;
   const depthUsed = exactDepth ? Float32Array.from(state.depthExact.plain, (x) => x + (dbg.shiftConst ?? 0) * LAMBDA_TO_ALPHA) : engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
@@ -867,7 +869,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   }, {
     ...LYTRO_SPLAT,
     exact: exactGeo,
-    aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, exactGeo ? (dbg.apFraction ?? EXACT_APERTURE_FRACTION) : ENGINE_APERTURE_FRACTION),
+    aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, exactGeo ? (dbg.apFraction ?? (exactDepth ? EXACT_APERTURE_FRACTION : EXACT_APERTURE_FRACTION_OWN)) : ENGINE_APERTURE_FRACTION),
     // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
     gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
       try {
@@ -1569,7 +1571,7 @@ function placedGrid(alpha, w, h, P) {
 }
 
 // A depth map on the sampler's grid moved through the ray table's origin field (where each lens's rays start in the engine's picture, at the lens center): out(p) = alpha(p - sign * origin(p)).
-function fieldPlacedGrid(alpha, w, h, sign) {
+function fieldPlacedGrid(alpha, w, h, sign, exact = false) {
   const rw = state.rayWarpEdof || (state.rayWarpEdof = parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height, { tilt: false, chief: true }));
   const { cam, grid: g } = state.lf;
   const unit = g.rowStep;
@@ -1577,6 +1579,9 @@ function fieldPlacedGrid(alpha, w, h, sign) {
   const cosR = Math.cos(g.rotation);
   const sinR = Math.sin(g.rotation);
   const out4 = new Float64Array(4);
+  const gOut = [0, 0];
+  const geo = exact && state.lf.geometryBytes && state.lf.metadata ? (state.geoTableExact ||= parseGeometryTable(state.lf.geometryBytes)) : null;
+  if (geo) state.engineLattice = engineLatticeIdx(state.lf);
   const out = new Float32Array(alpha.length);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -1587,8 +1592,20 @@ function fieldPlacedGrid(alpha, w, h, sign) {
       const sy = g.oy + sinR * lx + cosR * ly;
       const cell = rw.lens(sx / cam.width - 0.5, sy / cam.height - 0.5);
       rw.fromLens(cell, 0, 0, out4);
-      const ox = (cosR * out4[0] * cam.width + sinR * out4[1] * cam.height) / unit;
-      const oy = (-sinR * out4[0] * cam.width + cosR * out4[1] * cam.height) / unit;
+      let dxp = out4[0] * cam.width;
+      let dyp = out4[1] * cam.height;
+      if (geo) {
+        // The engine's rays start at the lattice's disk centre, which is the physical lens centre less the geometry table's cell offset (G, lens pitches): a depth seen
+        // through the lens centre sits at (table origin - G) in the engine's picture.
+        geometryAt(geo, (sx + 0.5) / cam.width - 0.5, (sy + 0.5) / cam.height - 0.5, gOut);
+        const ex = state.engineLattice;
+        const gx = gOut[0] * ex.pitch;
+        const gy = gOut[1] * (ex.rowStep / 0.8660254037844386);
+        dxp -= Math.cos(ex.rotation) * gx - Math.sin(ex.rotation) * gy;
+        dyp -= Math.sin(ex.rotation) * gx + Math.cos(ex.rotation) * gy;
+      }
+      const ox = (cosR * dxp + sinR * dyp) / unit;
+      const oy = (-sinR * dxp + cosR * dyp) / unit;
       const X = Math.min(w - 1.001, Math.max(0, x - sign * ox));
       const Y = Math.min(h - 1.001, Math.max(0, y - sign * oy));
       const x0 = Math.floor(X);
