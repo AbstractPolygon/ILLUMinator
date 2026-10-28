@@ -133,6 +133,22 @@ function render(u, v) {
   return renderView(lf.raw, lf.cam, dev, sampler, u, v, state.scratch);
 }
 
+// A view as the engine renders it for its depth: through a circular aperture (radius 0.12 lens pitches, ShiftedAperture(CircularAperture(0.12), u, v, ...)), here the mean of
+// seven sub-aperture samples inside the disc of radius `r` px around (u, v).
+function renderDisc(u, v, r) {
+  if (!(r > 0)) return render(u, v);
+  const pts = [[0, 0]];
+  for (let k = 0; k < 6; k++) pts.push([r * 0.7 * Math.cos((k * Math.PI) / 3), r * 0.7 * Math.sin((k * Math.PI) / 3)]);
+  let acc = null;
+  for (const [du, dv] of pts) {
+    const img = render(u + du, v + dv);
+    if (!acc) acc = Float32Array.from(img);
+    else for (let i = 0; i < acc.length; i++) acc[i] += img[i];
+  }
+  for (let i = 0; i < acc.length; i++) acc[i] /= pts.length;
+  return acc;
+}
+
 // The center view (linear RGB), rendered once per sampler: color settings
 // measure it on every change. Read only.
 function centerView() {
@@ -826,6 +842,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     const slope = (m * sxy - sx * sy) / (m * sxx - sx * sx);
     const icpt = (sy - slope * sx) / m;
     const corr = (m * sxy - sx * sy) / Math.sqrt((m * sxx - sx * sx) * (m * syy - sy * sy));
+    if (globalThis.__cmpDump) globalThis.__cmpDump(eng, ownField ? state.depthOwnF.plain : state.depthPlain, state.sampler.outW, state.sampler.outH);
     console.error('CMPDEPTH', JSON.stringify({ meanEng: sx / m, meanOurs: sy / m, slope, icpt, corr }));
   }
   if (dbg.printGrid) console.error('DEPTHPATH', JSON.stringify({ exactDepth, engineShift, ownField, hasOffsets: !!state.exactOffsets, fromLytro: !!(state.depthRaw && state.depthRaw.fromLytro), pp: !!state.pp, userDepth: !!state.userDepth }));
@@ -1498,7 +1515,7 @@ function depthViews() {
     const q = dv ? place2(deg) : place(deg);
     const u = q.u + (dv && dv.off ? dv.off[0] * pitch : 0);
     const v = q.v + (dv && dv.off ? dv.off[1] * pitch : 0);
-    const raw = render(u, v);
+    const raw = renderDisc(u, v, (globalThis.__lytro || {}).viewAp ?? 0);
     return { u, v, rgb: state.gpu ? raw : equalize(raw), gain: 1, detail: state.settings.detail };
   });
 }
