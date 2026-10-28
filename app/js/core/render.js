@@ -44,8 +44,21 @@ export function viewSizes(grid, cam, details) {
   }));
 }
 
-export function buildSampler(grid, cam, detail = 1, kernel = 1.0) {
+export function buildSampler(grid, cam, detail = 1, kernel = 1.0, offsets = null) {
   const lenses = lensCenters(grid, cam.width, cam.height);
+  if (offsets) {
+    // the lenses' physical centres (a lensTable of offsets from the grid): the views are read there, the picture's frame stays the grid's
+    for (let r = lenses.r0; r <= lenses.r1; r++) {
+      for (let c = lenses.c0; c <= lenses.c1; c++) {
+        const tr = r - offsets.r0;
+        const tc = c - offsets.c0;
+        if (tr < 0 || tc < 0 || tr >= offsets.rows || tc >= offsets.cols) continue;
+        const i = (r - lenses.r0) * lenses.cols + (c - lenses.c0);
+        lenses.cx[i] += offsets.dx[tr * offsets.cols + tc];
+        lenses.cy[i] += offsets.dy[tr * offsets.cols + tc];
+      }
+    }
+  }
   const { cols, r0, c0 } = lenses;
   const { spacing, xMin, xMax, yMin, yMax, outW, outH } = samplerExtent(lenses, grid, detail);
   const idx = new Int32Array(outW * outH * TAPS);

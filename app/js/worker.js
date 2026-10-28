@@ -2,7 +2,7 @@
 // Requests: { id, type, ...args }. Replies: { id, type: 'result' | 'progress' | 'frame' | 'error', ... }.
 
 import { decodeLightField } from './core/decode.js';
-import { normalizeGrid, measureGrid, calibrateGrid, lensCenters } from './core/lenslet.js';
+import { normalizeGrid, measureGrid, calibrateGrid, lensCenters, lensCenter } from './core/lenslet.js';
 import {
   buildSampler, renderView, makeDevelopParams, apertureSamples, refocus,
   colorMatrix, autoExposure, toneMap, sensorToOutput, viewSizes,
@@ -30,7 +30,7 @@ import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
 import { lytroSplat, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
-import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
+import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
@@ -329,14 +329,16 @@ function frameMessage(id, index, rgb, ctx, cs = state) {
 
 function rebuildSampler() {
   const { lf } = state;
-  state.sampler = buildSampler(lf.grid, lf.cam, state.settings.detail);
+  const exactOffsets = lf.raw ? exactLensOffsets() : null;
+  state.exactOffsets = exactOffsets;
+  state.sampler = buildSampler(lf.grid, lf.cam, state.settings.detail, 1.0, exactOffsets);
   state.center = null;
   state.gen++;
   state.refocusViews = null;
   state.vignetting = null;
   // From the camera's calibration when it has the white image for this photo
   // (else measured from the photo at the first full render).
-  state.lensOffsets = lf.raw ? calibratedLensOffsets() : null;
+  state.lensOffsets = lf.raw ? (exactOffsets ? null : calibratedLensOffsets()) : null;
   state.depth = null;
   state.depthRaw = null;
   state.focusOffset = undefined;
@@ -732,8 +734,8 @@ const ENGINE_APERTURE_FRACTION = 0.665;
 // With the engine's exact geometry and depth placement (below) the window can be wider again: 0.8 of the nominal one scores best (fitted mean difference against tnt, b4-1 / b4-3 / b4-2:
 // 1.99 / 1.70 / 2.45 at 0.8, 2.05 / 1.71 / 2.40 at 0.665, 2.12 / 1.73 at 1.0 with softer edges).
 const EXACT_APERTURE_FRACTION = 0.8;
-// Our own measured depth is less exact than the engine's (b4-1 own depth, fitted mean difference: 3.34 at 0.8, 2.78 at 0.5), so the window stays narrower there.
-const EXACT_APERTURE_FRACTION_OWN = 0.5;
+// Our own measured depth is less exact than the engine's (b4-1 with the app's combined depth, fitted mean difference against tnt: 2.35 at 0.5, 2.28 at 0.65, 2.32 at 0.8; with the classic depth alone 3.34 at 0.8, 2.78 at 0.5), so the window stays narrower there.
+const EXACT_APERTURE_FRACTION_OWN = 0.65;
 // The engine's lens lattice (HexDiskArrayModel) in pixel indices: its coordinates are pixel edges (a pixel's centre is x + 0.5), the app's are pixel centres.
 function engineLatticeIdx(lf) {
   const g = engineGrid(lf.metadata, lf.cam.width, lf.cam.height);
@@ -811,6 +813,22 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     state.depthOwnF = { sign: ownField, exact: exactGeo, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField, exactGeo) };
   }
   const ownShift = !engineShift && !state.pp && state.depthPlain ? ((dbg.ownShift ?? OWN_DEPTH_SHIFT) === 'table' ? Math.max(0, -activeRayWarpForShift() / LAMBDA_TO_ALPHA - 1) : (dbg.ownShift ?? OWN_DEPTH_SHIFT)) * LAMBDA_TO_ALPHA : 0;
+  if (dbg.cmpDepth && state.userDepth) {
+    // debug: our depth against the engine's in the picture's frame (alpha -> lambda): mean difference, spread, and the fit ours = a * engine + b
+    const eng = engineDepthInFrame(state.userDepth, state.sampler, state.lf.cam, 5).plain;
+    const n = eng.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, m = 0;
+    for (let i = 0; i < n; i++) {
+      const a = eng[i] / LAMBDA_TO_ALPHA;
+      const b = (ownField ? state.depthOwnF.plain[i] : state.depthPlain[i]) / LAMBDA_TO_ALPHA;
+      sx += a; sy += b; sxx += a * a; sxy += a * b; syy += b * b; m++;
+    }
+    const slope = (m * sxy - sx * sy) / (m * sxx - sx * sx);
+    const icpt = (sy - slope * sx) / m;
+    const corr = (m * sxy - sx * sy) / Math.sqrt((m * sxx - sx * sx) * (m * syy - sy * sy));
+    console.error('CMPDEPTH', JSON.stringify({ meanEng: sx / m, meanOurs: sy / m, slope, icpt, corr }));
+  }
+  if (dbg.printGrid) console.error('DEPTHPATH', JSON.stringify({ exactDepth, engineShift, ownField, hasOffsets: !!state.exactOffsets, fromLytro: !!(state.depthRaw && state.depthRaw.fromLytro), pp: !!state.pp, userDepth: !!state.userDepth }));
   const depthUsed = exactDepth ? Float32Array.from(state.depthExact.plain, (x) => x + (dbg.shiftConst ?? 0) * LAMBDA_TO_ALPHA) : engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
   let depth5 = null;
   if (!state.userDepth && !state.pp && dbg.own5) {
@@ -1031,7 +1049,7 @@ async function setCalibrations({ list, useWhites: use = true }) {
   const changed = use !== useWhites;
   useWhites = use;
   // The open photo takes the new choice at its next full render.
-  if (state.lf && state.lf.raw && changed) state.lensOffsets = calibratedLensOffsets();
+  if (state.lf && state.lf.raw && changed) state.lensOffsets = state.exactOffsets ? null : calibratedLensOffsets();
   return true;
 }
 
@@ -1041,6 +1059,44 @@ async function measureWhiteImage({ id, bytes, meta }) {
   const m = measureWhite(new Uint8Array(bytes), meta);
   post({ id, type: 'result', result: m }, [m.off.buffer]);
   return undefined;
+}
+
+// The physical lens centres of the open photo from the photo's own tables, as the engine has them: the lattice node (HexDiskArrayModel) plus the geometry table's cell offset
+// (lens pitches, lens axes) times the pitch. Returned as the offset of each lens from the app's grid, the whole of it (no common shift removed), or null without the tables.
+function exactLensOffsets() {
+  const { lf } = state;
+  if (globalThis.__lytro && (globalThis.__lytro.legacy || globalThis.__lytro.noExact)) return null;
+  if (!lf.geometryBytes || !lf.metadata || !lf.raw) return null;
+  const geo = (state.geoTableExact ||= parseGeometryTable(lf.geometryBytes));
+  if (!geo) return null;
+  const ge = engineLatticeIdx(lf);
+  const cos = Math.cos(ge.rotation);
+  const sin = Math.sin(ge.rotation);
+  const pitchY = ge.rowStep / 0.8660254037844386;
+  const table = lensTable(lf.grid, lf.cam);
+  const out = [0, 0];
+  for (let r = 0; r < table.rows; r++) {
+    for (let c = 0; c < table.cols; c++) {
+      const [px, py] = lensCenter(lf.grid, r + table.r0, c + table.c0);
+      const dx = px - ge.ox;
+      const dy = py - ge.oy;
+      const X = cos * dx + sin * dy;
+      const Y = -sin * dx + cos * dy;
+      const rr = Math.round(Y / ge.rowStep);
+      const cc = Math.round((X - (rr & 1) * ge.pitch * 0.5) / ge.pitch);
+      const lx = cc * ge.pitch + (rr & 1) * ge.pitch * 0.5;
+      const ly = rr * ge.rowStep;
+      const ex = ge.ox + cos * lx - sin * ly;
+      const ey = ge.oy + sin * lx + cos * ly;
+      geometryAt(geo, (ex + 0.5) / lf.cam.width - 0.5, (ey + 0.5) / lf.cam.height - 0.5, out);
+      const gx = out[0] * ge.pitch;
+      const gy = out[1] * pitchY;
+      const k = r * table.cols + c;
+      table.dx[k] = ex + cos * gx - sin * gy - px;
+      table.dy[k] = ey + sin * gx + cos * gy - py;
+    }
+  }
+  return table;
 }
 
 // Lens centers for the open photo from the white image of its camera's
@@ -1603,6 +1659,15 @@ function fieldPlacedGrid(alpha, w, h, sign, exact = false) {
         const gy = gOut[1] * (ex.rowStep / 0.8660254037844386);
         dxp -= Math.cos(ex.rotation) * gx - Math.sin(ex.rotation) * gy;
         dyp -= Math.sin(ex.rotation) * gx + Math.cos(ex.rotation) * gy;
+        // the depth of this texel was seen from the lens's physical centre, which sits offset from the grid's by the exact lens offsets
+        const off = state.exactOffsets;
+        if (off) {
+          const li = lensIndex(off, g, lx, ly);
+          if (li >= 0) {
+            dxp += off.dx[li];
+            dyp += off.dy[li];
+          }
+        }
       }
       const ox = (cosR * dxp + sinR * dyp) / unit;
       const oy = (-sinR * dxp + cosR * dyp) / unit;
