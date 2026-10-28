@@ -884,7 +884,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     const imgH = (lf.cam.height * 14) / lf.grid.pitch;
     // opts: the engine's filters are keyed by its own lambda, which differs from the plain-ray lambda of a depth measured here by a per-photo amount
     const bz = dbg.bankShift ? Float32Array.from(sp.zMap, (z) => z + dbg.bankShift) : sp.zMap;
-    const bank = buildEngineBank(W, H, imgW, imgH, lo + (dbg.bankShift || 0), hi + (dbg.bankShift || 0));
+    const bank = buildEngineBank(W * (dbg.bankSize || 1), H * (dbg.bankSize || 1), imgW, imgH, lo + (dbg.bankShift || 0), hi + (dbg.bankShift || 0));
     const r = applyBank(img, bz, W, H, bank);
     out = r.rgb;
     for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
