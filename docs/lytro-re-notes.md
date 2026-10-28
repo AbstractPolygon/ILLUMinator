@@ -591,3 +591,5 @@ Measured against tnt renders (b4-1, mean abs difference, edge-gradient ratio our
 | real photo, engine depth | default / exact / exact+soft 0.2 | 3.11 / 3.29 / 3.14 | 1.02 / 0.95 / 0.97 |
 
 At constant depth the exact aperture is clearly right. On real photos the halved aperture still scores as well or better, because it absorbs depth/placement error (ENGINE_PLACE, depth shift -1, D5_GROW were fitted under it). The default is therefore unchanged until those are re-fitted; `dbg.apExact` and the `apFall`/`apCone` splat options select the exact window for that work.
+
+Re-fit under the exact aperture (b4-1, engine depth map, soft 0.2): depth shift -2/-1/0/+1/+2 λ gives fitted MAE 3.64/3.10/2.91/3.04/3.50, so the exact window wants no depth shift (the default's -1 λ compensates for the halved aperture). z-test tolerance 1/2/4 gives 2.94/2.91/2.88, insensitive. The floor of about 2.9 against 2.4 at constant depth therefore comes from how the engine's depth map is resampled and applied (DmResampler x5, frame registration), not from aperture, shift or tolerance.
