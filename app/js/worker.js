@@ -792,7 +792,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   // With the engine's exact geometry its depth map needs no fitted placement: it is read where the ray falls on the sensor.
   const exactDepth = exactGeo && !!state.userDepth && !!(state.depthRaw && state.depthRaw.fromLytro) && state.settings.lytroDepth !== false && !dbg.noExactDepth;
   if (exactDepth && (!state.depthExact || state.depthExact.src !== state.userDepth || state.depthExact.key !== `${state.sampler.outW}x${state.sampler.outH}`)) {
-    state.depthExact = { src: state.userDepth, key: `${state.sampler.outW}x${state.sampler.outH}`, ...engineDepthInFrame(state.userDepth, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
+    state.depthExact = { src: state.userDepth, key: `${state.sampler.outW}x${state.sampler.outH}`, ...engineDepthInFrame(state.userDepth, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL, !dbg.noDmExact) };
   }
   const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? (dbg.legacy ? ENGINE_DEPTH_SHIFT : 0)) * LAMBDA_TO_ALPHA : 0;
   const place = { ...ENGINE_PLACE, ...(dbg.place || {}) };
@@ -954,6 +954,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
       for (let p = 0; p < W * H; p++) out[3 * p + c] = plane[p];
     }
   }
+  if (globalThis.__edofLinear) globalThis.__edofLinear(out, W, H);
   globalThis.__lytroStats = sp.stats;
   const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
   post({ id, type: 'result', width: W, height: H, pixels: pixels.buffer }, [pixels.buffer]);

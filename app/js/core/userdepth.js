@@ -1,3 +1,4 @@
+import { dmResample } from './dmresampler.js';
 // Lytro Desktop user depth maps.
 //
 // When a depth map is edited in Lytro Desktop, the picture's folder keeps it
@@ -309,10 +310,18 @@ export function dilateNearest(map, r, round = false) {
 // at floor((position + 0.5) * size) of the ray's normalised position. `sampler`'s picture is the app's lens-range frame (pixel centres at integers, `unit` sensor px
 // per step), so every sub texel of the picture's finer grid is looked up through its sensor position. Returns { up, plain }: the upscaled map on the picture's grid
 // (`factor` times finer, as userDepthAlphaUpscaled) and the same at the picture's own resolution (the centre sub texel), both in alpha.
-export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8, level = false) {
+export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8, level = false, exact = false) {
   const { width: Wd, height: Hd } = map;
   const raster = { outW: Wd, outH: Hd, grid: { ox: 0, oy: 0, rotation: 0, pitch: 1, rowStep: 1 }, spacing: 1, xMin: 0, yMin: 0 };
-  const e = userDepthAlphaUpscaled({ ...map, identity: true }, raster, cam, 0, null, factor, similar, level);
+  let e;
+  if (exact) {
+    // the engine's DmResampler itself (core/dmresampler.js), on the depth in lambda
+    const lam = Float32Array.from(map.data, (v) => map.min + v * (map.max - map.min));
+    const r = dmResample(lam, Wd, Hd, factor, { similarity: similar, blend: true });
+    e = { data: Float32Array.from(r.data, (x) => x * LAMBDA_TO_ALPHA), width: r.width, height: r.height, factor };
+  } else {
+    e = userDepthAlphaUpscaled({ ...map, identity: true }, raster, cam, 0, null, factor, similar, level);
+  }
   const { outW, outH, grid, xMin, yMin } = sampler;
   const unit = sampler.spacing;
   const cos = Math.cos(grid.rotation);
