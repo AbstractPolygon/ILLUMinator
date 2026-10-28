@@ -412,9 +412,9 @@ export function engineApertureExact(cam) {
   return nominalAperture(cam);
 }
 
-export function engineAperture(cam) {
+export function engineAperture(cam, fraction = 0.5) {
   const nominal = nominalAperture(cam);
-  return nominal === SPLAT.aperture ? nominal : nominal / 2;
+  return nominal === SPLAT.aperture ? nominal : nominal * fraction;
 }
 
 export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 } };

@@ -29,7 +29,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable } from './core/geometrytable.js';
-import { lytroSplat, engineAperture, engineApertureExact, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
+import { lytroSplat, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -717,6 +717,18 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // Lytro Desktop's all in focus picture (core/lytroedof.js): the rays
 // splatted with a depth each, holes filled, and the depth aware filter bank of
 // the photo applied.
+// debug: nudge the lens lattice used for the rays (gridOx / gridOy in px, gridPitch as a factor, gridRot in rad)
+// The engine's rays sit about (-0.25, -0.4) sensor px from the metadata lattice (fit on tnt renders at a wrong constant depth, whose lattice moire is very sensitive to the
+// lens centres: b4-1 (-0.2, -0.4), b4-3 (-0.3, -0.4), b4-2 better by the same shift).
+const ENGINE_LATTICE = [-0.25, -0.4];
+function probeGrid(g, dbg) {
+  if (dbg.printGrid) console.error('GRID', JSON.stringify(g));
+  const lat = dbg.legacy ? [0, 0] : ENGINE_LATTICE;
+  return { ...g, ox: g.ox + (dbg.gridOx ?? lat[0]), oy: g.oy + (dbg.gridOy ?? lat[1]), pitch: g.pitch * (dbg.gridPitch || 1), rowStep: g.rowStep * (dbg.gridPitch || 1), rotation: g.rotation + (dbg.gridRot || 0) };
+}
+// The engine's window is the full nominal hexagon (0.9025 on b4-1); with the engine's lattice offset, narrowing ours to 0.665 of it still scores best on all three photos (aperture 0.6 on b4-1: fitted 2.51 against
+// 2.57 at 0.5 and 2.70 at 0.9025; b4-3 2.20 / 2.20 / 2.24; b4-2 3.27 / 3.36 / 3.43), so some error that grows toward the window's edge remains in our rays.
+const ENGINE_APERTURE_FRACTION = 0.665;
 const ENGINE_DEPTH_SHIFT = -1;
 // A depth measured here sits this far (lambda) from the engine's rays: the ray table's own estimate of Lytro's lambda offset less the 1 lambda most photos carry (b4-2: 3.5 of the 5 that gave
 // the sharpest picture; b4-1e and b4-3 about 0).
@@ -764,7 +776,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
   // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
   // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
-  const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? ENGINE_DEPTH_SHIFT) * LAMBDA_TO_ALPHA : 0;
+  const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? (dbg.legacy ? ENGINE_DEPTH_SHIFT : 0)) * LAMBDA_TO_ALPHA : 0;
   const place = { ...ENGINE_PLACE, ...(dbg.place || {}) };
   const placeKey = JSON.stringify(place);
   if (engineShift && (!state.depthEngine || state.depthEngine.key !== placeKey || state.depthEngine.src !== state.depthRaw)) {
@@ -833,13 +845,13 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
-    raw: lf.raw, cam: lf.cam, dev, grid: dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
+    raw: lf.raw, cam: lf.cam, dev, grid: probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => progress('Splatting the rays', p),
   }, {
     ...LYTRO_SPLAT,
-    aperture: dbg.apExact ? engineApertureExact(lf.cam) : engineAperture(lf.cam),
+    aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, ENGINE_APERTURE_FRACTION),
     // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
     gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
       try {
