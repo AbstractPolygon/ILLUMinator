@@ -882,7 +882,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     }
   }
   let out = img;
-  if (!dbg.noBank && dbg.bank !== 'photo') {
+  // The engine's JointAdaptiveFilter (method 10) runs the photo's own reconstruction kernel PNG; the designed filters are only its fallback for photos without one.
+  if (!dbg.noBank && (dbg.bank === 'engine' || (dbg.bank !== 'photo' && !lf.reconFilter))) {
     progress('Reconstructing with the filter bank', 0);
     let lo = Infinity;
     let hi = -Infinity;

@@ -49,6 +49,7 @@ uniform vec4 uGrid;      // pitch, rowStep, cos, sin
 uniform vec2 uOrigin;
 uniform ivec4 uLens;     // first row, first column, rows, columns
 uniform float uRadius;
+uniform float uRefMin;
 out vec4 o;
 float rawAt(int x, int y) { return float(texelFetch(uRaw, ivec2(x, y), 0).r); }
 void main() {
@@ -80,7 +81,7 @@ void main() {
   float b = uBlack[ch];
   float m = max(0.0, float(texelFetch(uMod, ivec2(x, y), 0).r) - b);
   float ref = texelFetch(uRef, cell, 0)[ch];
-  float gain = m > ref * 0.15 ? ref / m : 0.0;
+  float gain = m > ref * uRefMin ? ref / m : 0.0;
   if (!(gain > 0.0)) return;
   float value = rawAt(x, y);
   float mean = 0.25 * (rawAt(x - 2, y) + rawAt(x + 2, y) + rawAt(x, y - 2) + rawAt(x, y + 2));
@@ -596,6 +597,14 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   if (!rawTex) return null;
   const modTex = keep(upload(gpu, cam.width, cam.height, gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, P.modulation, 2));
   const refs = lensReferences(P.modulation, cam, dev, g, range);
+  if (P.opts.modGlobal) {
+    // one reference per colour for the whole sensor (the engine's modulation bitmap is normalised globally), as in correctedPlane
+    const mean = [0, 0, 0];
+    const cnt = [0, 0, 0];
+    for (let k = 0; k < refs.data.length; k += 4) for (let ch = 0; ch < 3; ch++) if (refs.data[k + ch] > 0) { mean[ch] += refs.data[k + ch]; cnt[ch]++; }
+    for (let ch = 0; ch < 3; ch++) mean[ch] = cnt[ch] ? mean[ch] / cnt[ch] : 0;
+    for (let k = 0; k < refs.data.length; k += 4) for (let ch = 0; ch < 3; ch++) if (refs.data[k + ch] > 0) refs.data[k + ch] = mean[ch];
+  }
   const refTex = keep(upload(gpu, refs.cols, refs.rows, gl.RGBA32F, gl.RGBA, gl.FLOAT, refs.data));
   const d5 = P.depth5;
   const depthTex = keep(d5 ? upload(gpu, d5.width, d5.height, gl.R32F, gl.RED, gl.FLOAT, d5.data) : upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.depth));
@@ -656,6 +665,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
       gl.uniform2f(U.uOrigin, g.ox, g.oy);
       gl.uniform4i(U.uLens, range.r0, range.c0, refs.rows, refs.cols);
       gl.uniform1f(U.uRadius, P.planeRadius);
+      gl.uniform1f(U.uRefMin, P.opts.modGlobal ? 0.02 : 0.15);
     });
     fullscreen(prog.complete, compTex, cam.width, th, (U) => {
       common(U, t0);

@@ -417,11 +417,11 @@ export function engineAperture(cam, fraction = 0.5) {
   return nominal === SPLAT.aperture ? nominal : nominal * fraction;
 }
 
-export const SPLAT = { aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 } };
+export const SPLAT = { modGlobal: true, aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 } };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
-export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null) {
+export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
   plane.mod = new Float32Array(width * height);
@@ -439,6 +439,15 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null) 
       c[3 + ch]++;
     });
   }
+  // The engine divides by the modulation bitmap normalised by one mean per colour over the whole sensor (StandardizeLightfield, no per-lens reference): the lens-to-lens
+  // brightness stays in the weights (m^2) and the colour.
+  let refAll = null;
+  if (centres && globalRef) {
+    refAll = [0, 0, 0];
+    const cnt = [0, 0, 0];
+    for (const c of centres.values()) for (let ch = 0; ch < 3; ch++) if (c[3 + ch]) { refAll[ch] += c[ch] / c[3 + ch]; cnt[ch]++; }
+    for (let ch = 0; ch < 3; ch++) refAll[ch] = cnt[ch] ? refAll[ch] / cnt[ch] : 0;
+  }
   const binScale = vg.bins / (2 * vg.rMax);
   const binsSq = vg.bins * vg.bins;
   let lastLens = NaN;
@@ -454,8 +463,8 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null) 
     if (centres) {
       const c = centres.get(lastLens);
       const m = Math.max(0, modulation[i] - dev.black[ch]);
-      const ref = c && c[3 + ch] ? c[ch] / c[3 + ch] : 0;
-      gain = m > ref * 0.15 ? ref / m : 0;
+      const ref = refAll ? refAll[ch] : c && c[3 + ch] ? c[ch] / c[3 + ch] : 0;
+      gain = m > ref * (refAll ? 0.02 : 0.15) ? ref / m : 0;
     } else {
       for (const [t, w] of tw) gain += vg.gain[(t * binsSq + bin) * 3 + ch] * w;
     }
@@ -690,7 +699,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
-  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation);
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   if (dm && opts.sharpen) dm = sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
