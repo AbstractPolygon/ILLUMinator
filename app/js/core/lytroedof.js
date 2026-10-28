@@ -647,9 +647,13 @@ function sharpenHighlights(dm, W, H, { amount = 0.25, c = 0.7, clampPre = 0, cla
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
-export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null, depth5 = null }, opts = SPLAT) {
+export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null, depth5 = null }, opts = SPLAT) {
   const { width } = cam;
-  const unit = g.rowStep;
+  // opts.exact: the engine's ray model as read from its code (stage2 spec): g is the engine's lens lattice (pixel indices, pitch.x / pitch.y from the metadata), every ray's direction is
+  // taken off by the geometry table's cell at its disk centre (nearest cell), the window is tested on that direction, the ray table is looked up on it, and the ray is placed in sensor
+  // pixels (lambda * the sensor aligned ratios) and then in the picture's frame, which stays the app's lens-range frame (`sampleGrid`).
+  const sg = sampleGrid || g;
+  const unit = sg.rowStep;
   const { xMin, yMin, outW: lw, outH: lh } = sampler;
   const hex = opts.shape !== 'circle';
   const apothem = g.pitch * opts.aperture * 0.5;
@@ -666,7 +670,14 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // GeometryErrorTable::CorrectLightfieldPoint takes the cell's (u, v) off every ray's direction. The picture-fitted lens centres already absorb how the table varies
   // from lens to lens but not its mean, which is a viewpoint shift of the whole picture (b4-1: -0.0186, -0.0063 pitches): near objects sit 1 to 3 px off the engine's.
   const rayShift = [0, 0];
-  if (geoTable && opts.geoMean !== false) {
+  const ex = !!opts.exact && !!geoTable && !!rayWarp;
+  const pitchY = g.rowStep / 0.8660254037844386;
+  const ratioX = cosR * g.pitch - sinR * pitchY;
+  const ratioY = cosR * pitchY + sinR * g.pitch;
+  const cosS = Math.cos(sg.rotation);
+  const sinS = Math.sin(sg.rotation);
+  const dispK = LAMBDA_TO_ALPHA * (opts.dispScale || 1);
+  if (geoTable && opts.geoMean !== false && !ex) {
     let su = 0;
     let sv = 0;
     const cells = geoTable.w * geoTable.h;
@@ -693,7 +704,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
-  const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  const gpuInput = { rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
   if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
@@ -708,7 +719,19 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   let count = 0;
   let accepted = 0;
   forEachLensPixel(g, cam, radius + 1, (i, x, y, u, v, lensX, lensY) => {
-    if (hex) {
+    let eu = 0;
+    let ev = 0;
+    let cxm = 0;
+    let cym = 0;
+    if (ex) {
+      cxm = x - (cosR * u - sinR * v);
+      cym = y - (sinR * u + cosR * v);
+      geometryAt(geoTable, (cxm + 0.5) / cam.width - 0.5, (cym + 0.5) / cam.height - 0.5, geoOut);
+      eu = u / g.pitch - geoOut[0];
+      ev = v / pitchY - geoOut[1];
+      const au = Math.abs(eu);
+      if (Math.max(au, (au + Math.sqrt(3) * Math.abs(ev)) / 2) > opts.aperture / 2) return;
+    } else if (hex) {
       // HexAperture::operator()(u, v): flat sides at |u| = apothem, corners on the v axis (u, v are in the lens array's own frame)
       // opts.apShift: the engine tests the window on the direction after the geometry table (centred on the table's mean shift)
       const au = Math.abs(u + (opts.apShift !== false ? rayShift[0] : 0));
@@ -733,7 +756,24 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     let rv = v;
     const lx0 = lx;
     const ly0 = ly;
-    if (rayWarp) {
+    if (ex) {
+      const key = lensX + lensY * 1e6;
+      if (key !== lastCell) {
+        lastCell = key;
+        cell = rayWarp.lens((cxm + 0.5) / cam.width - 0.5, (cym + 0.5) / cam.height - 0.5);
+      }
+      rayWarp.fromLens(cell, eu, ev, warpOut);
+      const dirX = cosR * eu - sinR * ev + warpOut[2];
+      const dirY = cosR * ev + sinR * eu + warpOut[3];
+      const px = cxm + warpOut[0] * cam.width - sg.ox;
+      const py = cym + warpOut[1] * cam.height - sg.oy;
+      lx = (cosS * px + sinS * py - xMin) / unit;
+      ly = (-sinS * px + cosS * py - yMin) / unit;
+      const dx = dirX * ratioX;
+      const dy = dirY * ratioY;
+      ru = (cosS * dx + sinS * dy) / unit / dispK;
+      rv = (-sinS * dx + cosS * dy) / unit / dispK;
+    } else if (rayWarp) {
       // The engine corrects every ray with the camera's table: where it comes
       // from (dx, dy: fractions of the picture) and its direction (du, dv: lens
       // pitches), then projects the corrected ray (HexLightfieldGeometry::Project).
@@ -768,8 +808,10 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
       ru -= opts.geoSign * geoOut[0] * g.pitch;
       rv -= opts.geoSign * geoOut[1] * g.pitch;
     }
-    ru += rayShift[0] + (opts.ruOff || 0);
-    rv += rayShift[1] + (opts.rvOff || 0);
+    if (!ex) {
+      ru += rayShift[0] + (opts.ruOff || 0);
+      rv += rayShift[1] + (opts.rvOff || 0);
+    }
     if (opts.vScale) rv *= opts.vScale;
     // opts.plainMarch: a depth measured here is in the frame of the plain rays (the lens centres and straight rays); hit it with those and splat the engine's corrected ones.
     const mx = opts.plainMarch ? lx0 : lx;

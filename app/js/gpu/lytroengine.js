@@ -331,6 +331,10 @@ uniform float uModPow;
 uniform float uTolerance;
 uniform vec2 uMarch;       // tolA, tolB
 uniform vec2 uRayShift;    // viewpoint shift of every ray (px, lens array axes)
+uniform int uExact;        // the engine's ray model (lytroSplat opts.exact)
+uniform highp sampler2D uGct;
+uniform vec4 uExactA;      // pitch.y, ratio.x, ratio.y, lambda gain
+uniform vec4 uExactB;      // sampler grid: origin x, origin y, cos, sin
 uniform vec2 uCam;
 uniform int uRayWarp;
 uniform highp sampler2D uRayGrid;
@@ -437,11 +441,24 @@ void main() {
   float v = ly0 - lensY;
   // HexAperture: flat sides at |u| = apothem, corners on the v axis
   // (on the direction after the geometry table, like the engine: centred on the table's mean shift)
-  float au = abs(u + uRayShift.x);
-  float av = abs(v + uRayShift.y);
   float ap = uHex.x;
   float rise = uHex.y;
-  if (au > ap || av > 2.0 * rise || (av > rise && av + au / 1.7320508 > 2.0 * rise)) return;
+  vec2 ev = vec2(0.0);
+  vec2 centreIdx = vec2(uOrigin.x + cosR * lensX - sinR * lensY, uOrigin.y + sinR * lensX + cosR * lensY);
+  if (uExact == 1) {
+    // geometry table: the nearest cell at the disk centre, taken off the direction; the window is on that direction (in lens pitches)
+    ivec2 gs = textureSize(uGct, 0);
+    vec2 n = (centreIdx + 0.5) / uCam;
+    ivec2 gi = clamp(ivec2(floor(vec2(gs) * n + 0.5)), ivec2(0), gs - 1);
+    vec2 G = texelFetch(uGct, gi, 0).rg;
+    ev = vec2(u / pitch, v / uExactA.x) - G;
+    float eau = abs(ev.x);
+    if (max(eau, (eau + 1.7320508 * abs(ev.y)) / 2.0) > ap / pitch) return;
+  } else {
+    float au = abs(u + uRayShift.x);
+    float av = abs(v + uRayShift.y);
+    if (au > ap || av > 2.0 * rise || (av > rise && av + au / 1.7320508 > 2.0 * rise)) return;
+  }
   // the colour: demosaic, then the luma boost
   vec3 rgb = texelFetch(uT, pl, 0).rgb;
   if (uSharpen.y > 0.0) rgb = min(rgb, vec3(uSharpen.y));
@@ -454,16 +471,26 @@ void main() {
   vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
   float ru = u;
   float rv = v;
-  if (uRayWarp == 1) {
-    vec2 centre = vec2(uOrigin.x + cosR * lensX - sinR * lensY, uOrigin.y + sinR * lensX + cosR * lensY);
+  if (uExact == 1) {
+    vec4 wv = rayWarpAt(vec4((centreIdx + 0.5) / uCam - 0.5, ev));
+    vec2 P = centreIdx + wv.xy * uCam - uExactB.xy;
+    lens = vec2((uExactB.z * P.x + uExactB.w * P.y - uMin.x) / uUnit, (-uExactB.w * P.x + uExactB.z * P.y - uMin.y) / uUnit);
+    vec2 dir = vec2(cosR * ev.x - sinR * ev.y + wv.z, cosR * ev.y + sinR * ev.x + wv.w);
+    vec2 dpx = dir * uExactA.yz;
+    ru = (uExactB.z * dpx.x + uExactB.w * dpx.y) / uUnit / uExactA.w;
+    rv = (-uExactB.w * dpx.x + uExactB.z * dpx.y) / uUnit / uExactA.w;
+  } else if (uRayWarp == 1) {
+    vec2 centre = centreIdx;
     vec4 wv = rayWarpAt(vec4(centre / uCam - 0.5, (u + uRayShift.x) / pitch, (v + uRayShift.y) / pitch));
     vec2 s = wv.xy * uCam;
     lens += vec2(cosR * s.x + sinR * s.y, -sinR * s.x + cosR * s.y) / uUnit;
     ru += (cosR * wv.z + sinR * wv.w) * pitch;
     rv += (-sinR * wv.z + cosR * wv.w) * pitch;
   }
-  ru += uRayShift.x;
-  rv += uRayShift.y;
+  if (uExact == 0) {
+    ru += uRayShift.x;
+    rv += uRayShift.y;
+  }
   // BackProjectDepthMap::RayTraceRegion
   float lam0 = sampleDepth(uDepthLo, lens) / LTA;
   float lam1 = sampleDepth(uDepthHi, lens) / LTA + 1.0;
@@ -611,6 +638,8 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   const loTex = keep(upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.lo));
   const hiTex = keep(upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.hi));
   const zTex = keep(upload(gpu, W, H, gl.R32F, gl.RED, gl.FLOAT, P.zMap));
+  const ex = !!P.opts.exact && !!P.geoTable;
+  const gctTex = keep(ex ? upload(gpu, P.geoTable.w, P.geoTable.h, gl.RG32F, gl.RG, gl.FLOAT, P.geoTable.data, 4) : upload(gpu, 1, 1, gl.RG32F, gl.RG, gl.FLOAT, new Float32Array(2), 4));
   const acc = tex(W, H, gl.RGBA32F);
   gpu.target(acc, W, H);
   gl.clearColor(0, 0, 0, 0);
@@ -754,6 +783,15 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform2f(U.uRayShift, P.rayShift ? P.rayShift[0] : 0, P.rayShift ? P.rayShift[1] : 0);
     gl.uniform2f(U.uCam, cam.width, cam.height);
     gl.uniform1f(U.uFactor, d5 ? d5.factor : 1);
+    gl.uniform1i(U.uExact, ex ? 1 : 0);
+    gl.uniform1i(U.uGct, 9);
+    gpu.bindTex(9, gctTex);
+    if (ex) {
+      const sg = P.sampleGrid;
+      const pitchY = g.rowStep / 0.8660254037844386;
+      gl.uniform4f(U.uExactA, pitchY, cos * g.pitch - sin * pitchY, cos * pitchY + sin * g.pitch, LAMBDA_TO_ALPHA * (P.opts.dispScale || 1));
+      gl.uniform4f(U.uExactB, sg.ox, sg.oy, Math.cos(sg.rotation), Math.sin(sg.rotation));
+    }
     gl.bindVertexArray(gpu.emptyVao);
     const total = (y1 - y0) * cam.width;
     const chunk = 1 << 22;

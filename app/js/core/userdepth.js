@@ -303,3 +303,37 @@ export function dilateNearest(map, r, round = false) {
   }
   return { ...map, data: out };
 }
+
+// The engine's depth map in the app's picture frame, with no fitted placement (stage 2 of the engine read): the map is a regular raster over the whole sensor
+// (texel (i, j) of Wd x Hd centred at ((i + 0.5) / Wd, (j + 0.5) / Hd) of the sensor's edge frame), upscaled by DmResampler on that raster, and the engine reads it
+// at floor((position + 0.5) * size) of the ray's normalised position. `sampler`'s picture is the app's lens-range frame (pixel centres at integers, `unit` sensor px
+// per step), so every sub texel of the picture's finer grid is looked up through its sensor position. Returns { up, plain }: the upscaled map on the picture's grid
+// (`factor` times finer, as userDepthAlphaUpscaled) and the same at the picture's own resolution (the centre sub texel), both in alpha.
+export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8, level = false) {
+  const { width: Wd, height: Hd } = map;
+  const raster = { outW: Wd, outH: Hd, grid: { ox: 0, oy: 0, rotation: 0, pitch: 1, rowStep: 1 }, spacing: 1, xMin: 0, yMin: 0 };
+  const e = userDepthAlphaUpscaled({ ...map, identity: true }, raster, cam, 0, null, factor, similar, level);
+  const { outW, outH, grid, xMin, yMin } = sampler;
+  const unit = sampler.spacing;
+  const cos = Math.cos(grid.rotation);
+  const sin = Math.sin(grid.rotation);
+  const w5 = outW * factor;
+  const h5 = outH * factor;
+  const up = new Float32Array(w5 * h5);
+  const c = (factor - 1) / 2;
+  for (let J = 0; J < h5; J++) {
+    const Y = yMin + ((J - c) / factor) * unit;
+    for (let I = 0; I < w5; I++) {
+      const X = xMin + ((I - c) / factor) * unit;
+      const sx = grid.ox + cos * X - sin * Y + 0.5;
+      const sy = grid.oy + sin * X + cos * Y + 0.5;
+      const ei = Math.min(e.width - 1, Math.max(0, Math.floor((sx / cam.width) * e.width)));
+      const ej = Math.min(e.height - 1, Math.max(0, Math.floor((sy / cam.height) * e.height)));
+      up[J * w5 + I] = e.data[ej * e.width + ei];
+    }
+  }
+  const plain = new Float32Array(outW * outH);
+  const m = Math.floor(c);
+  for (let j = 0; j < outH; j++) for (let i = 0; i < outW; i++) plain[j * outW + i] = up[(j * factor + m) * w5 + i * factor + m];
+  return { up: { data: up, width: w5, height: h5, factor }, plain };
+}

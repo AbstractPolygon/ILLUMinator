@@ -9,7 +9,7 @@ import {
   clipTrust,
 } from './core/render.js';
 import { makeSyntheticLfr } from './core/synthetic.js';
-import { userDepthAlpha, userDepthAlphaUpscaled, dilateNearest, DEPTH_MAP_PLACE } from './core/userdepth.js';
+import { userDepthAlpha, userDepthAlphaUpscaled, engineDepthInFrame, dilateNearest, DEPTH_MAP_PLACE } from './core/userdepth.js';
 import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
@@ -729,6 +729,14 @@ function probeGrid(g, dbg) {
 // The engine's window is the full nominal hexagon (0.9025 on b4-1); with the engine's lattice offset, narrowing ours to 0.665 of it still scores best on all three photos (aperture 0.6 on b4-1: fitted 2.51 against
 // 2.57 at 0.5 and 2.70 at 0.9025; b4-3 2.20 / 2.20 / 2.24; b4-2 3.27 / 3.36 / 3.43), so some error that grows toward the window's edge remains in our rays.
 const ENGINE_APERTURE_FRACTION = 0.665;
+// With the engine's exact geometry and depth placement (below) the window can be wider again: 0.8 of the nominal one scores best (fitted mean difference against tnt, b4-1 / b4-3 / b4-2:
+// 1.99 / 1.70 / 2.45 at 0.8, 2.05 / 1.71 / 2.40 at 0.665, 2.12 / 1.73 at 1.0 with softer edges).
+const EXACT_APERTURE_FRACTION = 0.8;
+// The engine's lens lattice (HexDiskArrayModel) in pixel indices: its coordinates are pixel edges (a pixel's centre is x + 0.5), the app's are pixel centres.
+function engineLatticeIdx(lf) {
+  const g = engineGrid(lf.metadata, lf.cam.width, lf.cam.height);
+  return { ...g, ox: g.ox - 0.5, oy: g.oy - 0.5 };
+}
 const ENGINE_DEPTH_SHIFT = -1;
 // A depth measured here sits this far (lambda) from the engine's rays: the ray table's own estimate of Lytro's lambda offset less the 1 lambda most photos carry (b4-2: 3.5 of the 5 that gave
 // the sharpest picture; b4-1e and b4-3 about 0).
@@ -776,6 +784,12 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
   // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
   // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
+  const exactGeo = !dbg.legacy && !dbg.noExact && !!lf.geometryBytes && !!lf.rayWarpBytes && !!lf.metadata;
+  // With the engine's exact geometry its depth map needs no fitted placement: it is read where the ray falls on the sensor.
+  const exactDepth = exactGeo && !!state.userDepth && !!(state.depthRaw && state.depthRaw.fromLytro) && state.settings.lytroDepth !== false && !dbg.noExactDepth;
+  if (exactDepth && (!state.depthExact || state.depthExact.src !== state.userDepth || state.depthExact.key !== `${state.sampler.outW}x${state.sampler.outH}`)) {
+    state.depthExact = { src: state.userDepth, key: `${state.sampler.outW}x${state.sampler.outH}`, ...engineDepthInFrame(state.userDepth, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
+  }
   const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? (dbg.legacy ? ENGINE_DEPTH_SHIFT : 0)) * LAMBDA_TO_ALPHA : 0;
   const place = { ...ENGINE_PLACE, ...(dbg.place || {}) };
   const placeKey = JSON.stringify(place);
@@ -795,7 +809,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     state.depthOwnF = { sign: ownField, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField) };
   }
   const ownShift = !engineShift && !state.pp && state.depthPlain ? ((dbg.ownShift ?? OWN_DEPTH_SHIFT) === 'table' ? Math.max(0, -activeRayWarpForShift() / LAMBDA_TO_ALPHA - 1) : (dbg.ownShift ?? OWN_DEPTH_SHIFT)) * LAMBDA_TO_ALPHA : 0;
-  const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
+  const depthUsed = exactDepth ? Float32Array.from(state.depthExact.plain, (x) => x + (dbg.shiftConst ?? 0) * LAMBDA_TO_ALPHA) : engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
   let depth5 = null;
   if (!state.userDepth && !state.pp && dbg.own5) {
     // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
@@ -839,19 +853,21 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
       depth5 = state.depth5.shifted;
     }
   }
+  if (exactDepth) depth5 = dbg.shiftConst ? { ...state.depthExact.up, data: Float32Array.from(state.depthExact.up.data, (x) => x + dbg.shiftConst * LAMBDA_TO_ALPHA) } : state.depthExact.up;
   progress('Splatting the rays', 0);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
   const sp = lytroSplat({
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
-    raw: lf.raw, cam: lf.cam, dev, grid: probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
+    raw: lf.raw, cam: lf.cam, dev, grid: exactGeo ? engineLatticeIdx(lf) : probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampleGrid: lf.grid, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => progress('Splatting the rays', p),
   }, {
     ...LYTRO_SPLAT,
-    aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, ENGINE_APERTURE_FRACTION),
+    exact: exactGeo,
+    aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, exactGeo ? (dbg.apFraction ?? EXACT_APERTURE_FRACTION) : ENGINE_APERTURE_FRACTION),
     // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
     gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
       try {
