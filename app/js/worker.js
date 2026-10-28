@@ -718,8 +718,9 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
 // splatted with a depth each, holes filled, and the depth aware filter bank of
 // the photo applied.
 const ENGINE_DEPTH_SHIFT = -1;
-// A depth measured here sits this far (lambda) from the engine's rays.
-const OWN_DEPTH_SHIFT = 0;
+// A depth measured here sits this far (lambda) from the engine's rays: the ray table's own estimate of Lytro's lambda offset less the 1 lambda most photos carry (b4-2: 3.5 of the 5 that gave
+// the sharpest picture; b4-1e and b4-3 about 0).
+const OWN_DEPTH_SHIFT = 'table';
 // Where Lytro's depth map sits in our picture, for the engine's own picture (userdepth.js DEPTH_MAP_PLACE, texels of the depth map about its center). The engine's depth
 // map spans its picture, which is 1.6 % tighter than ours, so away from the center our nominal placement was off by up to 4 lenses (fit on the engine's binary depth oracle:
 // fence wire edge region 18.6 -> 6.4 on the binary oracle; on b4-1e the three edge blocks 8.4 7.7 7.6 -> 6.3 7.6 5.7, whole picture 3.25 -> 3.18; the fit is coordinate descent on those blocks, halo and whole; b4-2 and b4-3 do not move).
@@ -781,7 +782,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   if (ownField && (!state.depthOwnF || state.depthOwnF.sign !== ownField || state.depthOwnF.src !== state.depthPlain)) {
     state.depthOwnF = { sign: ownField, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField) };
   }
-  const ownShift = !engineShift && !state.pp && state.depthPlain ? (dbg.ownShift ?? OWN_DEPTH_SHIFT) * LAMBDA_TO_ALPHA : 0;
+  const ownShift = !engineShift && !state.pp && state.depthPlain ? ((dbg.ownShift ?? OWN_DEPTH_SHIFT) === 'table' ? Math.max(0, -activeRayWarpForShift() / LAMBDA_TO_ALPHA - 1) : (dbg.ownShift ?? OWN_DEPTH_SHIFT)) * LAMBDA_TO_ALPHA : 0;
   const depthUsed = engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
   let depth5 = null;
   if (!state.userDepth && !state.pp && dbg.own5) {
@@ -881,8 +882,10 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     // the standardized lightfield: 14 px disks
     const imgW = (lf.cam.width * 14) / lf.grid.pitch;
     const imgH = (lf.cam.height * 14) / lf.grid.pitch;
-    const bank = buildEngineBank(W, H, imgW, imgH, lo, hi);
-    const r = applyBank(img, sp.zMap, W, H, bank);
+    // opts: the engine's filters are keyed by its own lambda, which differs from the plain-ray lambda of a depth measured here by a per-photo amount
+    const bz = dbg.bankShift ? Float32Array.from(sp.zMap, (z) => z + dbg.bankShift) : sp.zMap;
+    const bank = buildEngineBank(W, H, imgW, imgH, lo + (dbg.bankShift || 0), hi + (dbg.bankShift || 0));
+    const r = applyBank(img, bz, W, H, bank);
     out = r.rgb;
     for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
   } else if (!dbg.noBank && lf.reconFilter) {
@@ -1576,6 +1579,12 @@ function smoothedDepth(alpha, confidence) {
   const guide = equalize(Float32Array.from(centerView()));
   const smooth = state.gpu ? state.gpu.smoothDepth.bind(state.gpu) : smoothDepth;
   return smooth(alpha, outW, outH, guide, { amount: state.settings.depthSmoothing ?? 0.3, confidence, step: state.depthRaw && state.depthRaw.flat ? DEPTH_STEP : 0 });
+}
+
+// The ray table's estimate of how far Lytro's lambda sits from the plain rays' (alpha; negative on these photos), whatever the depth source.
+function activeRayWarpForShift() {
+  const warp = state.rayWarp;
+  return warp && state.lf && state.lf.grid ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0;
 }
 
 function applyDepthSmoothing() {
