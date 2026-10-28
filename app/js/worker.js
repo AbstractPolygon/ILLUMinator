@@ -29,7 +29,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable } from './core/geometrytable.js';
-import { lytroSplat, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
+import { lytroSplat, engineAperture, engineApertureExact, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -839,7 +839,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     onProgress: (p) => progress('Splatting the rays', p),
   }, {
     ...LYTRO_SPLAT,
-    aperture: engineAperture(lf.cam),
+    aperture: dbg.apExact ? engineApertureExact(lf.cam) : engineAperture(lf.cam),
     // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
     gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
       try {

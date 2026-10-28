@@ -407,6 +407,11 @@ export function nominalAperture(cam) {
 // aperture: the hexagon the engine's pictures match best (swept against tnt on b4-1 with the engine's depth: 0.3..0.5 -> 3.92, 0.6 -> 4.09, 0.857 -> 4.74). The engine's
 // aperture table is sampled over -1..1 (index = 127.5 * coordinate + 128, ProjectEdof::robustProjection), so HexAperture's flat sides at 0.5 * value are in units
 // of the lens disk's radius: the value 0.9025 the metadata gives is 0.451 in this parameter (apothem = aperture * pitch / 2), in the middle of that optimum.
+// The engine's own NominalApertureFraction (1.85 / f-number, see docs/lytro-ray-model-spec.md): the port's `aperture` option takes it as it is (flat sides of the hexagon at 0.5 * value of the disk radius).
+export function engineApertureExact(cam) {
+  return nominalAperture(cam);
+}
+
 export function engineAperture(cam) {
   const nominal = nominalAperture(cam);
   return nominal === SPLAT.aperture ? nominal : nominal / 2;
@@ -681,7 +686,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { rayShift, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
@@ -767,7 +772,17 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampler, vignetting: vg, de
     const lamR = marchRay(mx, my, mu, mv, lam0, lam1, depth, lw, lh, opts, depth5);
     count++;
     if (!(lamR === lamR)) return;
-    const rayWeight = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;
+    let rayWeight = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;
+    if (opts.apFall || opts.apCone) {
+      // debug: a non flat aperture: distance to the hexagon's edge, 0 at the center, 1 on the flat sides
+      const ux = Math.abs(u + (opts.apShift !== false ? rayShift[0] : 0));
+      const vy = Math.abs(v + (opts.apShift !== false ? rayShift[1] : 0));
+      const dh = Math.max(ux, (ux + Math.sqrt(3) * vy) / 2) / apothem;
+      let wa = 1;
+      if (opts.apCone) wa *= Math.pow(Math.max(0, 1 - Math.min(1, dh)), opts.apCone);
+      if (opts.apFall) wa *= Math.max(0, Math.min(1, (1 - dh) / opts.apFall));
+      rayWeight *= wa;
+    }
     const a = lamR * LAMBDA_TO_ALPHA * (opts.dispScale || 1);
     // viewpoint (ProjectEdof's perspective): the splat direction is taken off the view's (u, v) in lens pitches and the picture is pivoted at lambda `pivot`
     let pu = 0;

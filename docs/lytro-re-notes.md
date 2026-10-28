@@ -575,3 +575,19 @@ Not the cause: the filter bank (the engine changes by 0.55 grey levels without t
 ### Edge sharpness against the engine at equal pixel size (render at scale 3.2366 so a pixel is the engine's size; the engine's picture resampled with a cubic filter, shift only)
 Ours / engine mean gradient on the engine's strong edges: b4-1e 0.911, b4-2 0.879, b4-3 0.891, so ours is about 10 % softer on every photo, MAE 3.16 / 5.66 / 2.77 (no fit).
 Tried on b4-1e (MAE, ratio; base 3.16, 0.911): luma boost amount 0.5 3.64, 1.009 (sharper but worse); edge artifact reduction off 3.17, 0.913; the photo's reconstruction bank 3.15, 0.913; no bank 3.41, 0.939; engine lattice 4.18; engine lattice plus the full geometry table per ray (sign +1) 3.64, 0.888 (sign -1: 5.83); fitted lattice plus the full table 3.82; aperture 0.38 / 0.55 / 0.7 / 0.9025: 3.26 / 3.10 / 3.12 / 3.42 with ratios 0.916 / 0.903 / 0.877 / 0.804. None closes the 10 % without raising the error; the fitted lens centres plus the mean viewpoint shift stay best.
+
+## Aperture (disassembly, exact)
+
+The engine's EDOF window is a hard, flat 0/1 hexagon (`HexAperture`, apothem 0.5 * NominalApertureFraction in lens pitches, i.e. 0.45125 pitch on b4-1), sampled into a 256x256 table over -1..1 and read by nearest lookup (index 127.5 * c + 128) on the GCT-corrected direction. `ImageAperture`/`smoothEdges` are not on the refocus path. Full spec: the aperture disassembly notes (HexAperture ctor 0x1003a01e0, operator() 0x1003a0a90, robustProjection lookup 0x1004890bf).
+
+Measured against tnt renders (b4-1, mean abs difference, edge-gradient ratio ours/engine):
+
+| input | aperture | MAE | edge ratio |
+|---|---|---|---|
+| constant depth -4.2 | halved flat (default) | 4.35 | 1.04 |
+| constant depth -4.2 | exact 0.9025 hard | 2.47 | 0.92 |
+| constant depth -4.2 | exact 0.9025, soft fall-off 0.15 | 2.36 | 0.95 |
+| real photo, own depth | default / exact | 3.09 / 3.54 | 1.00 / 0.88 |
+| real photo, engine depth | default / exact / exact+soft 0.2 | 3.11 / 3.29 / 3.14 | 1.02 / 0.95 / 0.97 |
+
+At constant depth the exact aperture is clearly right. On real photos the halved aperture still scores as well or better, because it absorbs depth/placement error (ENGINE_PLACE, depth shift -1, D5_GROW were fitted under it). The default is therefore unchanged until those are re-fitted; `dbg.apExact` and the `apFall`/`apCone` splat options select the exact window for that work.
