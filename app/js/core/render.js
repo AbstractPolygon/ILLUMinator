@@ -26,8 +26,8 @@ const TAPS = 8;
 // 2022 x 1404 picture on the ILLUM). `frame` takes a grid-local lens position (lx, ly) to its sensor position: x = ox + cos * lx - sin * ly, y = oy + sin * lx + cos * ly.
 function samplerExtent(lenses, grid, detail, cam) {
   const spacing = grid.rowStep / detail;
-  const outW = Math.max(1, Math.round(cam.width / spacing));
-  const outH = Math.max(1, Math.round(cam.height / spacing));
+  const outW = Math.max(1, Math.ceil(cam.width / spacing - 1e-6));
+  const outH = Math.max(1, Math.ceil(cam.height / spacing - 1e-6));
   const xMin = 0.5 * spacing - 0.5;
   const yMin = 0.5 * spacing - 0.5;
   return { spacing, xMin, xMax: xMin + outW * spacing, yMin, yMax: yMin + outH * spacing, outW, outH };

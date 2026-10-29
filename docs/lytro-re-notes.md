@@ -672,3 +672,11 @@ Calibrated against the engine's own render of b4-1 at its 2022 px width (the blu
 old linear-Y mask, 1.21 with the L* mask (amount 1.5, soft threshold 0.4 L*, sigma 0.38 pitches; amounts 1.35 to 1.8
 fit equally). A halo limiter built from the gradient-mask table fitted worse and is not used. CPU (`engineUnsharp`)
 and GPU (`USM_BLUR`/`USM_APPLY`) agree within one level.
+
+## Picture size: the base grid covers the sensor (ceil, not round)
+
+The engine's 2022 x 1404 picture is 625 x 434 lens-row steps times the 3.2366 scale (floor). The count is the
+sensor divided by the row step, rounded up so the picture covers the whole sensor. Rounding to nearest gave 624
+(2019 px) on photos whose row step is a little above nominal (b4-2), which looked like a +1 px x shift when scored.
+With ceil all photos are 2022 x 1404 and the fitted error against the pre-adjust renders is: b4-2 0.72 to 0.67,
+154bedc9 0.54 to 0.39, 5b8b8107 1.03 to 0.74; the remaining shift is 0.4 to 0.6 px in y (x is 0 to -0.1).
