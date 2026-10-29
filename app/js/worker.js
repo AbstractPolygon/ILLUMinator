@@ -31,7 +31,7 @@ import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
 import { lytroSplat, engineColorScale, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
-import { fixHotPixels } from './core/raw.js';
+import { fixHotPixels, blendedCcm } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } from './core/lens.js';
@@ -184,7 +184,7 @@ function updateColor() {
   state.masks = masks.filter((m, i) => i === show || activeMasks([m]).length);
   state.maskShow = show >= 0 ? state.masks.indexOf(masks[show]) : -1;
   // The Lytro Desktop look applies saturation after its curve (toneMap).
-  const camCcm = lf.cam.ccm;
+  const camCcm = engineCcm(s);
   const exactColor = s.lytroLook !== false && !!state.engineScale && Array.isArray(camCcm) && camCcm.length === 9 && s.engineColor !== false;
   state.lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1, exact: exactColor } : null;
   const ccm = colorMatrix(lf.cam, state.lytro ? { ...s, saturation: 1 } : s);
@@ -211,6 +211,14 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 // The color pass for an animation frame whose Process and Optics settings
 // are keyframed: `color` (main.js colorSettings) over the photo's settings.
 // Returns what toPixels and finishGpu read (the photo's own: `state`).
+// The engine's colour matrix for the photo's white balance temperature (blended from the sensor's matrices); the photo's own at the as-shot temperature.
+function engineCcm(s) {
+  const cam = state.lf.cam;
+  if (!cam.ccm) return cam.ccm;
+  const kelvin = s && s.wb && s.wb.kelvin ? s.wb.kelvin : asShotKelvin();
+  return (globalThis.__lytro && globalThis.__lytro.asShotCcm) ? cam.ccm : blendedCcm(cam.perCcm, kelvin, cam.ccm);
+}
+
 function colorState(color) {
   if (!color) return state;
   const s = { ...state.settings, ...color };
@@ -227,7 +235,7 @@ function colorState(color) {
   }
   const gains = auto.map((g, i) => g * manual[i]);
   // The engine's own colour pipeline when the photo's engine units are known (colour matrix, tone spline, sRGB); the fitted Lytro look otherwise.
-  const ccm = state.lf.cam.ccm;
+  const ccm = engineCcm(s);
   const exact = s.lytroLook !== false && !!state.engineScale && Array.isArray(ccm) && ccm.length === 9 && s.engineColor !== false;
   const lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1, exact } : null;
   const matrix = exact

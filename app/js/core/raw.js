@@ -101,6 +101,29 @@ export function illumBlackLevel(gain) {
   return ILLUM_BLACK[ILLUM_BLACK.length - 1][1];
 }
 
+// SensorCcm::getLinearlyBlendedCcm (0x1002f8330): the matrix of the nearest temperature at or beyond either end of the list, otherwise the linear blend of the two
+// entries closest below and above `cct`; the photo's own matrix when the list is empty.
+export function blendedCcm(perCcm, cct, fallback) {
+  if (!perCcm || !perCcm.length || !Number.isFinite(cct)) return fallback;
+  if (perCcm.length === 1) return perCcm[0].ccm;
+  let lo = perCcm[0];
+  let hi = perCcm[0];
+  for (const e of perCcm) {
+    if (e.cct < lo.cct) lo = e;
+    if (e.cct > hi.cct) hi = e;
+  }
+  if (cct <= lo.cct) return lo.ccm;
+  if (cct >= hi.cct) return hi.ccm;
+  let below = lo;
+  let above = hi;
+  for (const e of perCcm) {
+    if (e.cct <= cct && cct - e.cct < cct - below.cct) below = e;
+    if (e.cct >= cct && e.cct - cct < above.cct - cct) above = e;
+  }
+  const t = (cct - below.cct) / (above.cct - below.cct);
+  return below.ccm.map((v, i) => v * (1 - t) + above.ccm[i] * t);
+}
+
 export function cameraInfo(metadata, fallbackLayout) {
   const md = metadata || {};
   const image = md.image || {};
@@ -160,6 +183,10 @@ export function cameraInfo(metadata, fallbackLayout) {
     white,
     wb,
     ccm: Array.isArray(ccm) && ccm.length === 9 ? ccm : null,
+    // The sensor's matrices by colour temperature (SensorCcm), which the engine blends for the photo's temperature.
+    perCcm: (Array.isArray(get(md, 'devices', 'sensor', 'perCcm')) ? get(md, 'devices', 'sensor', 'perCcm') : [])
+      .filter((e) => e && Number.isFinite(e.cct) && Array.isArray(e.ccm) && e.ccm.length === 9)
+      .map((e) => ({ cct: e.cct, ccm: e.ccm })),
     exposureBias: first(image.modulationExposureBias, 0),
     mla,
     capture: {
