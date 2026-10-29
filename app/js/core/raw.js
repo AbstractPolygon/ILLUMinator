@@ -179,6 +179,29 @@ export function cameraInfo(metadata, fallbackLayout) {
   };
 }
 
+// The engine's hot pixel correction (HotPixelCorrectionImage::SimpleCorrection, 0x10044c640): only the pixels of the camera's calibration list, only those of the border-free
+// interior (3 pixels in); the estimate is the mean of the two same-colour neighbours (2 pixels away) along the direction of the smaller gradient, vertical when the
+// vertical gradient |v(-2) - v(+2)| + |v(-1) - v(+1)| is not larger than the horizontal one; the pixel is replaced when it is above 1.2 times the estimate (cfg 0xa18)
+// or above 0.99 of full scale.
+export function listedHotPixels(raw, width, height, listed, max = 1023) {
+  const out = raw.slice();
+  const w2 = 2 * width;
+  let count = 0;
+  for (const i of listed) {
+    const y = Math.floor(i / width);
+    const x = i - y * width;
+    if (x < 3 || y < 3 || x >= width - 3 || y >= height - 3) continue;
+    const vg = Math.abs(raw[i - w2] - raw[i + w2]) + Math.abs(raw[i - width] - raw[i + width]);
+    const hg = Math.abs(raw[i - 2] - raw[i + 2]) + Math.abs(raw[i - 1] - raw[i + 1]);
+    const est = (vg <= hg ? raw[i - w2] + raw[i + w2] : raw[i - 2] + raw[i + 2]) * 0.5;
+    if (1.2 * est < raw[i] || raw[i] > 0.99 * max) {
+      out[i] = Math.round(est);
+      count++;
+    }
+  }
+  return { raw: out, count };
+}
+
 // Hot and dead pixels: a copy of the raw image with each pixel that stands
 // far from the median of its eight nearest same-color neighbors (two pixels
 // away, diagonals included) replaced by that median. The median is not
@@ -187,7 +210,8 @@ export function cameraInfo(metadata, fallbackLayout) {
 // { raw, count }. `listed` (optional) holds pixel indices the camera's
 // calibration names as defective: those are always replaced, and the
 // search above still finds the ones the list misses.
-export function fixHotPixels(raw, width, height, listed = null) {
+export function fixHotPixels(raw, width, height, listed = null, max = 1023) {
+  if (listed && listed.length && !(globalThis.__lytro && globalThis.__lytro.heuristicHot)) return listedHotPixels(raw, width, height, listed, max);
   const out = raw.slice();
   const nb = new Float64Array(8);
   const w2 = 2 * width;

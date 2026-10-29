@@ -26,6 +26,26 @@ test('listed pixels are always repaired, even when mild', () => {
   assert.equal(listed.count, 1);
 });
 
+test('a listed pixel follows the engine rule: left alone up to 1.2 times the estimate, else the smoother direction\'s mean', () => {
+  const w = 12;
+  const raw = new Uint16Array(w * w).fill(100);
+  const i = 5 * w + 6;
+  // horizontal neighbours differ (a vertical edge): the vertical pair is smoother
+  raw[i - 2] = 100;
+  raw[i + 2] = 300;
+  raw[i - 2 * w] = 100;
+  raw[i + 2 * w] = 120;
+  raw[i] = 119; // under 1.2 x 110
+  assert.equal(fixHotPixels(raw, w, w, Uint32Array.of(i)).raw[i], 119);
+  raw[i] = 140;
+  const out = fixHotPixels(raw, w, w, Uint32Array.of(i));
+  assert.equal(out.raw[i], 110);
+  assert.equal(out.count, 1);
+  // nothing outside the list is touched
+  raw[3 * w + 3] = 900;
+  assert.equal(fixHotPixels(raw, w, w, Uint32Array.of(i)).raw[3 * w + 3], 900);
+});
+
 import { makeTar } from '../app/js/core/tar.js';
 import { memoryStorage } from '../app/js/library/storage.js';
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration, KEEP_BYTES } from '../app/js/core/calibration.js';
