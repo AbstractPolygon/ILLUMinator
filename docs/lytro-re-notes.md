@@ -691,3 +691,15 @@ gain (metadata devices.sensor.analogGain) times the digital gain above ISO 640. 
 (`engineUnsharp` with an `engineUsmMap`) and the GPU (`USM_BLUR`/`USM_APPLY`, the map as an RG32F texture) agree within one level.
 Check on b4-1 with the engine's own depth: fitted error 1.23 (constant 1.5: 1.21), so the per-lambda tables change little at gain 1; the gain table is what
 matters on high-ISO photos (b4-2, gain 8: amount x0.65; fitted error 1.32 either way, edge ratio 1.043 against 1.065 for the gain-1 amount).
+
+### Noise reduction (Neat Image, `NILib`): what it changes, and why it is not ported
+The engine runs `NILib` (`resources/bin/NILib.dll`, 1.4 MB, the full Neat Image engine with CPU and GPU paths) on the picture with the default luminance / colour
+amounts of 50. Measured by rendering the same photo with the engine's NR on and off (recipe `viewLuminanceNoiseReduction` / `viewColorNoiseReduction` 0) and scoring our picture
+against both (fitted difference): b4-1 1.23 against the NR render, 0.89 against the no-NR render; b4-2 1.32 and 1.09. The two engine renders differ by a mean absolute
+0.82 (b4-1) and 0.76 (b4-2) grey levels, almost all of it in a / b (rms change dL 0.20, da 0.95, db 1.04 on b4-1; 0.20, 0.80, 1.23 on b4-2), so NR is the largest single
+stage still missing. Our picture carries 8% (gain 1) to 26-38% (gain 8) more a / b high-frequency energy than the engine's, with no colour bias (under 0.25 L*).
+It is not a linear filter: a six-band linear regression of the change on band-passed no-NR chroma explains 33-53% of its variance, a Gaussian 16-46%, an L-guided joint
+bilateral on a / b 39-56% (best of 36 parameter sets), so an approximation would remove only a third of the NR gap and is not shipped. The library itself is tiled
+(96 px tiles with 40 px overlap, worker threads), control-flow obfuscated (state mutation around every call, scrambled vtables) and stripped (1398 functions, biggest
+10 KB; entry points `NIFilter` 0x180003980 -> `FUN_180018130`), so reading the algorithm and the camera noise profiles is a separate large job. Ghidra project:
+`scratchpad/ni/proj` (import done, function / string lists in `scratchpad/ni`). Probe tools: `tntrun/rec_edof_nonr.json` (the default recipe with both NR sliders at 0).
