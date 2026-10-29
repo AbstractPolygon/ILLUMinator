@@ -320,9 +320,9 @@ export function removeDust(rgb, w, h, p) {
 }
 
 // The engine's unsharp mask (stage 5 of the engine read, SmoothlyVaryingUnsharpMaskImage at the ILLUM's baseline bank): on the picture after the tone curve and before the sRGB
-// encoding, a Gaussian unsharp mask of the linear luminance Y of the normalized Lab (a and b untouched), sigma = 0.38 lens pitches (the picture is 7728 / 14.29 = 540.8 lens pitches
-// wide), amount 1.35 (3.0 x 0.45 at base gain), a soft threshold of 0.004. `scale` scales the amount.
-export const ENGINE_USM = { amount: 1.35, radius: 0.38, threshold: 0.004, lensColumns: 540.8 };
+// encoding, a Gaussian unsharp mask of the Lab lightness L* (a and b untouched), sigma = 0.38 lens pitches (the picture is 7728 / 14.29 = 540.8 lens pitches wide), amount 1.5,
+// a soft threshold of 0.4 L*. Fitted against the engine's own render of b4-1 (no halo limiter: it fitted worse). `scale` scales the amount.
+export const ENGINE_USM = { amount: 1.5, radius: 0.38, threshold: 0.4, lensColumns: 540.8 };
 const XYZ_RGB = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
 const RGB_XYZ = [3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252];
 const SRGB_DEC = Float32Array.from({ length: 256 }, (_, i) => {
@@ -347,7 +347,7 @@ export function engineUnsharp(px, w, h, scale = 1) {
   }
   const n = w * h;
   const Y = new Float32Array(n);
-  for (let i = 0; i < n; i++) Y[i] = XYZ_RGB[3] * SRGB_DEC[px[4 * i]] + XYZ_RGB[4] * SRGB_DEC[px[4 * i + 1]] + XYZ_RGB[5] * SRGB_DEC[px[4 * i + 2]];
+  for (let i = 0; i < n; i++) Y[i] = 116 * labF(XYZ_RGB[3] * SRGB_DEC[px[4 * i]] + XYZ_RGB[4] * SRGB_DEC[px[4 * i + 1]] + XYZ_RGB[5] * SRGB_DEC[px[4 * i + 2]]) - 16;
   const T = new Float32Array(n);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -371,13 +371,13 @@ export function engineUnsharp(px, w, h, scale = 1) {
       const G = SRGB_DEC[px[o + 1]];
       const B = SRGB_DEC[px[o + 2]];
       const X = XYZ_RGB[0] * R + XYZ_RGB[1] * G + XYZ_RGB[2] * B;
-      const Yc = Y[i];
+      const Yc = XYZ_RGB[3] * R + XYZ_RGB[4] * G + XYZ_RGB[5] * B;
       const Z = XYZ_RGB[6] * R + XYZ_RGB[7] * G + XYZ_RGB[8] * B;
       const fY = labF(Yc);
       const aa = 500 * (labF(X / 0.95047) - fY);
       const bb = 200 * (fY - labF(Z / 1.08883));
-      const Yn = Math.max(0, Yc + amount * core);
-      const fN = labF(Yn);
+      const fN = (Y[i] + amount * core + 16) / 116;
+      const Yn = labFinv(fN);
       const X2 = 0.95047 * labFinv(fN + aa / 500);
       const Z2 = 1.08883 * labFinv(fN - bb / 200);
       px[o] = srgbEnc(Math.min(1, Math.max(0, RGB_XYZ[0] * X2 + RGB_XYZ[1] * Yn + RGB_XYZ[2] * Z2)));

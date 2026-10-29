@@ -663,3 +663,12 @@ the depth views, user depth lookups, the lattice phase and the GPU view pass. Ag
 render, the fitted error on b4-1 went from 0.96 to 0.43, with scale 1.0158 -> 0.9999 and the shift at 0.
 One latent bug surfaced with it: after lens-centre calibration the pattern removal kept using the first pass's
 weights; it now takes the second pass's.
+
+## Unsharp mask works in L*, not linear Y
+
+The engine's unsharp mask blurs and thresholds the Lab lightness L* (a and b untouched), not linear luminance.
+Calibrated against the engine's own render of b4-1 at its 2022 px width (the blur is 0.38 lens pitches, about
+1.4 px there, so calibrate at that width, not on a small render): fitted error 1.92 with no mask, 1.64 with the
+old linear-Y mask, 1.21 with the L* mask (amount 1.5, soft threshold 0.4 L*, sigma 0.38 pitches; amounts 1.35 to 1.8
+fit equally). A halo limiter built from the gradient-mask table fitted worse and is not used. CPU (`engineUnsharp`)
+and GPU (`USM_BLUR`/`USM_APPLY`) agree within one level.

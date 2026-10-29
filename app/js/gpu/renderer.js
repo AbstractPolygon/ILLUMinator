@@ -674,13 +674,14 @@ void main() {
 
 // Details, pass 2: unsharp mask on sqrt brightness, then recombine.
 
-// The engine's unsharp mask on the picture after the tone curve (core/detail.js engineUnsharp): a Gaussian blur of the linear luminance, then the Lab luma sharpen with a and b kept.
+// The engine's unsharp mask on the picture after the tone curve (core/detail.js engineUnsharp): a Gaussian blur of the lightness L*, then the Lab luma sharpen with a and b kept.
 const USM_COMMON = `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D uSrc;
 vec3 decode(vec3 v) { return mix(pow((v + 0.055) / 1.055, vec3(2.4)), v / 12.92, lessThanEqual(v, vec3(0.04045))); }
-float lum(vec3 c) { return dot(decode(c), vec3(0.2126729, 0.7151522, 0.0721750)); }
+float labF(float t) { return t > 0.008856 ? pow(t, 1.0 / 3.0) : 7.787037 * t + 0.137931; }
+float lum(vec3 c) { return 116.0 * labF(dot(decode(c), vec3(0.2126729, 0.7151522, 0.0721750))) - 16.0; }
 out vec4 outColor;
 `;
 const USM_BLUR = `${USM_COMMON}
@@ -706,7 +707,6 @@ const USM_APPLY = `${USM_COMMON}
 uniform sampler2D uBlur;
 uniform float uAmount;
 uniform float uThreshold;
-float labF(float t) { return t > 0.008856 ? pow(t, 1.0 / 3.0) : 7.787037 * t + 0.137931; }
 float labFinv(float f) { return f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037; }
 vec3 encode(vec3 x) { x = clamp(x, 0.0, 1.0); return mix(1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, x * 12.92, lessThanEqual(x, vec3(0.0031308))); }
 const mat3 SRGB_XYZ = mat3(0.4124564, 0.2126729, 0.0193339, 0.3575761, 0.7151522, 0.1191920, 0.1804375, 0.0721750, 0.9503041);
@@ -715,14 +715,15 @@ void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec4 c = texelFetch(uSrc, p, 0);
   vec3 xyz = SRGB_XYZ * decode(c.rgb);
-  float d = xyz.y - texelFetch(uBlur, p, 0).r;
+  float L = 116.0 * labF(xyz.y) - 16.0;
+  float d = L - texelFetch(uBlur, p, 0).r;
   float core = abs(d) >= uThreshold ? d - sign(d) * uThreshold : 0.0;
   if (core == 0.0) { outColor = vec4(c.rgb, 1.0); return; }
   float fY = labF(xyz.y);
   float aa = 500.0 * (labF(xyz.x / 0.95047) - fY);
   float bb = 200.0 * (fY - labF(xyz.z / 1.08883));
-  float Yn = max(0.0, xyz.y + uAmount * core);
-  float fN = labF(Yn);
+  float fN = (L + uAmount * core + 16.0) / 116.0;
+  float Yn = labFinv(fN);
   vec3 xyz2 = vec3(0.95047 * labFinv(fN + aa / 500.0), Yn, 1.08883 * labFinv(fN - bb / 200.0));
   outColor = vec4(encode(XYZ_SRGB * xyz2), 1.0);
 }`;
