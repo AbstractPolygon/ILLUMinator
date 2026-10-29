@@ -76,7 +76,7 @@ const V = 1 / Math.sqrt(6);
 
 // Lytro's color per hue on an encoded (0..1) color c, in place; `sat`
 // scales it further (the Saturation slider). Brightness is kept.
-export function lytroColor(c, sat = 1) {
+export function lytroColor(c, sat = 1, exact = false) {
   const [r, g, b] = c;
   const u = U * (r - g);
   const v = V * (r + g - 2 * b);
@@ -86,8 +86,8 @@ export function lytroColor(c, sat = 1) {
   const i = Math.floor(t) % 12;
   const j = (i + 1) % 12;
   const f = t - Math.floor(t);
-  const kr = sat * (LYTRO_HUE[i][0] * (1 - f) + LYTRO_HUE[j][0] * f);
-  const ki = sat * (LYTRO_HUE[i][1] * (1 - f) + LYTRO_HUE[j][1] * f);
+  const kr = sat * (exact ? 1 : LYTRO_HUE[i][0] * (1 - f) + LYTRO_HUE[j][0] * f);
+  const ki = sat * (exact ? 0 : LYTRO_HUE[i][1] * (1 - f) + LYTRO_HUE[j][1] * f);
   const du = u * kr - v * ki - u;
   const dv = u * ki + v * kr - v;
   let R = r + U * du + V * dv;
@@ -98,4 +98,54 @@ export function lytroColor(c, sat = 1) {
   c[1] = Math.min(1, Math.max(0, G + dy));
   c[2] = Math.min(1, Math.max(0, B + dy));
   return c;
+}
+
+// The engine's own tone and colour (stage 5 of the engine read): camera RGB in the engine's linear units x the colour matrix (cam.ccm) -> a natural cubic spline T through 14 knots per
+// channel (looked up through a 4097 entry table) -> the sRGB encoding. No hue step: `lytroColor` with hue factors (1, 0) is just the saturation slider.
+export const ENGINE_KNOTS = [
+  [0, 0], [0.01, 0.004], [0.03, 0.02], [0.05, 0.045], [0.076, 0.088], [0.108, 0.143], [0.15, 0.206],
+  [0.35, 0.49], [0.54, 0.705], [0.625, 0.786], [0.75, 0.885], [0.865, 0.955], [0.924, 0.981], [1, 1],
+];
+// Segment coefficients y = a + b t + c t^2 + d t^3, t = x - x_i, of the natural cubic spline.
+export function naturalSpline(knots) {
+  const n = knots.length - 1;
+  const x = knots.map((k) => k[0]);
+  const y = knots.map((k) => k[1]);
+  const h = Array.from({ length: n }, (_, i) => x[i + 1] - x[i]);
+  const alpha = new Array(n + 1).fill(0);
+  for (let i = 1; i < n; i++) alpha[i] = (3 / h[i]) * (y[i + 1] - y[i]) - (3 / h[i - 1]) * (y[i] - y[i - 1]);
+  const l = new Array(n + 1).fill(1);
+  const mu = new Array(n + 1).fill(0);
+  const z = new Array(n + 1).fill(0);
+  for (let i = 1; i < n; i++) {
+    l[i] = 2 * (x[i + 1] - x[i - 1]) - h[i - 1] * mu[i - 1];
+    mu[i] = h[i] / l[i];
+    z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+  }
+  const c = new Array(n + 1).fill(0);
+  const b = new Array(n).fill(0);
+  const d = new Array(n).fill(0);
+  for (let j = n - 1; j >= 0; j--) {
+    c[j] = z[j] - mu[j] * c[j + 1];
+    b[j] = (y[j + 1] - y[j]) / h[j] - (h[j] * (c[j + 1] + 2 * c[j])) / 3;
+    d[j] = (c[j + 1] - c[j]) / (3 * h[j]);
+  }
+  return { x: x.slice(0, n), a: y.slice(0, n), b, c: c.slice(0, n), d };
+}
+export const ENGINE_SPLINE = naturalSpline(ENGINE_KNOTS);
+// T at x (clamped to 0..1, through the engine's 4097 entry nearest lookup).
+export function engineTone(x) {
+  const v = Math.round(Math.min(1, Math.max(0, x)) * 4095) / 4095;
+  const S = ENGINE_SPLINE;
+  let i = 0;
+  for (let k = 1; k < S.x.length; k++) if (v >= S.x[k]) i = k;
+  const t = v - S.x[i];
+  return ((S.d[i] * t + S.c[i]) * t + S.b[i]) * t + S.a[i];
+}
+const srgbEncode = (x) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
+// Byte lookup for linear input 0..CURVE_MAX in `size` steps (the engine's colour pipeline).
+export function engineTable(size) {
+  const t = new Uint8ClampedArray(size + 1);
+  for (let i = 0; i <= size; i++) t[i] = Math.round(255 * srgbEncode(engineTone(Math.min(1, (i / size) * CURVE_MAX))));
+  return t;
 }

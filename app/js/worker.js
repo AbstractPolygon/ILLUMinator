@@ -29,7 +29,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
-import { lytroSplat, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
+import { lytroSplat, engineColorScale, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
 import { fixHotPixels } from './core/raw.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
@@ -184,11 +184,15 @@ function updateColor() {
   state.masks = masks.filter((m, i) => i === show || activeMasks([m]).length);
   state.maskShow = show >= 0 ? state.masks.indexOf(masks[show]) : -1;
   // The Lytro Desktop look applies saturation after its curve (toneMap).
-  state.lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
+  const camCcm = lf.cam.ccm;
+  const exactColor = s.lytroLook !== false && !!state.engineScale && Array.isArray(camCcm) && camCcm.length === 9 && s.engineColor !== false;
+  state.lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1, exact: exactColor } : null;
   const ccm = colorMatrix(lf.cam, state.lytro ? { ...s, saturation: 1 } : s);
   // Fold the white balance gains into the matrix columns.
-  // The Lytro Desktop look balances the result slightly (core/base.js).
-  state.matrix = ccm.map((v, i) => v * state.wbGains[i % 3] * (state.lytro ? lytroBalance(state.lf.cam.capture && state.lf.cam.capture.cct)[Math.floor(i / 3)] : 1));
+  // The Lytro Desktop look balances the result slightly (core/base.js); the engine's own pipeline scales by its colour units instead.
+  state.matrix = exactColor
+    ? camCcm.map((v, i) => v * state.engineScale[i % 3] * state.wbGains[i % 3])
+    : ccm.map((v, i) => v * state.wbGains[i % 3] * (state.lytro ? lytroBalance(state.lf.cam.capture && state.lf.cam.capture.cct)[Math.floor(i / 3)] : 1));
   // Reduce flare: the veil is measured once on the center view.
   const { outW, outH } = state.sampler;
   if (!(s.flare && s.flare.on)) state.veil = null;
@@ -198,7 +202,7 @@ function updateColor() {
   if (state.gpu) state.gpu.setVeil(state.veil);
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
-  state.baseExposure = state.lytro ? LYTRO_EXPOSURE : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
+  state.baseExposure = state.lytro ? (exactColor ? 1 : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
 
@@ -222,14 +226,19 @@ function colorState(color) {
     return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0, lytro: null };
   }
   const gains = auto.map((g, i) => g * manual[i]);
-  const lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1 } : null;
-  const matrix = colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3] * (lytro ? lytroBalance(state.lf.cam.capture && state.lf.cam.capture.cct)[Math.floor(i / 3)] : 1));
+  // The engine's own colour pipeline when the photo's engine units are known (colour matrix, tone spline, sRGB); the fitted Lytro look otherwise.
+  const ccm = state.lf.cam.ccm;
+  const exact = s.lytroLook !== false && !!state.engineScale && Array.isArray(ccm) && ccm.length === 9 && s.engineColor !== false;
+  const lytro = s.lytroLook !== false ? { saturation: s.saturation ?? 1, exact } : null;
+  const matrix = exact
+    ? ccm.map((v, i) => v * state.engineScale[i % 3] * gains[i % 3])
+    : colorMatrix(state.lf.cam, lytro ? { ...s, saturation: 1 } : s).map((v, i) => v * gains[i % 3] * (lytro ? lytroBalance(state.lf.cam.capture && state.lf.cam.capture.cct)[Math.floor(i / 3)] : 1));
   // The veil is measured once (with Reduce flare on); its amount animates.
   const veil = s.flare && s.flare.on ? state.veil : null;
   const veilAmount = veil ? s.flare.amount : 0;
   const center = centerView();
   const { outW, outH } = state.sampler;
-  const baseExposure = lytro ? LYTRO_EXPOSURE : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
+  const baseExposure = lytro ? (exact ? 1 : LYTRO_EXPOSURE) : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
   return { settings: s, look, lens: lensParams(s.lens, state.lf.cam), matrix, baseExposure, veil, veilAmount, lytro };
 }
 
@@ -470,6 +479,19 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     }
     if (state.gpu) state.gpu.setRaw(state.lf.raw, state.lf.cam, state.dev);
     rebuildSampler();
+    // The engine's colour units for this photo (from its modulation frame), for the engine's colour pipeline; without the frame the Lytro look stays.
+    state.engineScale = null;
+    if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
+      try {
+        state.modulation = await state.lf.readModulation();
+        state.engineScale = state.modulation ? engineColorScale(state.modulation, state.lf.cam, state.dev, state.lf.grid) : null;
+      } catch (e) {
+        console.error('ENGINESCALE failed', e && e.message);
+        state.modulation = undefined;
+      }
+      if (globalThis.__lytro && globalThis.__lytro.printGrid) console.error('ENGINESCALE', JSON.stringify(state.engineScale));
+      if (state.engineScale) updateColor();
+    }
   }
   return summary();
 }

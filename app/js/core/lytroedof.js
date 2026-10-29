@@ -421,6 +421,35 @@ export const SPLAT = { modGlobal: true, aperture: 0.4, modPow: 2, shape: 'hex', 
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
+// The engine's colour units (stage 1 and 5 of the engine read): its demodulation divides by the modulation bitmap normalised by the mean of the WHOLE sensor per colour, ours by the
+// mean at the lens centres, so its linear colour is ours times `f`, the ratio of the two, and its units are raw / 1023 less the black level where ours divide by (white - black).
+// Returns the factor per colour from our linear camera RGB to the engine's.
+export function engineColorScale(modulation, cam, dev, g) {
+  const { width, height } = cam;
+  const whole = [0, 0, 0];
+  const nWhole = [0, 0, 0];
+  for (let y = 0; y < height; y++) {
+    const row = dev.cfa[y & 1];
+    for (let x = 0; x < width; x++) {
+      const ch = row[x & 1];
+      whole[ch] += Math.max(0, modulation[y * width + x] - dev.black[ch]);
+      nWhole[ch]++;
+    }
+  }
+  const centre = [0, 0, 0];
+  const nCentre = [0, 0, 0];
+  forEachLensPixel(g, cam, 2.3, (i, x, y, u, v) => {
+    if (u * u + v * v > 5.3) return;
+    const ch = dev.cfa[y & 1][x & 1];
+    centre[ch] += Math.max(0, modulation[i] - dev.black[ch]);
+    nCentre[ch]++;
+  }, null, 3);
+  return [0, 1, 2].map((ch) => {
+    const f = nCentre[ch] && nWhole[ch] && centre[ch] ? whole[ch] / nWhole[ch] / (centre[ch] / nCentre[ch]) : 0.82;
+    return ((cam.white[ch] - cam.black[ch]) / 1023) * f;
+  });
+}
+
 export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);

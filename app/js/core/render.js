@@ -6,7 +6,7 @@
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
 
-import { lytroTable, lytroColor, CURVE_MAX } from './base.js';
+import { lytroTable, lytroColor, engineTable, CURVE_MAX } from './base.js';
 import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
@@ -514,6 +514,7 @@ export function autoExposure(rgb, matrix) {
 
 const LYTRO_STEPS = 8192;
 const LYTRO_TABLE = lytroTable(LYTRO_STEPS);
+const ENGINE_TABLE = engineTable(LYTRO_STEPS);
 
 // Linear camera RGB -> sRGB RGBA bytes. `look`: the per-pixel color
 // adjustments from makeLook (core/color.js), applied after exposure.
@@ -531,7 +532,7 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
   // the Lytro curve.
   const steps = lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
   const top = lytro ? LYTRO_STEPS : 4096;
-  const table = lytro ? LYTRO_TABLE : SRGB;
+  const table = lytro ? (lytro.exact ? ENGINE_TABLE : LYTRO_TABLE) : SRGB;
   // In the Lytro look the sliders come after the curve.
   const linearLook = lytro ? null : look;
   const lateLook = lytro ? look : null;
@@ -576,7 +577,7 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
       p[0] = table[R | 0] / 255;
       p[1] = table[G | 0] / 255;
       p[2] = table[B | 0] / 255;
-      lytroColor(p, sat);
+      lytroColor(p, sat, !!lytro.exact);
       let r1 = 255 * p[0];
       let g1 = 255 * p[1];
       let b1 = 255 * p[2];

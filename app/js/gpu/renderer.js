@@ -18,7 +18,7 @@ import { ENGINE_USM, rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckle
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
-import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP } from '../core/base.js';
+import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP, ENGINE_SPLINE } from '../core/base.js';
 import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX, BACK_PROJECTION_EDGE, depthEdgeMask, RAY_MATCH, depthFilter } from '../core/superres.js';
 import { LAMBDA_TO_ALPHA } from '../core/recipe.js';
 
@@ -1036,9 +1036,23 @@ float lytroCurve(float v) {
   return mix(uLytroCurve[i], uLytroCurve[i + 1], t - float(i));
 }
 
+// The engine's tone spline (core/base.js ENGINE_SPLINE) and sRGB.
+uniform int uLytroExact;
+const float TK[13] = float[13](${ENGINE_SPLINE.x.map((v) => v.toFixed(9)).join(', ')});
+const float TA[13] = float[13](${ENGINE_SPLINE.a.map((v) => v.toFixed(9)).join(', ')});
+const float TB[13] = float[13](${ENGINE_SPLINE.b.map((v) => v.toFixed(9)).join(', ')});
+const float TC[13] = float[13](${ENGINE_SPLINE.c.map((v) => v.toFixed(9)).join(', ')});
+const float TD[13] = float[13](${ENGINE_SPLINE.d.map((v) => v.toFixed(9)).join(', ')});
+float engineTone(float x) {
+  float v = floor(clamp(x, 0.0, 1.0) * 4095.0 + 0.5) / 4095.0;
+  int i = 0;
+  for (int k = 1; k < 13; k++) if (v >= TK[k]) i = k;
+  float t = v - TK[i];
+  return ((TD[i] * t + TC[i]) * t + TB[i]) * t + TA[i];
+}
 vec3 encodeOut(vec3 c) {
   if (uLytro == 0) return vec3(srgb(c.r), srgb(c.g), srgb(c.b));
-  vec3 s = vec3(lytroCurve(c.r), lytroCurve(c.g), lytroCurve(c.b));
+  vec3 s = uLytroExact == 1 ? vec3(srgb(engineTone(c.r)), srgb(engineTone(c.g)), srgb(engineTone(c.b))) : vec3(lytroCurve(c.r), lytroCurve(c.g), lytroCurve(c.b));
   // Color per hue (lytroColor in core/base.js).
   float u = 0.70710678 * (s.r - s.g);
   float v = 0.40824829 * (s.r + s.g - 2.0 * s.b);
@@ -1046,7 +1060,7 @@ vec3 encodeOut(vec3 c) {
   float t = atan(v, u) / 6.28318531 * 12.0;
   if (t < 0.0) t += 12.0;
   int i = int(floor(t)) % 12;
-  vec2 k = uLytroSat * mix(uLytroHue[i], uLytroHue[(i + 1) % 12], fract(t));
+  vec2 k = uLytroSat * (uLytroExact == 1 ? vec2(1.0, 0.0) : mix(uLytroHue[i], uLytroHue[(i + 1) % 12], fract(t)));
   float du = u * k.x - v * k.y - u;
   float dv = u * k.y + v * k.x - v;
   vec3 q = s + vec3(0.70710678 * du + 0.40824829 * dv, -0.70710678 * du + 0.40824829 * dv, -0.81649658 * dv);
@@ -3896,6 +3910,7 @@ export class GpuRenderer {
     gl.uniform3fv(P.u.uLutMin, this.lut ? this.lut.min : [0, 0, 0]);
     gl.uniform3fv(P.u.uLutMax, this.lut ? this.lut.max : [1, 1, 1]);
     gl.uniform1i(P.u.uLytro, lytro ? 1 : 0);
+    gl.uniform1i(P.u.uLytroExact, lytro && lytro.exact ? 1 : 0);
     if (lytro) {
       gl.uniform1fv(P.u.uLytroCurve, LYTRO_CURVE);
       gl.uniform1f(P.u.uLytroSat, lytro.saturation ?? 1);
