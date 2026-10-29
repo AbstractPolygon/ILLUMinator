@@ -1540,8 +1540,16 @@ function depthViews() {
     const u = q.u + (dv && dv.off ? dv.off[0] * pitch : 0);
     const v = q.v + (dv && dv.off ? dv.off[1] * pitch : 0);
     const raw = renderDisc(u, v, (globalThis.__lytro || {}).viewAp ?? 0);
-    return { u, v, rgb: state.gpu ? raw : equalize(raw), gain: 1, detail: state.settings.detail };
+    return { u, v, rgb: state.gpu || DEPTH_PASSES.engineView ? raw : equalize(raw), gain: 1, detail: state.settings.detail };
   });
+}
+
+// The colour matrix of the engine's depth views (its final image pipeline: camera colour matrix on the engine's colour units, then the HDTV gamma).
+function engineViewMatrix() {
+  const ccm = state.lf && state.lf.cam && state.lf.cam.ccm;
+  const o = globalThis.__lytro || {};
+  if (o.engineView === false || state.pp || !state.engineScale || !Array.isArray(ccm) || ccm.length !== 9) return null;
+  return ccm.map((v, i) => v * state.engineScale[i % 3]);
 }
 
 // The Lytro-style depth (core/depthmatch.js): on the GPU when there is one,
@@ -1562,6 +1570,8 @@ function measureLytro(progress) {
   // no brightness curve and no smoothing (its cost cap 0.2, blown-out level 0.95 and flat level 0.15 are in those units).
   Object.assign(DEPTH_LCOST, { gamma: 1, normQ: 0, fixedTop: state.dev.clip || 1 });
   DEPTH_PASSES.noisy = (globalThis.__lytro || {}).noisy ?? 0.075;
+  DEPTH_PASSES.engineView = engineViewMatrix();
+  if ((globalThis.__lytro || {}).printGrid) console.error("ENGINEVIEW", JSON.stringify(DEPTH_PASSES.engineView));
   {
     // debug overrides of the estimator's constants
     const o = globalThis.__lytro || {};

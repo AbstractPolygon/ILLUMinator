@@ -9,6 +9,8 @@
 import { crossArms, aggregateCross, flatness, trwsVolume, bestDepth, depthColorGuide, median3, DEPTH_CBCA, DEPTH_EDGE, DEPTH_TRWS, DEPTH_LCOST } from './depth.js';
 
 export const DEPTH_PASSES = {
+  // 3x3 colour matrix (row-major) of the engine's depth views; null: linear views.
+  engineView: null,
   on: false,
   // Trial depths: whole lambda steps (LAMBDA_ALPHA alpha each) from `first` to `top`.
   first: -35,
@@ -100,8 +102,31 @@ function boxBlur3(img, w, h, r) {
 }
 
 // Color images the cost compares: gamma, scaled by the center view's top value.
+// The engine renders its depth views through the final image pipeline with the colour matrix and the HDTV gamma (type 3, RefocusCommon::resetParameters), clamped to 0..1 (GammaFunctionHDTV, 0x1003b7730): 4.5 x below 0.018, else 1.099 x^0.45 - 0.099.
+export function hdtvGamma(x) {
+  const y = x <= 0.018 ? 4.5 * x : 1.099 * Math.pow(x, 0.45) - 0.099;
+  return y < 0 ? 0 : y > 1 ? 1 : y;
+}
+
+function engineViewColors(views, n, matrix) {
+  const colors = views.map((v) => {
+    const out = new Float32Array(n * 3);
+    const g = v.gain;
+    for (let i = 0; i < n; i++) {
+      const r = v.rgb[3 * i] * g;
+      const gg = v.rgb[3 * i + 1] * g;
+      const b = v.rgb[3 * i + 2] * g;
+      for (let k = 0; k < 3; k++) out[3 * i + k] = hdtvGamma(matrix[3 * k] * r + matrix[3 * k + 1] * gg + matrix[3 * k + 2] * b);
+    }
+    return out;
+  });
+  matchColor(colors, Math.floor(views.length / 2), n);
+  return colors;
+}
+
 export function viewColors(views, n, w, h) {
   const mid = Math.floor(views.length / 2);
+  if (DEPTH_PASSES.engineView) return engineViewColors(views, n, DEPTH_PASSES.engineView);
   const linear = views.map((v) => {
     const out = new Float32Array(n * 3);
     for (let i = 0; i < n * 3; i++) out[i] = Math.max(0, v.rgb[i] * v.gain);
