@@ -703,3 +703,9 @@ bilateral on a / b 39-56% (best of 36 parameter sets), so an approximation would
 (96 px tiles with 40 px overlap, worker threads), control-flow obfuscated (state mutation around every call, scrambled vtables) and stripped (1398 functions, biggest
 10 KB; entry points `NIFilter` 0x180003980 -> `FUN_180018130`), so reading the algorithm and the camera noise profiles is a separate large job. Ghidra project:
 `scratchpad/ni/proj` (import done, function / string lists in `scratchpad/ni`). Probe tools: `tntrun/rec_edof_nonr.json` (the default recipe with both NR sliders at 0).
+
+### Zoom-step "residual shift": none (it was the scorer)
+With the frame and size fixes, the engine and the app were rendered at a constant depth of lambda 0 and 25 (`--depth-in`, a flat 541 x 376 map) on b4-1 and b4-2. A phase correlation of the two
+2022 x 1404 pictures, without any registration step, finds them aligned to 0.00-0.07 px in all nine tiles (centre and corners) on both photos, at both depths. The 0.3-0.6 px
+"shift" that `score_gt.py` / `linscore.py` print is a bias of their affine registration (it warps about the picture centre in pixel-corner coordinates), not an offset between the
+pictures; it is the same at lambda 0 and 25 (b4-2: -0.5 and -0.6), so the old "depth-proportional shift" of zoom-step photos was only the old frame and size. Geometry is closed.
