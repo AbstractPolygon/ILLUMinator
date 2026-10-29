@@ -87,6 +87,20 @@ function channelGains(obj, fallback) {
 // Collects everything needed from the (ILLUM or first generation) metadata.
 // Works with a missing or partial metadata object by falling back to defaults
 // for the camera the image size identifies.
+// Black level (raw counts of 1023) by analog gain: the engine's four points, piecewise linear between them, constant beyond.
+const ILLUM_BLACK = [[1, 64.08], [2, 64.87], [4, 65.12], [8, 66.39]];
+export function illumBlackLevel(gain) {
+  if (gain <= ILLUM_BLACK[0][0]) return ILLUM_BLACK[0][1];
+  for (let i = 1; i < ILLUM_BLACK.length; i++) {
+    if (gain <= ILLUM_BLACK[i][0]) {
+      const [x0, y0] = ILLUM_BLACK[i - 1];
+      const [x1, y1] = ILLUM_BLACK[i];
+      return y0 + ((y1 - y0) * (gain - x0)) / (x1 - x0);
+    }
+  }
+  return ILLUM_BLACK[ILLUM_BLACK.length - 1][1];
+}
+
 export function cameraInfo(metadata, fallbackLayout) {
   const md = metadata || {};
   const image = md.image || {};
@@ -104,7 +118,12 @@ export function cameraInfo(metadata, fallbackLayout) {
   const pixelFormat = first(image.pixelFormat, raw.pixelFormat, {});
   const max = 2 ** bits - 1;
   const defaultBlack = isFirstGen ? 168 : 64;
-  const black = channelGains(pixelFormat.black, [defaultBlack, defaultBlack, defaultBlack]);
+  let black = channelGains(pixelFormat.black, [defaultBlack, defaultBlack, defaultBlack]);
+  // The engine takes the ILLUM's black level from a table over the sensor's analog gain (InitializeBlackLevelOverridePointsBlitzenVersion1_1 read by Metadata::findBlackLevelFromLut);
+  // the metadata carries it rounded to a whole count.
+  const analogGain = get(md, 'devices', 'sensor', 'analogGain') || {};
+  const gainGr = first(analogGain.gr, analogGain.r);
+  if (!isFirstGen && Number.isFinite(gainGr) && !(globalThis.__lytro && globalThis.__lytro.noLutBlack)) black = black.map(() => illumBlackLevel(gainGr));
   const white = channelGains(pixelFormat.white, [max, max, max]);
 
   const color = image.color || {};
