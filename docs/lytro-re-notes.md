@@ -626,3 +626,4 @@ Engine: camera RGB in its linear units x the photo's colour matrix (ccm) -> the 
 
 ### Own-depth error anatomy (b4-1, combined style)
 Against the engine's depth in the picture's frame, about 54% of the absolute error lies within 2 px of depth edges (25% of pixels); the rest is a bias that grows toward near objects (our nearest depth reaches about -1.9 where the engine reaches -2.3: thin near wires). A global depth gain does not help (ownGain 0.92 / 1 / 1.17: fitted difference 1.35 / 1.36 / 1.42 against the engine's EXR), so the 0.82-0.85 slope is the thin-object and edge behaviour of the match, not a scale error. The engine matches on a regular grid with one sample per lens pitch in both axes (541 x 376); ours is at the row step (615 x 427).
+Matching on the engine's coarser grid (detail 0.866, about one sample per pitch) lowers the correlation with the engine's depth (0.909 against 0.928 at detail 1), so the raster spacing is not the cause of the own-depth gap.
