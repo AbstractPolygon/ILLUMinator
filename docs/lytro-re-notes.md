@@ -652,3 +652,14 @@ The engine corrects only the pixels of the camera's calibration list (HOTPIXEL.B
 
 ### Colour matrix by temperature (SensorCcm::getLinearlyBlendedCcm 0x1002f8330, LfeWhiteBalanceCct)
 The sensor metadata lists matrices at 2850, 4150 and 6500 K (`devices.sensor.perCcm`). The engine takes the one at or beyond either end, otherwise blends the entries just below and above the photo's temperature linearly (the computed white balance temperature, or the user's when the white balance is overridden). The photo's stored `image.color.ccm` is exactly that blend at the as-shot temperature (b4-1: 4982 K gives 2.37697 against the stored 2.37695). `blendedCcm` / `engineCcm` apply it to the exact colour path, so a changed white balance temperature moves the matrix as well as the gains.
+
+## Picture frame: the whole sensor, axes along the sensor
+
+Lytro Desktop's picture (2022×1404 for a 7728×5368 capture) is the whole sensor, aligned with the sensor's
+axes, not the lens grid's. One output pixel is `rowStep / scale` sensor pixels wide (scale 3.2366), and output
+pixel k has its centre at sensor position `(k + 0.5) * spacing - 0.5`. At a render scale s the splat position is
+`(l + 0.5) * s - 0.5`. Every render path now uses this frame: the sampler (`render.js`), CPU and GPU splats,
+the depth views, user depth lookups, the lattice phase and the GPU view pass. Against the engine's pre-adjust
+render, the fitted error on b4-1 went from 0.96 to 0.43, with scale 1.0158 -> 0.9999 and the shift at 0.
+One latent bug surfaced with it: after lens-centre calibration the pattern removal kept using the first pass's
+weights; it now takes the second pass's.

@@ -538,7 +538,8 @@ void main() {
   float nY = wt * (low + dl) + (1.0 - wt) * (low + (dl > 0.0 ? dl : 0.0));
   rgb += vec3(nY - Y);
   }
-  vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
+  // the picture's frame is the sensor's: the lens's place in it through the grid's turn and origin
+  vec2 lens = vec2((centreIdx.x - uMin.x) / uUnit, (centreIdx.y - uMin.y) / uUnit);
   float ru = u;
   float rv = v;
   if (uExact == 1) {
@@ -553,13 +554,17 @@ void main() {
     vec2 centre = centreIdx;
     vec4 wv = rayWarpAt(vec4(centre / uCam - 0.5, (u + uRayShift.x) / pitch, (v + uRayShift.y) / pitch));
     vec2 s = wv.xy * uCam;
-    lens += vec2(cosR * s.x + sinR * s.y, -sinR * s.x + cosR * s.y) / uUnit;
+    lens += s / uUnit;
     ru += (cosR * wv.z + sinR * wv.w) * pitch;
     rv += (-sinR * wv.z + cosR * wv.w) * pitch;
   }
   if (uExact == 0) {
     ru += uRayShift.x;
     rv += uRayShift.y;
+    // the direction from the lens array's axes into the frame's
+    vec2 fr = vec2(cosR * ru - sinR * rv, sinR * ru + cosR * rv);
+    ru = fr.x;
+    rv = fr.y;
   }
   // BackProjectDepthMap::RayTraceRegion
   float lam0 = sampleDepth(uDepthLo, lens) / LTA;
@@ -587,7 +592,7 @@ void main() {
   }
   if (!found) return;
   float a = lamR * LTA;
-  vec2 q = (lens - a * vec2(ru, rv)) * uScaleOut;
+  vec2 q = (lens - a * vec2(ru, rv) + 0.5) * uScaleOut - 0.5;
   vec2 f = floor(q);
   gl_Position = vec4(((f + 1.0) / vec2(uOutSize)) * 2.0 - 1.0, 0.0, 1.0);
   vQ = q;

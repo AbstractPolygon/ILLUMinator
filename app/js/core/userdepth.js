@@ -322,10 +322,8 @@ export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8,
   } else {
     e = userDepthAlphaUpscaled({ ...map, identity: true }, raster, cam, 0, null, factor, similar, level);
   }
-  const { outW, outH, grid, xMin, yMin } = sampler;
+  const { outW, outH, xMin, yMin } = sampler;
   const unit = sampler.spacing;
-  const cos = Math.cos(grid.rotation);
-  const sin = Math.sin(grid.rotation);
   const w5 = outW * factor;
   const h5 = outH * factor;
   const up = new Float32Array(w5 * h5);
@@ -334,8 +332,9 @@ export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8,
     const Y = yMin + ((J - c) / factor) * unit;
     for (let I = 0; I < w5; I++) {
       const X = xMin + ((I - c) / factor) * unit;
-      const sx = grid.ox + cos * X - sin * Y + 0.5;
-      const sy = grid.oy + sin * X + cos * Y + 0.5;
+      // the picture's frame is the sensor's
+      const sx = X + 0.5;
+      const sy = Y + 0.5;
       const ei = Math.min(e.width - 1, Math.max(0, Math.floor((sx / cam.width) * e.width)));
       const ej = Math.min(e.height - 1, Math.max(0, Math.floor((sy / cam.height) * e.height)));
       up[J * w5 + I] = e.data[ej * e.width + ei];

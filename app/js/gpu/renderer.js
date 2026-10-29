@@ -198,13 +198,15 @@ uniform sampler2D uLens;
 uniform ivec2 uLensSize;
 uniform ivec2 uLens0;
 uniform vec4 uGrid;     // pitch, rowStep
-uniform vec2 uMin;      // grid-local position of output pixel (0, 0)
+uniform vec2 uMin;      // sensor position of output pixel (0, 0) (the picture's frame is the sensor's)
+uniform vec4 uFrame;    // the lens grid: cos, sin of its turn and its origin on the sensor
 uniform float uSpacing; // sensor pixels per output pixel
 uniform float uKernel;  // kernel radius, sensor pixels
 uniform int uTrust;     // 1: alpha carries the samples' trust (refocus views)
 out vec4 outColor;
 void main() {
-  vec2 l = uMin + (gl_FragCoord.xy - 0.5) * uSpacing;
+  vec2 sp = uMin + (gl_FragCoord.xy - 0.5) * uSpacing - uFrame.zw;
+  vec2 l = vec2(uFrame.x * sp.x + uFrame.y * sp.y, -uFrame.y * sp.x + uFrame.x * sp.y);
   float pitch = uGrid.x;
   float rowStep = uGrid.y;
   float r2 = uKernel * uKernel;
@@ -228,7 +230,15 @@ void main() {
       wsum += w;
     }
   }
-  outColor = wsum > 0.0 ? sum / wsum : vec4(0.0, 0.0, 0.0, 1.0);
+  if (wsum <= 0.0) {
+    // beyond the outermost lenses (the picture reaches the sensor's edge): the nearest lens of the grid stands in
+    int r = clamp(int(floor(l.y / rowStep + 0.5)), uLens0.y, uLens0.y + uLensSize.y - 1);
+    float off = float(r & 1) * pitch * 0.5;
+    int c = clamp(int(floor((l.x - off) / pitch + 0.5)), uLens0.x, uLens0.x + uLensSize.x - 1);
+    sum = texelFetch(uLens, ivec2(c - uLens0.x, r - uLens0.y), 0);
+    wsum = 1.0;
+  }
+  outColor = sum / wsum;
   if (uTrust == 0) outColor.a = 1.0;
 }`;
 
@@ -1324,7 +1334,8 @@ void main() {
   float dv = v - uUV0.y;
   float conf = (1.0 - (u * u + v * v) / (uRUse * uRUse)) * (uInv2a2 > 0.0 ? exp(-(du * du + dv * dv) * uInv2a2) : 1.0);
   if (conf < 1e-3) return;
-  vec2 lens = vec2((lensX - uMin.x) / uUnit, (lensY - uMin.y) / uUnit);
+  // the picture's frame is the sensor's: the lens's place in it through the grid's turn and origin
+  vec2 lens = vec2((uOrigin.x + uGrid.z * lensX - uGrid.w * lensY - uMin.x) / uUnit, (uOrigin.y + uGrid.w * lensX + uGrid.z * lensY - uMin.y) / uUnit);
   float alpha = uAllInFocus == 1 ? depthAt(lens * uDetail) : uAlpha;
   // The ray as the camera really made it (core/superres.js).
   vec2 duv = vec2(du, dv);
@@ -1334,9 +1345,11 @@ void main() {
     vec4 wv = rayWarpAt(vec4(pos, u / pitch, v / pitch));
     vec2 sh = wv.xy * uImage;
     if (uRayCentre == 0) sh -= rayWarpAt(vec4(pos, 0.0, 0.0)).xy * uImage;
-    lens += vec2(uGrid.z * sh.x + uGrid.w * sh.y, -uGrid.w * sh.x + uGrid.z * sh.y) / uUnit;
+    lens += sh / uUnit;
     duv += vec2(uGrid.z * wv.z + uGrid.w * wv.w, -uGrid.w * wv.z + uGrid.z * wv.w) * pitch;
   }
+  // the direction from the lens array's axes into the frame's
+  duv = vec2(uGrid.z * duv.x - uGrid.w * duv.y, uGrid.w * duv.x + uGrid.z * duv.y);
   if (uAllInFocus == 1) {
     // Each ray at the depth of the surface it meets (core/superres.js).
     float a1 = depthAt((lens - alpha * duv) * uDetail);
@@ -1361,7 +1374,7 @@ void main() {
       float ebest = 1e9;
       float abest = alpha;
       for (int k = 0; k < 3; k++) {
-        vec2 q = warpForward((lens - cands[k] * duv) * uOutScale + 0.5) - 0.5;
+        vec2 q = warpForward((lens - cands[k] * duv + 0.5) * uOutScale) - 0.5;
         ivec2 qi = ivec2(floor(q + 0.5));
         float e = 1e9;
         if (qi.x >= uReach && qi.y >= uReach && qi.x < uOutSize.x - uReach && qi.y < uOutSize.y - uReach) {
@@ -1378,7 +1391,7 @@ void main() {
       alpha = abest;
     }
   }
-  vec2 o = (lens - alpha * duv) * uOutScale;
+  vec2 o = (lens - alpha * duv + 0.5) * uOutScale - 0.5;
   o = warpForward(o + 0.5) - 0.5;
   ivec2 pp = ivec2(floor(o + 0.5));
   if (pp.x < uReach || pp.y < uReach || pp.x >= uOutSize.x - uReach || pp.y >= uOutSize.y - uReach) return;
@@ -1435,7 +1448,7 @@ void main() {
     int k = uCandStart + j;
     if (k >= side * side) break;
     vec2 c = vec2(float(k / side - uReachCand), float(k % side - uReachCand)) * uStep;
-    float d = vY - estAt(warpForward((vLens - vAlpha * (vD - c)) * uOutScale + 0.5) - 0.5);
+    float d = vY - estAt(warpForward((vLens - vAlpha * (vD - c) + 0.5) * uOutScale) - 0.5);
     e[j] = vConf * d * d;
   }
   outColor = e;
@@ -1659,10 +1672,13 @@ uniform vec2 uMin;
 uniform float uUnit;
 uniform float uScale;
 uniform vec2 uLattice;  // pitch, rowStep
+uniform vec4 uFrameG;   // the lens grid: cos, sin of its turn and its origin on the sensor
 vec2 phaseAt(vec2 k) {
   k = warpSource(k + 0.5) - 0.5;
-  float ly = uMin.y + (k.y / uScale) * uUnit;
-  float lx = uMin.x + (k.x / uScale) * uUnit;
+  // the picture's frame is the sensor's: its position on the lens grid
+  vec2 sp = vec2(uMin.x + ((k.x + 0.5) / uScale - 0.5) * uUnit, uMin.y + ((k.y + 0.5) / uScale - 0.5) * uUnit) - uFrameG.zw;
+  float lx = uFrameG.x * sp.x + uFrameG.y * sp.y;
+  float ly = -uFrameG.y * sp.x + uFrameG.x * sp.y;
   float fj = ly / uLattice.y;
   float fi = (lx - fj * uLattice.x * 0.5) / uLattice.x;
   return vec2(fract(fi), fract(fj));
@@ -2475,6 +2491,7 @@ export class GpuRenderer {
     gl.uniform2i(P.view.u.uLens0, sampler.lenses.c0, sampler.lenses.r0);
     gl.uniform4f(P.view.u.uGrid, sampler.grid.pitch, sampler.grid.rowStep, 0, 0);
     gl.uniform2f(P.view.u.uMin, sampler.xMin, sampler.yMin);
+    gl.uniform4f(P.view.u.uFrame, sampler.frame.cos, sampler.frame.sin, sampler.frame.ox, sampler.frame.oy);
     gl.uniform1f(P.view.u.uSpacing, sampler.spacing);
     gl.uniform1f(P.view.u.uKernel, sampler.kernel * sampler.grid.pitch);
     gl.uniform1i(P.view.u.uTrust, layer === undefined ? 0 : 1);
@@ -3641,6 +3658,7 @@ export class GpuRenderer {
       gl.uniform1f(Q.u.uUnit, p.unit);
       gl.uniform1f(Q.u.uScale, p.scale);
       gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+      gl.uniform4f(Q.u.uFrameG, Math.cos(g.rotation), Math.sin(g.rotation), g.ox, g.oy);
       this.setWarp(Q.u, p, W, H);
       gl.bindVertexArray(this.emptyVao);
       gl.enable(gl.BLEND);
@@ -3694,6 +3712,7 @@ export class GpuRenderer {
       gl.uniform1f(Q.u.uUnit, p.unit);
       gl.uniform1f(Q.u.uScale, p.scale);
       gl.uniform2f(Q.u.uLattice, g.pitch, g.rowStep);
+      gl.uniform4f(Q.u.uFrameG, Math.cos(g.rotation), Math.sin(g.rotation), g.ox, g.oy);
       this.setWarp(Q.u, p, W, H);
       this.draw();
       [sharp, next] = [next, sharp];

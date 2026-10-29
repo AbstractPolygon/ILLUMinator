@@ -2,7 +2,7 @@
 // Requests: { id, type, ...args }. Replies: { id, type: 'result' | 'progress' | 'frame' | 'error', ... }.
 
 import { decodeLightField } from './core/decode.js';
-import { normalizeGrid, measureGrid, calibrateGrid, lensCenters, lensCenter } from './core/lenslet.js';
+import { normalizeGrid, measureGrid, calibrateGrid, lensCenters, lensCenter, toLocal } from './core/lenslet.js';
 import {
   buildSampler, renderView, makeDevelopParams, apertureSamples, refocus,
   colorMatrix, autoExposure, toneMap, sensorToOutput, viewSizes,
@@ -933,7 +933,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
-    raw: lf.raw, cam: lf.cam, dev, grid: exactGeo ? engineLatticeIdx(lf) : probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampleGrid: lf.grid, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
+    raw: lf.raw, cam: lf.cam, dev, grid: exactGeo ? engineLatticeIdx(lf) : probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => progress('Splatting the rays', p),
@@ -1312,11 +1312,8 @@ function samplingAt(x0, y0, w, h, scale, alpha, allInFocus) {
   const { rUse, sigma, reach, unit, xMin, yMin, detail } = superResParams(sampler, { scale });
   const cos = Math.cos(g.rotation);
   const sin = Math.sin(g.rotation);
-  const toLens = (x, y) => {
-    const dx = x - g.ox;
-    const dy = y - g.oy;
-    return [((cos * dx + sin * dy) - xMin) / unit, ((-sin * dx + cos * dy) - yMin) / unit];
-  };
+  // the picture's frame is the sensor's
+  const toLens = (x, y) => [(x - xMin) / unit, (y - yMin) / unit];
   const corners = [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]].map(([x, y]) => toLens(x, y));
   const bx0 = Math.min(...corners.map((c) => c[0]));
   const by0 = Math.min(...corners.map((c) => c[1]));
@@ -1360,8 +1357,8 @@ function samplingAt(x0, y0, w, h, scale, alpha, allInFocus) {
     const c = lenses.c0 + (k % lenses.cols);
     const lensX = c * g.pitch + (r & 1) * g.pitch * 0.5;
     const lensY = r * g.rowStep;
-    const lu = (lensX - xMin) / unit;
-    const lv = (lensY - yMin) / unit;
+    const lu = (lx0 - xMin) / unit;
+    const lv = (ly0 - yMin) / unit;
     const a = depth ? depthAt(lu, lv) : alpha;
     for (let y = Math.ceil(ly0 - rUse); y <= Math.floor(ly0 + rUse); y++) {
       if (y < 2 || y >= height - 2) continue;
@@ -1561,7 +1558,7 @@ async function prepareEngineViews(id) {
   const sp = lytroSplat({
     modulation: state.modulation,
     geoTable: parseGeometryTable(lf.geometryBytes),
-    raw: lf.raw, cam: lf.cam, dev, grid: engineLatticeIdx(lf), sampleGrid: lf.grid, sampler, vignetting: state.vignetting, depth: new Float32Array(W * H), scale: 1, lens: null, W, H,
+    raw: lf.raw, cam: lf.cam, dev, grid: engineLatticeIdx(lf), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: new Float32Array(W * H), scale: 1, lens: null, W, H,
     rayWarp: (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }),
   }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: null, views, sensorRaster: raster, ...(dbg.splat || {}) });
@@ -1768,10 +1765,8 @@ function fieldPlacedGrid(alpha, w, h, sign, exact = false) {
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       // sensor position of this output pixel's lens-plane point (grid axes -> sensor)
-      const lx = xMin + x * unit;
-      const ly = yMin + y * unit;
-      const sx = g.ox + cosR * lx - sinR * ly;
-      const sy = g.oy + sinR * lx + cosR * ly;
+      const sx = xMin + x * unit;
+      const sy = yMin + y * unit;
       const cell = rw.lens(sx / cam.width - 0.5, sy / cam.height - 0.5);
       rw.fromLens(cell, 0, 0, out4);
       let dxp = out4[0] * cam.width;
@@ -1788,6 +1783,7 @@ function fieldPlacedGrid(alpha, w, h, sign, exact = false) {
         // the depth of this texel was seen from the lens's physical centre, which sits offset from the grid's by the exact lens offsets
         const off = state.exactOffsets;
         if (off) {
+          const [lx, ly] = toLocal(g, sx, sy);
           const li = lensIndex(off, g, lx, ly);
           if (li >= 0) {
             dxp += off.dx[li];
@@ -1795,8 +1791,9 @@ function fieldPlacedGrid(alpha, w, h, sign, exact = false) {
           }
         }
       }
-      const ox = (cosR * dxp + sinR * dyp) / unit;
-      const oy = (-sinR * dxp + cosR * dyp) / unit;
+      // the picture's frame is the sensor's
+      const ox = dxp / unit;
+      const oy = dyp / unit;
       const X = Math.min(w - 1.001, Math.max(0, x - sign * ox));
       const Y = Math.min(h - 1.001, Math.max(0, y - sign * oy));
       const x0 = Math.floor(X);

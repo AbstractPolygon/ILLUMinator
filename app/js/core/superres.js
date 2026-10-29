@@ -15,7 +15,7 @@
 
 import { geometryAt } from './geometrytable.js';
 import { lensWarp } from './lens.js';
-import { lensRange, lensCenter } from './lenslet.js';
+import { lensRange, lensCenter, toLocal } from './lenslet.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
 
 const BINS = 17;
@@ -391,7 +391,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     return { focusOffset, metrics };
   }
 
-  const { accY, wsum } = splat(null, 0);
+  let { accY, wsum } = splat(null, 0);
 
   // The depth at every output pixel, for the depth `rayDepth` (rebuilt when
   // edge snapping switches it).
@@ -494,7 +494,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           cell = rayWarp.lens(cx / width - 0.5, cy / height - 0.5);
         }
         if (allInFocus && depth) {
-          lensAlpha = sampleDepth(rayDepth, bw, bh, ((lensX - xMin) / unit) * detail, ((lensY - yMin) / unit) * detail);
+          lensAlpha = sampleDepth(rayDepth, bw, bh, ((cosR * lensX - sinR * lensY + g.ox - xMin) / unit) * detail, ((sinR * lensX + cosR * lensY + g.oy - yMin) / unit) * detail);
         }
       }
       const ch = dev.cfa[y & 1][x & 1];
@@ -517,8 +517,9 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       const dv = v - v0;
       const conf = DISC.flat ? (u * u + v * v < rUse * rUse ? 1 : 0) : (1 - (u * u + v * v) / (rUse * rUse)) * (inv2a2 ? Math.exp(-(du * du + dv * dv) * inv2a2) : 1);
       if (conf < 1e-3) return;
-      let lx = (lensX - xMin) / unit;
-      let ly = (lensY - yMin) / unit;
+      // The picture's frame is the sensor's (whole sensor, axes along it): the lens's place in it, and the ray's direction turned from the lens array's axes into it.
+      let lx = (cosR * lensX - sinR * lensY + g.ox - xMin) / unit;
+      let ly = (sinR * lensX + cosR * lensY + g.oy - yMin) / unit;
       let rdu = du;
       let rdv = dv;
       if (cell && rayWarp) {
@@ -532,10 +533,15 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           sx -= centreOut[0] * width;
           sy -= centreOut[1] * height;
         }
-        lx += (cosR * sx + sinR * sy) / unit;
-        ly += (-sinR * sx + cosR * sy) / unit;
+        lx += sx / unit;
+        ly += sy / unit;
         rdu += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch;
         rdv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch;
+      }
+      {
+        const fdu = cosR * rdu - sinR * rdv;
+        rdv = sinR * rdu + cosR * rdv;
+        rdu = fdu;
       }
       let rayAlpha = lensAlpha;
       if (allInFocus && depth && RAY_MARCH.on) {
@@ -561,8 +567,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         if (hi - lo > RAY_MATCH.gap * LAMBDA_TO_ALPHA) {
           const value = Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch] * gain;
           const miss = (a) => {
-            let qx = (lx - a * rdu) * scale;
-            let qy = (ly - a * rdv) * scale;
+            let qx = (lx - a * rdu + 0.5) * scale - 0.5;
+            let qy = (ly - a * rdv + 0.5) * scale - 0.5;
             if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
             const qi = Math.round(qy) * W + Math.round(qx);
             if (!(qx >= reach && qy >= reach && qx < W - reach && qy < H - reach)) return Infinity;
@@ -582,8 +588,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           rayAlpha = best;
         }
       }
-      let ox = (lx - rayAlpha * rdu) * scale;
-      let oy = (ly - rayAlpha * rdv) * scale;
+      let ox = (lx - rayAlpha * rdu + 0.5) * scale - 0.5;
+      let oy = (ly - rayAlpha * rdv + 0.5) * scale - 0.5;
       if (warp) [ox, oy] = warp.forward(ox + 0.5, oy + 0.5).map((q) => q - 0.5);
       const px = Math.round(ox);
       const py = Math.round(oy);
@@ -591,7 +597,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       // Visibility: a ray from a surface farther than the one the picture
       // shows where it lands is hidden behind it, and would only mix far
       // color into the edge of the near object, lens by lens.
-      if (allInFocus && depth && OCCLUSION.on && rayAlpha - sampleDepth(rayDepth, bw, bh, (ox / scale) * detail, (oy / scale) * detail) > OCCLUSION.tol) return;
+      if (allInFocus && depth && OCCLUSION.on && rayAlpha - sampleDepth(rayDepth, bw, bh, ((ox + 0.5) / scale - 0.5) * detail, ((oy + 0.5) / scale - 0.5) * detail) > OCCLUSION.tol) return;
       // Brightness estimate from this one color sample and the local color.
       const lp = py * W + px;
       const c = up[3 * lp + ch];
@@ -608,8 +614,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         pos[2 * lens + 1] = lensY;
         for (let k = 0; k < deltas.length; k++) {
           const a = lensAlpha + deltas[k];
-          let qx = (lx - a * rdu) * scale;
-          let qy = (ly - a * rdv) * scale;
+          let qx = (lx - a * rdu + 0.5) * scale - 0.5;
+          let qy = (ly - a * rdv + 0.5) * scale - 0.5;
           if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
           const qi = Math.round(qy) * W + Math.round(qx);
           if (!(qx >= reach && qy >= reach && qx < W - reach && qy < H - reach)) continue;
@@ -625,7 +631,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         if (lens < 0) return;
         const { cand, est, err } = probe;
         for (let k = 0; k < cand.length; k++) {
-          const e = yEst - sampleBilinear(est, W, H, ...landing((lx - rayAlpha * (rdu - cand[k][0])) * scale, (ly - rayAlpha * (rdv - cand[k][1])) * scale));
+          const e = yEst - sampleBilinear(est, W, H, ...landing((lx - rayAlpha * (rdu - cand[k][0]) + 0.5) * scale - 0.5, (ly - rayAlpha * (rdv - cand[k][1]) + 0.5) * scale - 0.5));
           err[lens * cand.length + k] += conf * e * e;
         }
         return;
@@ -741,6 +747,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     lensOffsets = chooseLensOffsets(table, cand, err);
     const r = splat(null, 0);
     for (let p = 0; p < W * H; p++) sharpY[p] = (r.accY[p] + upY[p] * lambda) / (r.wsum[p] + lambda);
+    ({ accY, wsum } = r);
   }
   if (globalThis.__depthProbe && allInFocus && depth) {
     const hook = globalThis.__depthProbe;
@@ -1280,8 +1287,8 @@ function removeLatticePattern(sharpY, upY, focus, wsum, W, H, { g, xMin, yMin, u
       k = sx - 0.5;
       j = sy - 0.5;
     }
-    const ly = yMin + (j / scale) * unit;
-    const lx = xMin + (k / scale) * unit;
+    // the picture's frame is the sensor's: its position on the lens grid
+    const [lx, ly] = toLocal(g, xMin + ((k + 0.5) / scale - 0.5) * unit, yMin + ((j + 0.5) / scale - 0.5) * unit);
     const fj = ly / g.rowStep;
     const fi = (lx - fj * g.pitch * 0.5) / g.pitch;
     return [fi - Math.floor(fi), fj - Math.floor(fj)];

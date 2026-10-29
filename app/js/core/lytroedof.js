@@ -902,8 +902,9 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
         dg.cnt[rr]++;
       }
     }
-    let lx = (lensX - xMin) / unit;
-    let ly = (lensY - yMin) / unit;
+    // the picture's frame is the sensor's (a lens-array position goes through the grid's turn and origin)
+    let lx = (cosR * lensX - sinR * lensY + g.ox - xMin) / unit;
+    let ly = (sinR * lensX + cosR * lensY + g.oy - yMin) / unit;
     let ru = u;
     let rv = v;
     const lx0 = lx;
@@ -946,8 +947,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       }
       const sx = warpOut[0] * cam.width;
       const sy = warpOut[1] * cam.height;
-      lx += (cosR * sx + sinR * sy) / unit;
-      ly += (-sinR * sx + cosR * sy) / unit;
+      lx += sx / unit;
+      ly += sy / unit;
       const dus = opts.duScale ?? 1;
       ru += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch * dus;
       rv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch * dus;
@@ -955,8 +956,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     if (viewHits) {
       // lambda 0: every ray of the window lands at its lens (the ray table's origin applied), bilinear into each view that holds it
       // opts.sensorRaster: the engine's own raster for its depth work, texel (i, j) of W x H centred at ((i + 0.5) / W, (j + 0.5) / H) of the sensor's edge frame
-      const qx = opts.sensorRaster ? ((cxm + warpOut[0] * cam.width + 0.5) / cam.width) * W - 0.5 : lx * scale;
-      const qy = opts.sensorRaster ? ((cym + warpOut[1] * cam.height + 0.5) / cam.height) * H - 0.5 : ly * scale;
+      const qx = opts.sensorRaster ? ((cxm + warpOut[0] * cam.width + 0.5) / cam.width) * W - 0.5 : (lx + 0.5) * scale - 0.5;
+      const qy = opts.sensorRaster ? ((cym + warpOut[1] * cam.height + 0.5) / cam.height) * H - 0.5 : (ly + 0.5) * scale - 0.5;
       const x0 = Math.floor(qx);
       const y0 = Math.floor(qy);
       const fx = qx - x0;
@@ -992,6 +993,10 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     if (!ex) {
       ru += rayShift[0] + (opts.ruOff || 0);
       rv += rayShift[1] + (opts.rvOff || 0);
+      // the direction from the lens array's axes into the picture's frame (the sensor's)
+      const fu = cosR * ru - sinR * rv;
+      rv = sinR * ru + cosR * rv;
+      ru = fu;
     }
     if (opts.vScale) rv *= opts.vScale;
     // opts.plainMarch: a depth measured here is in the frame of the plain rays (the lens centres and straight rays); hit it with those and splat the engine's corrected ones.
@@ -1025,8 +1030,9 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       pv = (opts.perspSwap ? opts.persp[0] : opts.persp[1]) * sg[1] * g.pitch;
     }
     const aPivot = LAMBDA_TO_ALPHA * (opts.dispScale || 1) * (opts.pivot || 0);
-    let qx = (lx - a * (ru - pu) - aPivot * pu + (opts.posX || 0)) * scale;
-    let qy = (ly - a * (rv - pv) - aPivot * pv + (opts.posY || 0)) * scale;
+    // output pixel k at `scale` is at the picture frame's position (k + 0.5) / scale - 0.5 (in output pixels of the unscaled frame)
+    let qx = (lx - a * (ru - pu) - aPivot * pu + (opts.posX || 0) + 0.5) * scale - 0.5;
+    let qy = (ly - a * (rv - pv) - aPivot * pv + (opts.posY || 0) + 0.5) * scale - 0.5;
     if (warp) [qx, qy] = warp.forward(qx + 0.5, qy + 0.5).map((q) => q - 0.5);
     const x0 = Math.floor(qx);
     const y0 = Math.floor(qy);

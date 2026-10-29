@@ -21,25 +21,26 @@ const TAPS = 8;
 // within `kernel` lens pitches treats every direction alike instead.
 // Output pixels are spaced `rowStep / detail` sensor pixels apart along the
 // (de-rotated) lens grid axes.
-// Grid-local extent covered by complete lens neighbourhoods, and the output
-// size at `detail`.
-function samplerExtent(lenses, grid, detail) {
-  const { r0, r1, c0, c1 } = lenses;
+// The picture frame is the engine's: the whole sensor, axes along the sensor's, one output pixel per `rowStep / detail` sensor pixels, output pixel (X, Y)
+// centred at the sensor edge position ((X + 0.5) * spacing, (Y + 0.5) * spacing), i.e. at pixel-index position (X + 0.5) * spacing - 0.5 (Lytro Desktop's
+// 2022 x 1404 picture on the ILLUM). `frame` takes a grid-local lens position (lx, ly) to its sensor position: x = ox + cos * lx - sin * ly, y = oy + sin * lx + cos * ly.
+function samplerExtent(lenses, grid, detail, cam) {
   const spacing = grid.rowStep / detail;
-  const xMin = c0 * grid.pitch + 2 * grid.pitch;
-  const xMax = c1 * grid.pitch - 2 * grid.pitch;
-  const yMin = (r0 + 1) * grid.rowStep;
-  const yMax = (r1 - 2) * grid.rowStep;
-  const outW = Math.max(1, Math.floor((xMax - xMin) / spacing));
-  const outH = Math.max(1, Math.floor((yMax - yMin) / spacing));
-  return { spacing, xMin, xMax, yMin, yMax, outW, outH };
+  const outW = Math.max(1, Math.round(cam.width / spacing));
+  const outH = Math.max(1, Math.round(cam.height / spacing));
+  const xMin = 0.5 * spacing - 0.5;
+  const yMin = 0.5 * spacing - 0.5;
+  return { spacing, xMin, xMax: xMin + outW * spacing, yMin, yMax: yMin + outH * spacing, outW, outH };
+}
+
+export function frameOf(grid) {
+  return { cos: Math.cos(grid.rotation), sin: Math.sin(grid.rotation), ox: grid.ox, oy: grid.oy };
 }
 
 // View size (pixels) at each `detail`, without building a sampler.
 export function viewSizes(grid, cam, details) {
-  const lenses = lensCenters(grid, cam.width, cam.height);
   return Object.fromEntries(details.map((d) => {
-    const { outW, outH } = samplerExtent(lenses, grid, d);
+    const { outW, outH } = samplerExtent(null, grid, d, cam);
     return [d, [outW, outH]];
   }));
 }
@@ -59,8 +60,8 @@ export function buildSampler(grid, cam, detail = 1, kernel = 1.0, offsets = null
       }
     }
   }
-  const { cols, r0, c0 } = lenses;
-  const { spacing, xMin, xMax, yMin, yMax, outW, outH } = samplerExtent(lenses, grid, detail);
+  const { cols, rows, r0, c0 } = lenses;
+  const { spacing, xMin, xMax, yMin, yMax, outW, outH } = samplerExtent(lenses, grid, detail, cam);
   const idx = new Int32Array(outW * outH * TAPS);
   const wts = new Float32Array(outW * outH * TAPS);
   const radius = kernel * grid.pitch;
@@ -68,19 +69,25 @@ export function buildSampler(grid, cam, detail = 1, kernel = 1.0, offsets = null
   const half = grid.pitch / 2;
   const candI = new Int32Array(16);
   const candW = new Float32Array(16);
+  const rEnd = r0 + rows - 1;
+  const cEnd = c0 + cols - 1;
   let o = 0;
   for (let Y = 0; Y < outH; Y++) {
-    const ly = yMin + Y * spacing;
-    const ra = Math.floor(ly / grid.rowStep);
+    const sy = yMin + Y * spacing;
     for (let X = 0; X < outW; X++, o += TAPS) {
-      const lx = xMin + X * spacing;
+      const sx = xMin + X * spacing;
+      // the output pixel's place on the lens grid
+      const [lx, ly] = toLocal(grid, sx, sy);
+      const ra = Math.floor(ly / grid.rowStep);
       let n = 0;
       for (let r = ra - 1; r <= ra + 2; r++) {
+        if (r < r0 || r > rEnd) continue;
         const dy = ly - r * grid.rowStep;
         if (dy * dy >= r2) continue;
         const off = (r & 1) * half;
         const cc = Math.round((lx - off) / grid.pitch);
         for (let c = cc - 1; c <= cc + 1; c++) {
+          if (c < c0 || c > cEnd) continue;
           const dx = lx - (c * grid.pitch + off);
           const d2 = dx * dx + dy * dy;
           if (d2 >= r2) continue;
@@ -89,6 +96,14 @@ export function buildSampler(grid, cam, detail = 1, kernel = 1.0, offsets = null
           candW[n] = q * q;
           n++;
         }
+      }
+      if (n === 0) {
+        // Beyond the outermost lenses (the picture reaches the sensor's edge): the nearest lens of the grid stands in.
+        const r = Math.min(rEnd, Math.max(r0, Math.round(ly / grid.rowStep)));
+        const c = Math.min(cEnd, Math.max(c0, Math.round((lx - (r & 1) * half) / grid.pitch)));
+        candI[0] = (r - r0) * cols + (c - c0);
+        candW[0] = 1;
+        n = 1;
       }
       // Keep the strongest taps and normalize.
       let sum = 0;
@@ -108,15 +123,14 @@ export function buildSampler(grid, cam, detail = 1, kernel = 1.0, offsets = null
       for (let k = 0; k < TAPS; k++) wts[o + k] /= sum || 1;
     }
   }
-  return { grid, lenses, outW, outH, idx, wts, taps: TAPS, spacing, detail, xMin, yMin, kernel };
+  return { grid, frame: frameOf(grid), lenses, outW, outH, idx, wts, taps: TAPS, spacing, detail, xMin, yMin, kernel };
 }
 
 // Maps a sensor position to output image coordinates (used by the UI to draw
 // the grid overlay and by tests).
 export function sensorToOutput(sampler, x, y) {
-  const { grid, spacing } = sampler;
-  const [lx, ly] = toLocal(grid, x, y);
-  return [(lx - sampler.xMin) / spacing, (ly - sampler.yMin) / spacing];
+  const { spacing } = sampler;
+  return [(x - sampler.xMin) / spacing, (y - sampler.yMin) / spacing];
 }
 
 // Prepares per-channel normalization so samplers do not need the metadata.
