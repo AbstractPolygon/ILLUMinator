@@ -826,7 +826,7 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
     // One reference view's depth over `labels` (linear: first + k * step).
     const measureView = (r, labels, weights, refine, behind = false) => {
       const K = labels.length;
-      const guide = depthColorGuide(Float32Array.from(views[r].rgb, (x) => x * views[r].gain));
+      const guide = DEPTH_PASSES.engineView && !DEPTH_PASSES.sqrtGuide ? colors[r] : depthColorGuide(Float32Array.from(views[r].rgb, (x) => x * views[r].gain));
       upload2D(work, guideTex, guide, 3);
       let Q = pr.arms;
       fullscreen(Q, armsTex);

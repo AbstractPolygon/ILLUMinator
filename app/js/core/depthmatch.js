@@ -272,7 +272,8 @@ function costVolume(colors, views, r, alphas, w, h, hidden, behind) {
 // (1 visible, 0 hidden) and `behind` (1 where the other view's pixel is hidden from the reference).
 function measureView(colors, views, r, alphas, w, h, weights, refine = false, behind = null) {
   const n = w * h;
-  const guide = depthColorGuide(Float32Array.from(views[r].rgb, (x) => x * views[r].gain));
+  // The engine computes the arms, the flatness and the smoothness weights on the view image its cost compares (gamma domain, colour matched), whose thresholds are in those units.
+  const guide = DEPTH_PASSES.engineView && !DEPTH_PASSES.sqrtGuide ? colors[r] : depthColorGuide(Float32Array.from(views[r].rgb, (x) => x * views[r].gain));
   const arms = crossArms(guide, w, h, DEPTH_CBCA);
   const flat = DEPTH_EDGE.on ? flatness(guide, w, h, DEPTH_EDGE) : null;
   const hidden = weights ? weights.map((m) => (m ? Float32Array.from(m, (x) => 1 - x) : null)) : null;
