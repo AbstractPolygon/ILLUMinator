@@ -90,3 +90,33 @@ test('sharpening radius grows with pixels per lens so big renders look the same'
   assert.equal(detailForSize(p, 2460, 615).radius, 2);
   assert.equal(detailForSize(null, 2460, 615), null);
 });
+
+test('engine unsharp mask: per-lambda tables, gain table and the parameter map', async () => {
+  const { engineUsmMap, engineUnsharp, totalGain, ENGINE_USM } = await import('../app/js/core/detail.js');
+  // the tables are the engine's, piecewise linear: radius 0.36 in focus, 0.4 far out; amount 0.5 at lambda -3, 0.45 at -8; gain 3.0 at 1, 1.7 at 32
+  const flat = (l, gain) => engineUsmMap(new Float32Array(4).fill(l), 2, 2, gain).data;
+  const near = flat(-3, 1);
+  assert.ok(Math.abs(near[0] - 0.36) < 1e-6 && Math.abs(near[1] - 0.5 * 3.0) < 1e-6, `${near[0]} ${near[1]}`);
+  assert.ok(Math.abs(flat(-20, 1)[0] - 0.4) < 1e-6);
+  assert.ok(Math.abs(flat(-6, 8)[1] - 0.47 * (2 + (1.7 - 2) * (8 - 3) / 29)) < 1e-5);
+  // total gain: analog gain, digital gain only above ISO 640
+  assert.equal(totalGain({ capture: { analogGain: 8, iso: 80 } }), 8);
+  assert.equal(totalGain({ capture: { analogGain: 1, iso: 1280 } }), 2);
+  assert.equal(totalGain({}), 1);
+  // a step edge gains overshoot on both sides, a flat picture is untouched, and a weaker gain-8 amount overshoots less
+  const w = 2022; // the engine's width: the blur is about 1.4 px
+  const h = 4;
+  const edge = () => {
+    const px = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) px.set([i % w < w / 2 ? 90 : 160, i % w < w / 2 ? 90 : 160, i % w < w / 2 ? 90 : 160, 255], 4 * i);
+    return px;
+  };
+  const a = engineUnsharp(edge(), w, h, 1, engineUsmMap(null, 1, 1, 1));
+  const b = engineUnsharp(edge(), w, h, 1, engineUsmMap(null, 1, 1, 8));
+  const row = (px) => [px[4 * (w / 2 - 1)], px[4 * (w / 2)]];
+  assert.ok(row(a)[0] < 90 && row(a)[1] > 160, `${row(a)}`);
+  assert.ok(row(b)[0] > row(a)[0] && row(b)[1] < row(a)[1]);
+  const flatPx = new Uint8ClampedArray(w * h * 4).fill(120);
+  assert.deepEqual([...engineUnsharp(flatPx.slice(), w, h, 1, null)], [...flatPx]);
+  assert.equal(ENGINE_USM.threshold, 0.4);
+});

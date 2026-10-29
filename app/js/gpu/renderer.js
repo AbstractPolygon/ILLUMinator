@@ -14,7 +14,7 @@
 // Results are read back as linear RGB (Float32Array, w * h * 3) so the rest
 // of the pipeline (depth of field, defringing, tone mapping) is unchanged.
 
-import { ENGINE_USM, rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
+import { ENGINE_USM, engineUsmMap, rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
@@ -679,24 +679,36 @@ const USM_COMMON = `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D uSrc;
+uniform sampler2D uMap;   // per-pixel (radius in lens pitches, amount) over the picture, read bilinearly
+uniform float uPitch;     // picture width in lens pitches^-1: pixels per lens pitch
 vec3 decode(vec3 v) { return mix(pow((v + 0.055) / 1.055, vec3(2.4)), v / 12.92, lessThanEqual(v, vec3(0.04045))); }
 float labF(float t) { return t > 0.008856 ? pow(t, 1.0 / 3.0) : 7.787037 * t + 0.137931; }
 float lum(vec3 c) { return 116.0 * labF(dot(decode(c), vec3(0.2126729, 0.7151522, 0.0721750))) - 16.0; }
+vec2 mapAt(vec2 frag, vec2 size) {
+  ivec2 ms = textureSize(uMap, 0);
+  vec2 f = clamp((frag / size) * vec2(ms) - 0.5, vec2(0.0), max(vec2(ms) - 1.001, vec2(0.0)));
+  ivec2 i0 = ivec2(f);
+  vec2 t = f - vec2(i0);
+  ivec2 i1 = min(i0 + 1, ms - 1);
+  vec2 a = mix(texelFetch(uMap, i0, 0).rg, texelFetch(uMap, ivec2(i1.x, i0.y), 0).rg, t.x);
+  vec2 b = mix(texelFetch(uMap, ivec2(i0.x, i1.y), 0).rg, texelFetch(uMap, i1, 0).rg, t.x);
+  return mix(a, b, t.y);
+}
 out vec4 outColor;
 `;
 const USM_BLUR = `${USM_COMMON}
 uniform ivec2 uAxis;
-uniform float uSigma;
-uniform int uRadius;
-uniform int uDecode;  // 1: the source is the picture (take its luminance), 0: already luminance
+uniform int uDecode;  // 1: the source is the picture (take its lightness), 0: already lightness
 void main() {
   ivec2 size = textureSize(uSrc, 0);
   ivec2 p = ivec2(gl_FragCoord.xy);
+  float sigma = max(round(mapAt(gl_FragCoord.xy, vec2(size)).x * uPitch * 64.0) / 64.0, 0.05);
+  int radius = int(ceil(2.6 * sigma));
   float sum = 0.0;
   float ws = 0.0;
   for (int i = -40; i <= 40; i++) {
-    if (i < -uRadius || i > uRadius) continue;
-    float w = exp(-0.5 * float(i * i) / (uSigma * uSigma));
+    if (i < -radius || i > radius) continue;
+    float w = exp(-0.5 * float(i * i) / (sigma * sigma));
     vec4 c = texelFetch(uSrc, clamp(p + uAxis * i, ivec2(0), size - 1), 0);
     sum += w * (uDecode == 1 ? lum(c.rgb) : c.r);
     ws += w;
@@ -722,7 +734,8 @@ void main() {
   float fY = labF(xyz.y);
   float aa = 500.0 * (labF(xyz.x / 0.95047) - fY);
   float bb = 200.0 * (fY - labF(xyz.z / 1.08883));
-  float fN = (L + uAmount * core + 16.0) / 116.0;
+  float amount = mapAt(gl_FragCoord.xy, vec2(textureSize(uSrc, 0))).y * uAmount;
+  float fN = (L + amount * core + 16.0) / 116.0;
   float Yn = labFinv(fN);
   vec3 xyz2 = vec3(0.95047 * labFinv(fN + aa / 500.0), Yn, 1.08883 * labFinv(fN - bb / 200.0));
   outColor = vec4(encode(XYZ_SRGB * xyz2), 1.0);
@@ -3879,7 +3892,7 @@ export class GpuRenderer {
     return out;
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0 }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0, usm = null }) {
     const gl = this.gl;
     const P = this.programs.present;
     // Resizing reallocates the canvas: only when the size changes.
@@ -3945,25 +3958,32 @@ export class GpuRenderer {
       if (look.curve) gl.uniform1fv(P.u.uCurve, look.curve);
     }
     this.draw();
-    if (shot) this.engineUnsharp(shot, w, h, sharpen);
+    if (shot) this.engineUnsharp(shot, w, h, sharpen, usm);
     return this.canvas.transferToImageBitmap();
   }
   // The engine's unsharp mask (core/detail.js engineUnsharp) on a display picture held in `shot`, drawn to the canvas.
-  engineUnsharp(shot, w, h, sharpen) {
+  engineUnsharp(shot, w, h, sharpen, usm = null) {
     const gl = this.gl;
-    const sigma = (w / ENGINE_USM.lensColumns) * ENGINE_USM.radius;
-    const radius = Math.min(40, Math.ceil(2.6 * sigma));
+    const map = usm || engineUsmMap(null, 1, 1, 1);
+    if (!this.usmTex || this.usmTex.map !== map) {
+      if (this.usmTex) gl.deleteTexture(this.usmTex.tex);
+      const tex = this.texture(map.w, map.h, gl.RG32F);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, map.w, map.h, gl.RG, gl.FLOAT, map.data);
+      this.usmTex = { map, tex };
+    }
     const mid = this.scratch(w, h, 'usmMid');
     const blur = this.scratch(w, h, 'usmBlur');
-    let B = this.programs.usmBlur;
+    const B = this.programs.usmBlur;
     const pass = (from, to, axis, decode) => {
       this.target(to, w, h);
       gl.useProgram(B.p);
       gl.uniform1i(B.u.uSrc, 1);
       this.bindTex(1, from);
+      gl.uniform1i(B.u.uMap, 3);
+      this.bindTex(3, this.usmTex.tex);
+      gl.uniform1f(B.u.uPitch, w / ENGINE_USM.lensColumns);
       gl.uniform2i(B.u.uAxis, axis[0], axis[1]);
-      gl.uniform1f(B.u.uSigma, sigma);
-      gl.uniform1i(B.u.uRadius, radius);
       gl.uniform1i(B.u.uDecode, decode);
       this.draw();
     };
@@ -3977,9 +3997,10 @@ export class GpuRenderer {
     this.bindTex(1, shot);
     gl.uniform1i(A.u.uBlur, 2);
     this.bindTex(2, blur);
-    gl.uniform1f(A.u.uAmount, (globalThis.__usmAmount ?? ENGINE_USM.amount) * sharpen);
+    gl.uniform1i(A.u.uMap, 3);
+    this.bindTex(3, this.usmTex.tex);
+    gl.uniform1f(A.u.uAmount, sharpen);
     gl.uniform1f(A.u.uThreshold, ENGINE_USM.threshold);
     this.draw();
   }
-
 }

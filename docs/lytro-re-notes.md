@@ -680,3 +680,14 @@ sensor divided by the row step, rounded up so the picture covers the whole senso
 (2019 px) on photos whose row step is a little above nominal (b4-2), which looked like a +1 px x shift when scored.
 With ceil all photos are 2022 x 1404 and the fitted error against the pre-adjust renders is: b4-2 0.72 to 0.67,
 154bedc9 0.54 to 0.39, 5b8b8107 1.03 to 0.74; the remaining shift is 0.4 to 0.6 px in y (x is 0 to -0.1).
+
+### Unsharp mask: the engine's full parameterisation (replaces the single fitted amount)
+"Normalized Lab" in the engine's mask is L* / 100, so its soft threshold 0.004 is 0.4 L*: the L* reading and the engine's constants agree
+(a linear-Y reading, with threshold 0.004 on Y, fits worse at every amount: 1.67 against 1.21). Each pixel's blur and amount now come from the
+engine's baseline bank: sigma = r(lambda) lens pitches, amount = a(lambda) x G(total gain), the four-channel parameter map smoothed by a Gaussian of
+0.003 x the picture width, the blur level per pixel, masking 0. Tables (piecewise linear, in `ENGINE_USM`): r: 0.40 outside -12..12, 0.36 for -8..8, 0.38 at +-9;
+a: 0.40 outside -10..10, 0.45 at -8, 0.50 at -3, 0.45 at 0, 0.50 at 3, 0.45 at 8; G: 3.0 at gain 1, 2.0 at 3, 1.7 at 32, 1.0 at 120. Total gain = analog
+gain (metadata devices.sensor.analogGain) times the digital gain above ISO 640. The depth comes from the render's own depth (`state.usmDepth`); the CPU
+(`engineUnsharp` with an `engineUsmMap`) and the GPU (`USM_BLUR`/`USM_APPLY`, the map as an RG32F texture) agree within one level.
+Check on b4-1 with the engine's own depth: fitted error 1.23 (constant 1.5: 1.21), so the per-lambda tables change little at gain 1; the gain table is what
+matters on high-ISO photos (b4-2, gain 8: amount x0.65; fitted error 1.32 either way, edge ratio 1.043 against 1.065 for the gain-1 amount).

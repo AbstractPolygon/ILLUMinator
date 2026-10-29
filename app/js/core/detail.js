@@ -319,10 +319,74 @@ export function removeDust(rgb, w, h, p) {
   return out;
 }
 
-// The engine's unsharp mask (stage 5 of the engine read, SmoothlyVaryingUnsharpMaskImage at the ILLUM's baseline bank): on the picture after the tone curve and before the sRGB
-// encoding, a Gaussian unsharp mask of the Lab lightness L* (a and b untouched), sigma = 0.38 lens pitches (the picture is 7728 / 14.29 = 540.8 lens pitches wide), amount 1.5,
-// a soft threshold of 0.4 L*. Fitted against the engine's own render of b4-1 (no halo limiter: it fitted worse). `scale` scales the amount.
-export const ENGINE_USM = { amount: 1.5, radius: 0.38, threshold: 0.4, lensColumns: 540.8 };
+// The engine's unsharp mask (stage 5 of the engine read, SmoothlyVaryingUnsharpMaskImage with the ILLUM's baseline filter bank, RefocusEdof::computeUsmFilterBank): on the picture
+// after the tone curve and before the sRGB encoding, a Gaussian unsharp mask of the normalized Lab lightness L* / 100 (a and b untouched) with a soft threshold of 0.004 (0.4 L*).
+// Each pixel's blur radius and amount come from its depth lambda: sigma = radius(lambda) lens pitches (the picture is 7728 / 14.2899 = 540.8 lens pitches wide), amount =
+// amountMultiplier(lambda) x UnsharpAmountVsTotalGain(total gain); the parameter map is smoothed by a Gaussian of 0.003 x the picture's width. The engine's tables (piecewise
+// linear) are in ENGINE_USM; there is no halo limiter (the masking term is 0 at the baseline). `scale` scales the amount.
+export const ENGINE_USM = {
+  threshold: 0.4, // in L* (0.004 of the normalized lightness)
+  lensColumns: 540.8,
+  smooth: 0.003,
+  radius: [[-100, 0.4], [-12, 0.4], [-11, 0.4], [-10, 0.4], [-9, 0.38], [-8, 0.36], [-7, 0.36], [8, 0.36], [9, 0.38], [10, 0.4], [11, 0.4], [12, 0.4], [100, 0.4]],
+  amount: [[-100, 0.4], [-10, 0.4], [-8, 0.45], [-3, 0.5], [0, 0.45], [3, 0.5], [8, 0.45], [10, 0.4], [100, 0.4]],
+  gain: [[1, 3.0], [3, 2.0], [32, 1.7], [120, 1.0]],
+  lambda: -6, // the depth a picture without a depth map is taken to have
+};
+const tableAt = (t, x) => {
+  if (!(x > t[0][0])) return t[0][1];
+  for (let i = 1; i < t.length; i++) {
+    if (x <= t[i][0]) return t[i - 1][1] + ((t[i][1] - t[i - 1][1]) * (x - t[i - 1][0])) / (t[i][0] - t[i - 1][0]);
+  }
+  return t[t.length - 1][1];
+};
+// The sensor's total gain: the analog gain, times the digital gain above the ISO the analog gain covers (floor(8 x 80 + 0.5)).
+export function totalGain(cam) {
+  const capture = (cam && cam.capture) || {};
+  const analog = Number.isFinite(capture.analogGain) && capture.analogGain > 0 ? capture.analogGain : 1;
+  const iso = capture.iso;
+  return analog * (Number.isFinite(iso) && iso > 640 ? iso / 640 : 1);
+}
+// The parameter map: radius (lens pitches) and amount per pixel of a w x h grid, from lambda (a Float32Array, or null for one depth everywhere).
+export function engineUsmMap(lambda, w, h, gain = 1) {
+  const g = tableAt(ENGINE_USM.gain, gain);
+  const n = w * h;
+  const data = new Float32Array(2 * n);
+  for (let i = 0; i < n; i++) {
+    const l = lambda ? lambda[i] : ENGINE_USM.lambda;
+    data[2 * i] = tableAt(ENGINE_USM.radius, l);
+    data[2 * i + 1] = tableAt(ENGINE_USM.amount, l) * g;
+  }
+  const s = ENGINE_USM.smooth * w;
+  if (lambda && s > 0.3) {
+    const r = Math.ceil(2.6 * s);
+    const k = [];
+    let ks = 0;
+    for (let i = -r; i <= r; i++) {
+      const v = Math.exp(-0.5 * (i / s) ** 2);
+      k.push(v);
+      ks += v;
+    }
+    const tmp = new Float32Array(2 * n);
+    for (let c = 0; c < 2; c++) {
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let a = 0;
+          for (let i = -r; i <= r; i++) a += data[2 * (y * w + Math.min(w - 1, Math.max(0, x + i))) + c] * k[i + r];
+          tmp[2 * (y * w + x) + c] = a / ks;
+        }
+      }
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let a = 0;
+          for (let i = -r; i <= r; i++) a += tmp[2 * (Math.min(h - 1, Math.max(0, y + i)) * w + x) + c] * k[i + r];
+          data[2 * (y * w + x) + c] = a / ks;
+        }
+      }
+    }
+  }
+  return { w, h, data };
+}
 const XYZ_RGB = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
 const RGB_XYZ = [3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252];
 const SRGB_DEC = Float32Array.from({ length: 256 }, (_, i) => {
@@ -333,37 +397,64 @@ const srgbEnc = (x) => 255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1
 const labF = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787037 * t + 0.137931);
 const labFinv = (f) => (f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037);
 
-// px: RGBA bytes (w x h), changed in place.
-export function engineUnsharp(px, w, h, scale = 1) {
+// px: RGBA bytes (w x h), changed in place. `map` is an engineUsmMap (any size, read bilinearly over the picture) or null for the baseline at one depth.
+export function engineUnsharp(px, w, h, scale = 1, map = null) {
   if (!(scale > 0)) return px;
-  const sigma = (w / ENGINE_USM.lensColumns) * (globalThis.__usmRadius ?? ENGINE_USM.radius);
-  const r = Math.ceil(2.6 * sigma);
-  const g = [];
-  let gs = 0;
-  for (let i = -r; i <= r; i++) {
-    const v = Math.exp(-0.5 * (i / sigma) ** 2);
-    g.push(v);
-    gs += v;
-  }
+  const m = map || engineUsmMap(null, 1, 1, 1);
+  const pitchPx = w / ENGINE_USM.lensColumns;
   const n = w * h;
-  const Y = new Float32Array(n);
-  for (let i = 0; i < n; i++) Y[i] = 116 * labF(XYZ_RGB[3] * SRGB_DEC[px[4 * i]] + XYZ_RGB[4] * SRGB_DEC[px[4 * i + 1]] + XYZ_RGB[5] * SRGB_DEC[px[4 * i + 2]]) - 16;
+  const at = (x, y, c) => {
+    if (m.w === 1 && m.h === 1) return m.data[c];
+    const fx = Math.min(m.w - 1.001, Math.max(0, ((x + 0.5) / w) * m.w - 0.5));
+    const fy = Math.min(m.h - 1.001, Math.max(0, ((y + 0.5) / h) * m.h - 0.5));
+    const x0 = fx | 0;
+    const y0 = fy | 0;
+    const tx = fx - x0;
+    const ty = fy - y0;
+    const d = m.data;
+    const i = y0 * m.w + x0;
+    return (d[2 * i + c] * (1 - tx) + d[2 * (i + 1) + c] * tx) * (1 - ty) + (d[2 * (i + m.w) + c] * (1 - tx) + d[2 * (i + m.w + 1) + c] * tx) * ty;
+  };
+  const L = new Float32Array(n);
+  for (let i = 0; i < n; i++) L[i] = 116 * labF(XYZ_RGB[3] * SRGB_DEC[px[4 * i]] + XYZ_RGB[4] * SRGB_DEC[px[4 * i + 1]] + XYZ_RGB[5] * SRGB_DEC[px[4 * i + 2]]) - 16;
+  // Each pixel has its own sigma: one separable pass each way, the sigma read at the pixel being filtered.
+  const sig = new Float32Array(n);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sig[y * w + x] = at(x, y, 0) * pitchPx;
+  const cache = new Map();
+  const kernel = (s) => {
+    const key = Math.round(s * 64);
+    let k = cache.get(key);
+    if (!k) {
+      const sg = key / 64;
+      const r = Math.ceil(2.6 * sg);
+      const g = [];
+      let gs = 0;
+      for (let i = -r; i <= r; i++) {
+        const v = Math.exp(-0.5 * (i / sg) ** 2);
+        g.push(v);
+        gs += v;
+      }
+      cache.set(key, (k = { r, g, gs }));
+    }
+    return k;
+  };
   const T = new Float32Array(n);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
+      const { r, g, gs } = kernel(sig[y * w + x]);
       let a = 0;
-      for (let i = -r; i <= r; i++) a += Y[y * w + Math.min(w - 1, Math.max(0, x + i))] * g[i + r];
+      for (let i = -r; i <= r; i++) a += L[y * w + Math.min(w - 1, Math.max(0, x + i))] * g[i + r];
       T[y * w + x] = a / gs;
     }
   }
-  const amount = (globalThis.__usmAmount ?? ENGINE_USM.amount) * scale;
   const thr = ENGINE_USM.threshold;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      let a = 0;
-      for (let i = -r; i <= r; i++) a += T[Math.min(h - 1, Math.max(0, y + i)) * w + x] * g[i + r];
       const i = y * w + x;
-      const d = Y[i] - a / gs;
+      const { r, g, gs } = kernel(sig[i]);
+      let a = 0;
+      for (let j = -r; j <= r; j++) a += T[Math.min(h - 1, Math.max(0, y + j)) * w + x] * g[j + r];
+      const d = L[i] - a / gs;
       const core = Math.abs(d) >= thr ? d - Math.sign(d) * thr : 0;
       if (core === 0) continue;
       const o = 4 * i;
@@ -376,7 +467,7 @@ export function engineUnsharp(px, w, h, scale = 1) {
       const fY = labF(Yc);
       const aa = 500 * (labF(X / 0.95047) - fY);
       const bb = 200 * (fY - labF(Z / 1.08883));
-      const fN = (Y[i] + amount * core + 16) / 116;
+      const fN = (L[i] + at(x, y, 1) * scale * core + 16) / 116;
       const Yn = labFinv(fN);
       const X2 = 0.95047 * labFinv(fN + aa / 500);
       const Z2 = 1.08883 * labFinv(fN - bb / 200);

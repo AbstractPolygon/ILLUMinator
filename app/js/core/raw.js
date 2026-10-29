@@ -192,6 +192,7 @@ export function cameraInfo(metadata, fallbackLayout) {
     capture: {
       time: get(md, 'devices', 'clock', 'zuluTime'),
       iso: first(image.iso, get(md, 'devices', 'sensor', 'iso')),
+      analogGain: Number.isFinite(gainGr) ? gainGr : undefined,
       exposure: first(shutter.frameExposureDuration, shutter.pixelExposureDuration),
       fNumber: lens.fNumber,
       focalLength: lens.focalLength,

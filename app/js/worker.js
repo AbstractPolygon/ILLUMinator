@@ -23,7 +23,7 @@ import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, d
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
-import { makeDetail, applyDetail, detailForSize, engineUnsharp } from './core/detail.js';
+import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -265,6 +265,15 @@ function lensColumns() {
 
 // Linear camera RGB (w x h) -> displayable RGBA bytes.
 // `cs`: the color pass to use (colorState), the photo's by default.
+// The engine's unsharp-mask parameters over the picture: from the depth of the last render (per pixel), else the baseline at one depth.
+function usmMap() {
+  if (!state.usmMap) {
+    const d = state.usmDepth;
+    state.usmMap = d ? engineUsmMap(d.lambda, d.w, d.h, totalGain(state.lf && state.lf.cam)) : engineUsmMap(null, 1, 1, totalGain(state.lf && state.lf.cam));
+  }
+  return state.usmMap;
+}
+
 function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
   rgb = applyDetail(rgb, w, h, detailForSize(state.detail, w, lensColumns()));
   rgb = subtractVeil(rgb, w, h, cs.veil, cs.veilAmount);
@@ -275,7 +284,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
   // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
   if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
   const grade = state.lut ? { lut: state.lut, amount: cs.settings.lutAmount ?? 1 } : null;
-  const sharp = (px) => (state.detail && state.detail.engine && !state.pp ? engineUnsharp(px, w, h, state.detail.engine) : px);
+  const sharp = (px) => (state.detail && state.detail.engine && !state.pp ? engineUnsharp(px, w, h, state.detail.engine, usmMap()) : px);
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return sharp(toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade, cs.lytro));
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = cs.matrix;
@@ -343,6 +352,7 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
     local: packed,
     lytro: cs.lytro,
     sharpen: state.detail && state.detail.engine && !state.pp ? state.detail.engine : 0,
+    usm: state.detail && state.detail.engine && !state.pp ? usmMap() : null,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
@@ -490,6 +500,8 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     rebuildSampler();
     // The engine's colour units for this photo (from its modulation frame), for the engine's colour pipeline; without the frame the Lytro look stays.
     state.engineScale = null;
+    state.usmDepth = null;
+    state.usmMap = null;
     if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
       try {
         state.modulation = await state.lf.readModulation();
@@ -883,6 +895,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   }
   if (dbg.printGrid) console.error('DEPTHPATH', JSON.stringify({ exactDepth, engineShift, ownField, hasOffsets: !!state.exactOffsets, fromLytro: !!(state.depthRaw && state.depthRaw.fromLytro), pp: !!state.pp, userDepth: !!state.userDepth }));
   const depthUsed = exactDepth ? Float32Array.from(state.depthExact.plain, (x) => x + (dbg.shiftConst ?? 0) * LAMBDA_TO_ALPHA) : engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
+  state.usmMap = null;
+  state.usmDepth = state.pp ? null : { lambda: Float32Array.from(depthUsed, (a) => a / LAMBDA_TO_ALPHA), w: state.sampler.outW, h: state.sampler.outH };
   let depth5 = null;
   if (!state.userDepth && !state.pp && dbg.own5) {
     // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
