@@ -808,6 +808,9 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   // from lens to lens but not its mean, which is a viewpoint shift of the whole picture (b4-1: -0.0186, -0.0063 pitches): near objects sit 1 to 3 px off the engine's.
   const rayShift = [0, 0];
   const ex = !!opts.exact && !!geoTable && !!rayWarp;
+  const views = opts.views || null;
+  const viewHits = views && ex ? new Uint8Array(views.length) : null;
+  const viewAcc = viewHits ? views.map(() => new Float32Array(W * H * 4)) : null;
   const pitchY = g.rowStep / 0.8660254037844386;
   const ratioX = cosR * g.pitch - sinR * pitchY;
   const ratioY = cosR * pitchY + sinR * g.pitch;
@@ -843,7 +846,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && !viewHits && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
@@ -866,8 +869,20 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       geometryAt(geoTable, (cxm + 0.5) / cam.width - 0.5, (cym + 0.5) / cam.height - 0.5, geoOut);
       eu = u / g.pitch - geoOut[0];
       ev = v / pitchY - geoOut[1];
-      const au = Math.abs(eu);
-      if (Math.max(au, (au + Math.sqrt(3) * Math.abs(ev)) / 2) > opts.aperture / 2) return;
+      if (viewHits) {
+        // the depth views: each is a circular window (ShiftedAperture(CircularAperture(r), u, v)) on the direction after the geometry table
+        let any = false;
+        for (let k = 0; k < views.length; k++) {
+          const dx = eu - views[k].u;
+          const dy = ev - views[k].v;
+          viewHits[k] = dx * dx + dy * dy <= views[k].r2 ? 1 : 0;
+          if (viewHits[k]) any = true;
+        }
+        if (!any) return;
+      } else {
+        const au = Math.abs(eu);
+        if (Math.max(au, (au + Math.sqrt(3) * Math.abs(ev)) / 2) > opts.aperture / 2) return;
+      }
     } else if (hex) {
       // HexAperture::operator()(u, v): flat sides at |u| = apothem, corners on the v axis (u, v are in the lens array's own frame)
       // opts.apShift: the engine tests the window on the direction after the geometry table (centred on the table's mean shift)
@@ -936,6 +951,35 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       const dus = opts.duScale ?? 1;
       ru += (cosR * warpOut[2] + sinR * warpOut[3]) * g.pitch * dus;
       rv += (-sinR * warpOut[2] + cosR * warpOut[3]) * g.pitch * dus;
+    }
+    if (viewHits) {
+      // lambda 0: every ray of the window lands at its lens (the ray table's origin applied), bilinear into each view that holds it
+      // opts.sensorRaster: the engine's own raster for its depth work, texel (i, j) of W x H centred at ((i + 0.5) / W, (j + 0.5) / H) of the sensor's edge frame
+      const qx = opts.sensorRaster ? ((cxm + warpOut[0] * cam.width + 0.5) / cam.width) * W - 0.5 : lx * scale;
+      const qy = opts.sensorRaster ? ((cym + warpOut[1] * cam.height + 0.5) / cam.height) * H - 0.5 : ly * scale;
+      const x0 = Math.floor(qx);
+      const y0 = Math.floor(qy);
+      const fx = qx - x0;
+      const fy = qy - y0;
+      const rw = opts.modPow ? Math.pow(plane.mod[i], opts.modPow) : 1;
+      for (let k = 0; k < views.length; k++) {
+        if (!viewHits[k]) continue;
+        const A = viewAcc[k];
+        for (let j = 0; j < 2; j++) {
+          for (let kk = 0; kk < 2; kk++) {
+            const xx = x0 + kk;
+            const yy = y0 + j;
+            if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+            const w = (kk ? fx : 1 - fx) * (j ? fy : 1 - fy) * rw;
+            const pp = yy * W + xx;
+            A[4 * pp] += rgb[0] * w;
+            A[4 * pp + 1] += rgb[1] * w;
+            A[4 * pp + 2] += rgb[2] * w;
+            A[4 * pp + 3] += w;
+          }
+        }
+      }
+      return;
     }
     if (geoTable && opts.geoSign) {
       // GeometryErrorTable::CorrectLightfieldPoint: the cell's (u, v) is taken off the ray's direction (lens pitches, lens array axes).
@@ -1025,7 +1069,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     }
   }, onProgress);
   if (globalThis.__dumpSplatAcc) globalThis.__dumpSplatAcc(acc);
-  return { acc, W, H, zMap, stats: { rays: count, accepted } };
+  return { acc, W, H, zMap, views: viewAcc, stats: { rays: count, accepted } };
 }
 
 // ---- hole filling (FUN_180c5fa60 and the pyramid FUN_180c60140) -------------
