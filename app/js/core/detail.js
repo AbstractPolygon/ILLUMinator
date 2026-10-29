@@ -33,7 +33,10 @@ export function makeDetail(settings = {}) {
     speckle: (s.speckle || 0) / 100, // 0..1
     speckleSize: Math.max(1, Math.min(5, Math.round(s.speckleSize || 2))), // pixels
   };
-  return p.amount > 0 || p.luminance > 0 || p.color > 0 || p.dust > 0 || p.speckle > 0 ? p : null;
+  // The engine's own sharpening (Lytro Desktop's recipe path ignores the slider's size and only switches a fixed unsharp mask on): the slider's 25 is the engine's, other values scale it.
+  p.engine = settings.engineSharpen === true && settings.lytroLook !== false && p.amount > 0 ? Math.min(3, (s.amount || 0) / 25) : 0;
+  if (p.engine) p.amount = 0;
+  return p.engine > 0 || p.amount > 0 || p.luminance > 0 || p.color > 0 || p.dust > 0 || p.speckle > 0 ? p : null;
 }
 
 // Sharpening radius is set for a picture one pixel per lens wide (the view).
@@ -314,4 +317,73 @@ export function removeDust(rgb, w, h, p) {
     for (let c = 0; c < 3; c++) out[3 * i + c] = rgb[3 * i + c] * g;
   }
   return out;
+}
+
+// The engine's unsharp mask (stage 5 of the engine read, SmoothlyVaryingUnsharpMaskImage at the ILLUM's baseline bank): on the picture after the tone curve and before the sRGB
+// encoding, a Gaussian unsharp mask of the linear luminance Y of the normalized Lab (a and b untouched), sigma = 0.38 lens pitches (the picture is 7728 / 14.29 = 540.8 lens pitches
+// wide), amount 1.35 (3.0 x 0.45 at base gain), a soft threshold of 0.004. `scale` scales the amount.
+export const ENGINE_USM = { amount: 1.35, radius: 0.38, threshold: 0.004, lensColumns: 540.8 };
+const XYZ_RGB = [0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522, 0.0721750, 0.0193339, 0.1191920, 0.9503041];
+const RGB_XYZ = [3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252];
+const SRGB_DEC = Float32Array.from({ length: 256 }, (_, i) => {
+  const v = i / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+});
+const srgbEnc = (x) => 255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
+const labF = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787037 * t + 0.137931);
+const labFinv = (f) => (f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037);
+
+// px: RGBA bytes (w x h), changed in place.
+export function engineUnsharp(px, w, h, scale = 1) {
+  if (!(scale > 0)) return px;
+  const sigma = (w / ENGINE_USM.lensColumns) * (globalThis.__usmRadius ?? ENGINE_USM.radius);
+  const r = Math.ceil(2.6 * sigma);
+  const g = [];
+  let gs = 0;
+  for (let i = -r; i <= r; i++) {
+    const v = Math.exp(-0.5 * (i / sigma) ** 2);
+    g.push(v);
+    gs += v;
+  }
+  const n = w * h;
+  const Y = new Float32Array(n);
+  for (let i = 0; i < n; i++) Y[i] = XYZ_RGB[3] * SRGB_DEC[px[4 * i]] + XYZ_RGB[4] * SRGB_DEC[px[4 * i + 1]] + XYZ_RGB[5] * SRGB_DEC[px[4 * i + 2]];
+  const T = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let a = 0;
+      for (let i = -r; i <= r; i++) a += Y[y * w + Math.min(w - 1, Math.max(0, x + i))] * g[i + r];
+      T[y * w + x] = a / gs;
+    }
+  }
+  const amount = (globalThis.__usmAmount ?? ENGINE_USM.amount) * scale;
+  const thr = ENGINE_USM.threshold;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let a = 0;
+      for (let i = -r; i <= r; i++) a += T[Math.min(h - 1, Math.max(0, y + i)) * w + x] * g[i + r];
+      const i = y * w + x;
+      const d = Y[i] - a / gs;
+      const core = Math.abs(d) >= thr ? d - Math.sign(d) * thr : 0;
+      if (core === 0) continue;
+      const o = 4 * i;
+      const R = SRGB_DEC[px[o]];
+      const G = SRGB_DEC[px[o + 1]];
+      const B = SRGB_DEC[px[o + 2]];
+      const X = XYZ_RGB[0] * R + XYZ_RGB[1] * G + XYZ_RGB[2] * B;
+      const Yc = Y[i];
+      const Z = XYZ_RGB[6] * R + XYZ_RGB[7] * G + XYZ_RGB[8] * B;
+      const fY = labF(Yc);
+      const aa = 500 * (labF(X / 0.95047) - fY);
+      const bb = 200 * (fY - labF(Z / 1.08883));
+      const Yn = Math.max(0, Yc + amount * core);
+      const fN = labF(Yn);
+      const X2 = 0.95047 * labFinv(fN + aa / 500);
+      const Z2 = 1.08883 * labFinv(fN - bb / 200);
+      px[o] = srgbEnc(Math.min(1, Math.max(0, RGB_XYZ[0] * X2 + RGB_XYZ[1] * Yn + RGB_XYZ[2] * Z2)));
+      px[o + 1] = srgbEnc(Math.min(1, Math.max(0, RGB_XYZ[3] * X2 + RGB_XYZ[4] * Yn + RGB_XYZ[5] * Z2)));
+      px[o + 2] = srgbEnc(Math.min(1, Math.max(0, RGB_XYZ[6] * X2 + RGB_XYZ[7] * Yn + RGB_XYZ[8] * Z2)));
+    }
+  }
+  return px;
 }

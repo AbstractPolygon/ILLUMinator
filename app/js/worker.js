@@ -23,7 +23,7 @@ import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, d
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
-import { makeDetail, applyDetail, detailForSize } from './core/detail.js';
+import { makeDetail, applyDetail, detailForSize, engineUnsharp } from './core/detail.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -176,7 +176,7 @@ function updateColor() {
   const manual = awb ? awb.manual : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = (awb ? awb.auto : [1, 1, 1]).map((g, i) => g * manual[i]);
   state.look = makeLook(s);
-  state.detail = makeDetail(s);
+  state.detail = makeDetail({ ...s, engineSharpen: s.engineSharpen ?? !!(state.lf && state.lf.raw && !state.pp) });
   state.lens = lensParams(s.lens, state.lf && state.lf.cam);
   // Local adjustments: the masks that change something (or the one shown).
   const masks = parseMasks(s.local && s.local.masks);
@@ -258,7 +258,8 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
   // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
   if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
   const grade = state.lut ? { lut: state.lut, amount: cs.settings.lutAmount ?? 1 } : null;
-  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade, cs.lytro);
+  const sharp = (px) => (state.detail && state.detail.engine && !state.pp ? engineUnsharp(px, w, h, state.detail.engine) : px);
+  if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return sharp(toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade, cs.lytro));
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = cs.matrix;
   const srgb = new Float32Array(rgb.length);
@@ -270,7 +271,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro);
+  return sharp(toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro));
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -324,6 +325,7 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
     lutAmount: state.lut ? cs.settings.lutAmount ?? 1 : 0,
     local: packed,
     lytro: cs.lytro,
+    sharpen: state.detail && state.detail.engine && !state.pp ? state.detail.engine : 0,
   });
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
@@ -1980,7 +1982,7 @@ function updateProcessedColor() {
   // Processed pictures were finished by Lytro Desktop already.
   state.lytro = null;
   state.look = makeLook(s);
-  state.detail = makeDetail(s);
+  state.detail = makeDetail({ ...s, engineSharpen: s.engineSharpen ?? !!(state.lf && state.lf.raw && !state.pp) });
   applyAutoDefringe(center, pp.width, pp.height);
 }
 

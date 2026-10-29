@@ -14,7 +14,7 @@
 // Results are read back as linear RGB (Float32Array, w * h * 3) so the rest
 // of the pipeline (depth of field, defringing, tone mapping) is unchanged.
 
-import { rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
+import { ENGINE_USM, rangeSigma, chromaSigma, sharpenWindow, HALO_LIMIT, speckleThreshold, dustRadius, DUST_LOW, DUST_HIGH } from '../core/detail.js';
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
@@ -663,6 +663,60 @@ void main() {
 }`;
 
 // Details, pass 2: unsharp mask on sqrt brightness, then recombine.
+
+// The engine's unsharp mask on the picture after the tone curve (core/detail.js engineUnsharp): a Gaussian blur of the linear luminance, then the Lab luma sharpen with a and b kept.
+const USM_COMMON = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+vec3 decode(vec3 v) { return mix(pow((v + 0.055) / 1.055, vec3(2.4)), v / 12.92, lessThanEqual(v, vec3(0.04045))); }
+float lum(vec3 c) { return dot(decode(c), vec3(0.2126729, 0.7151522, 0.0721750)); }
+out vec4 outColor;
+`;
+const USM_BLUR = `${USM_COMMON}
+uniform ivec2 uAxis;
+uniform float uSigma;
+uniform int uRadius;
+uniform int uDecode;  // 1: the source is the picture (take its luminance), 0: already luminance
+void main() {
+  ivec2 size = textureSize(uSrc, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float sum = 0.0;
+  float ws = 0.0;
+  for (int i = -40; i <= 40; i++) {
+    if (i < -uRadius || i > uRadius) continue;
+    float w = exp(-0.5 * float(i * i) / (uSigma * uSigma));
+    vec4 c = texelFetch(uSrc, clamp(p + uAxis * i, ivec2(0), size - 1), 0);
+    sum += w * (uDecode == 1 ? lum(c.rgb) : c.r);
+    ws += w;
+  }
+  outColor = vec4(sum / ws, 0.0, 0.0, 1.0);
+}`;
+const USM_APPLY = `${USM_COMMON}
+uniform sampler2D uBlur;
+uniform float uAmount;
+uniform float uThreshold;
+float labF(float t) { return t > 0.008856 ? pow(t, 1.0 / 3.0) : 7.787037 * t + 0.137931; }
+float labFinv(float f) { return f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037; }
+vec3 encode(vec3 x) { x = clamp(x, 0.0, 1.0); return mix(1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, x * 12.92, lessThanEqual(x, vec3(0.0031308))); }
+const mat3 SRGB_XYZ = mat3(0.4124564, 0.2126729, 0.0193339, 0.3575761, 0.7151522, 0.1191920, 0.1804375, 0.0721750, 0.9503041);
+const mat3 XYZ_SRGB = mat3(3.2404542, -0.9692660, 0.0556434, -1.5371385, 1.8760108, -0.2040259, -0.4985314, 0.0415560, 1.0572252);
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 c = texelFetch(uSrc, p, 0);
+  vec3 xyz = SRGB_XYZ * decode(c.rgb);
+  float d = xyz.y - texelFetch(uBlur, p, 0).r;
+  float core = abs(d) >= uThreshold ? d - sign(d) * uThreshold : 0.0;
+  if (core == 0.0) { outColor = vec4(c.rgb, 1.0); return; }
+  float fY = labF(xyz.y);
+  float aa = 500.0 * (labF(xyz.x / 0.95047) - fY);
+  float bb = 200.0 * (fY - labF(xyz.z / 1.08883));
+  float Yn = max(0.0, xyz.y + uAmount * core);
+  float fN = labF(Yn);
+  vec3 xyz2 = vec3(0.95047 * labFinv(fN + aa / 500.0), Yn, 1.08883 * labFinv(fN - bb / 200.0));
+  outColor = vec4(encode(XYZ_SRGB * xyz2), 1.0);
+}`;
+
 const DETAIL_SHARPEN = `#version 300 es
 precision highp float;
 precision highp int;
@@ -2194,6 +2248,8 @@ export class GpuRenderer {
       detailMorph: program(gl, DETAIL_MORPH),
       detailDust: program(gl, DETAIL_DUST),
       detailSharpen: program(gl, DETAIL_SHARPEN),
+      usmBlur: program(gl, USM_BLUR),
+      usmApply: program(gl, USM_APPLY),
       present: program(gl, PRESENT),
       localSpatial: program(gl, LOCAL_SPATIAL),
       splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
@@ -3789,14 +3845,18 @@ export class GpuRenderer {
     return out;
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0 }) {
     const gl = this.gl;
     const P = this.programs.present;
     // Resizing reallocates the canvas: only when the size changes.
     if (this.canvas.width !== w) this.canvas.width = w;
     if (this.canvas.height !== h) this.canvas.height = h;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, w, h);
+    const shot = sharpen > 0 ? this.scratch(w, h, 'usmPicture') : null;
+    if (shot) this.target(shot, w, h);
+    else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, w, h);
+    }
     gl.useProgram(P.p);
     gl.uniform1i(P.u.uSrc, 1);
     this.bindTex(1, src);
@@ -3850,6 +3910,41 @@ export class GpuRenderer {
       if (look.curve) gl.uniform1fv(P.u.uCurve, look.curve);
     }
     this.draw();
+    if (shot) this.engineUnsharp(shot, w, h, sharpen);
     return this.canvas.transferToImageBitmap();
   }
+  // The engine's unsharp mask (core/detail.js engineUnsharp) on a display picture held in `shot`, drawn to the canvas.
+  engineUnsharp(shot, w, h, sharpen) {
+    const gl = this.gl;
+    const sigma = (w / ENGINE_USM.lensColumns) * ENGINE_USM.radius;
+    const radius = Math.min(40, Math.ceil(2.6 * sigma));
+    const mid = this.scratch(w, h, 'usmMid');
+    const blur = this.scratch(w, h, 'usmBlur');
+    let B = this.programs.usmBlur;
+    const pass = (from, to, axis, decode) => {
+      this.target(to, w, h);
+      gl.useProgram(B.p);
+      gl.uniform1i(B.u.uSrc, 1);
+      this.bindTex(1, from);
+      gl.uniform2i(B.u.uAxis, axis[0], axis[1]);
+      gl.uniform1f(B.u.uSigma, sigma);
+      gl.uniform1i(B.u.uRadius, radius);
+      gl.uniform1i(B.u.uDecode, decode);
+      this.draw();
+    };
+    pass(shot, mid, [1, 0], 1);
+    pass(mid, blur, [0, 1], 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    const A = this.programs.usmApply;
+    gl.useProgram(A.p);
+    gl.uniform1i(A.u.uSrc, 1);
+    this.bindTex(1, shot);
+    gl.uniform1i(A.u.uBlur, 2);
+    this.bindTex(2, blur);
+    gl.uniform1f(A.u.uAmount, (globalThis.__usmAmount ?? ENGINE_USM.amount) * sharpen);
+    gl.uniform1f(A.u.uThreshold, ENGINE_USM.threshold);
+    this.draw();
+  }
+
 }
