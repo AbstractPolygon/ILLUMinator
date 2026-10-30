@@ -159,6 +159,7 @@ function centerView() {
 }
 
 function asShotKelvin() {
+  if (globalThis.__lytro && globalThis.__lytro.cct) return globalThis.__lytro.cct;
   const c = state.lf && state.lf.cam && state.lf.cam.capture;
   return (c && c.cct) || DEFAULT_KELVIN;
 }
