@@ -201,6 +201,11 @@ export function cameraInfo(metadata, fallbackLayout) {
       // The lambda of an object at infinity: the depth labels reach three beyond its whole part.
       infinityLambda: lens.infinityLambda,
       dcfFile: get(md, 'picture', 'dcfFile'),
+      // The sensor's response to its calibration illuminant (normalizedResponses[0]): the engine's white balance corrects its colours with it.
+      responses: (() => {
+        const e = (get(md, 'devices', 'sensor', 'normalizedResponses') || [])[0];
+        return e && Number.isFinite(e.r) && Number.isFinite(e.b) ? [e.r, Number.isFinite(e.gr) ? e.gr : 1, e.b] : null;
+      })(),
       // Color temperature the camera's white balance was set for (kelvin).
       cct: first(get(md, 'algorithms', 'awb', 'computed', 'cct'), get(md, 'settings', 'whiteBalance', 'cct')),
     },

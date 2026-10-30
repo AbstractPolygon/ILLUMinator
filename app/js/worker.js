@@ -34,6 +34,7 @@ import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
 import { lytroSplat, engineColorScale, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
 import { fixHotPixels, blendedCcm } from './core/raw.js';
+import { awbImage, engineAwb } from './core/enginewb.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } from './core/lens.js';
@@ -215,10 +216,35 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 // are keyframed: `color` (main.js colorSettings) over the photo's settings.
 // Returns what toPixels and finishGpu read (the photo's own: `state`).
 // The engine's colour matrix for the photo's white balance temperature (blended from the sensor's matrices); the photo's own at the as-shot temperature.
+// The engine's own white balance for the photo (core/enginewb.js): its gains against the camera's and the temperature it blends the colour matrix at.
+function computeEngineWb() {
+  const { lf } = state;
+  const cam = lf && lf.cam;
+  const dbg = globalThis.__lytro || {};
+  if (!cam || !state.modulation || state.settings.engineWb === false || dbg.noEngineWb || dbg.legacy || !cam.capture || !cam.capture.responses || !cam.wb || !Number.isFinite(cam.capture.exposure)) return null;
+  try {
+    const W = Math.round(cam.width / lf.grid.pitch);
+    const H = Math.round(cam.height / lf.grid.pitch);
+    const image = awbImage(lf.raw, state.modulation, cam, state.dev, engineLatticeIdx(lf), W, H);
+    const res = engineAwb({ image, W, H, exposure: cam.capture.exposure, gain: cam.capture.analogGain || 1, responses: cam.capture.responses, camera: cam.wb });
+    const rel = res.gains.map((g, i) => g / cam.wb[i]);
+    if (dbg.logTime) console.error('ENGINE_WB', JSON.stringify(res.gains), 'camera', JSON.stringify(cam.wb), 'cct', Math.round(res.cct));
+    return { gains: res.gains, rel, cct: res.cct };
+  } catch (e) {
+    console.error('ENGINE_WB failed', e && e.message);
+    return null;
+  }
+}
+
+// The engine's gains over the camera's (depth views), when the white balance is the photo's own (not set by the user, not automatic).
+function engineWbRel(s) {
+  return state.engineWb && !(globalThis.__lytro && globalThis.__lytro.noWbRel) && !(s && s.wb && s.wb.kelvin) && !(s && s.autoWb) ? state.engineWb.rel : [1, 1, 1];
+}
+
 function engineCcm(s) {
   const cam = state.lf.cam;
   if (!cam.ccm) return cam.ccm;
-  const kelvin = s && s.wb && s.wb.kelvin ? s.wb.kelvin : asShotKelvin();
+  const kelvin = s && s.wb && s.wb.kelvin ? s.wb.kelvin : state.engineWb && !(globalThis.__lytro && globalThis.__lytro.noWbCct) && !(s && s.autoWb) ? state.engineWb.cct : asShotKelvin();
   return (globalThis.__lytro && globalThis.__lytro.asShotCcm) ? cam.ccm : blendedCcm(cam.perCcm, kelvin, cam.ccm);
 }
 
@@ -537,12 +563,14 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     rebuildSampler();
     // The engine's colour units for this photo (from its modulation frame), for the engine's colour pipeline; without the frame the Lytro look stays.
     state.engineScale = null;
+    state.engineWb = null;
     state.usmDepth = null;
     state.usmMap = null;
     if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
       try {
         state.modulation = await state.lf.readModulation();
         state.engineScale = state.modulation ? engineColorScale(state.modulation, state.lf.cam, state.dev, state.lf.grid) : null;
+        state.engineWb = state.modulation ? computeEngineWb() : null;
       } catch (e) {
         console.error('ENGINESCALE failed', e && e.message);
         state.modulation = undefined;
@@ -1617,6 +1645,7 @@ async function prepareEngineViews(id) {
   const radius = dbg.viewRadius ?? 0.06;
   const ring = dbg.viewRing ?? 0.25;
   const views = DEPTH_VIEW_RING.map((deg) => ({ deg, u: deg === null ? 0 : ring * Math.cos((deg * Math.PI) / 180), v: deg === null ? 0 : ring * Math.sin((deg * Math.PI) / 180), r2: radius * radius }));
+  if (dbg.viewOnly) views.splice(0, views.length, { deg: null, u: 0, v: 0, r2: dbg.viewOnly * dbg.viewOnly });
   // The engine measures depth on its own raster: one sample per lens pitch over the whole sensor (the standardized image over the pitch), texel (i, j) centred at ((i + 0.5) / W, (j + 0.5) / H) of the sensor.
   const raster = !dbg.noEngineRaster;
   const W = raster ? Math.round(lf.cam.width / lf.grid.pitch) : sampler.outW;
@@ -1651,6 +1680,7 @@ async function prepareEngineViews(id) {
     return { u: views[k].u * pitch, v: views[k].v * pitch, rgb, gain: 1, detail: state.settings.detail };
   });
   if (raster) list.raster = { w: W, h: H };
+  if (globalThis.__awbDump) globalThis.__awbDump(list, W, H);
   state.engineViews = list;
 }
 
@@ -1703,9 +1733,11 @@ function engineViewMatrix() {
   const ccm = state.lf && state.lf.cam && state.lf.cam.ccm;
   const o = globalThis.__lytro || {};
   if (o.engineView === false || state.pp || !state.engineScale || !Array.isArray(ccm) || ccm.length !== 9) return null;
+  // the views: the stored matrix (as-shot temperature) with the engine's gains over the camera's (b4-2 against the engine's views: colour error 0.0120 -> 0.0067); the final picture takes its matrix at the engine's temperature instead
   const cct = o.viewCct;
   const base = cct ? blendedCcm(state.lf.cam.perCcm, cct, ccm) : ccm;
-  return base.map((v, i) => v * state.engineScale[i % 3]);
+  const rel = engineWbRel(state.settings);
+  return base.map((v, i) => v * state.engineScale[i % 3] * rel[i % 3]);
 }
 
 // The Lytro-style depth (core/depthmatch.js): on the GPU when there is one,
