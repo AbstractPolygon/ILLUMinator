@@ -1597,7 +1597,7 @@ async function prepareEngineViews(id) {
   state.engineViews = null;
   const { lf, dev, sampler } = state;
   const dbg = globalThis.__lytro || {};
-  // Opt in (settings.engineViews or the debug hook): the views are rendered by the CPU ray splat, minutes on a full sensor; the GPU version is not written.
+  // Opt in (settings.engineViews or the debug hook): the views are rendered by the CPU ray splat, about a minute on a full sensor; the GPU version is not written. The combined style (the default) blends the classic depth and scores worse with them (b4-1 1.71 against 1.56); the match style with them is the engine's own (0.91).
   if (!lf || (!dbg.engineViews && !state.settings.engineViews) || dbg.legacy || dbg.noExact || state.pp || !lf.geometryBytes || !lf.rayWarpBytes || !lf.metadata) return;
   if (!state.vignetting) state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
@@ -1610,6 +1610,7 @@ async function prepareEngineViews(id) {
   const raster = !dbg.noEngineRaster;
   const W = raster ? Math.round(lf.cam.width / lf.grid.pitch) : sampler.outW;
   const H = raster ? Math.round(lf.cam.height / lf.grid.pitch) : sampler.outH;
+  const tViews = Date.now();
   const sp = lytroSplat({
     modulation: state.modulation,
     geoTable: parseGeometryTable(lf.geometryBytes),
@@ -1617,6 +1618,7 @@ async function prepareEngineViews(id) {
     rayWarp: (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }),
   }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: null, views, sensorRaster: raster, sharpen: { ...LYTRO_SPLAT.sharpen, amount: VIEW_SHARPEN }, ...(dbg.splat || {}) });
+  if (dbg.logTime) console.error('VIEWS_MS', Date.now() - tViews);
   const pitch = lf.grid.pitch;
   const list = sp.views.map((acc, k) => {
     const rgb = new Float32Array(W * H * 3);
