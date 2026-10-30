@@ -450,7 +450,7 @@ export function engineColorScale(modulation, cam, dev, g) {
   });
 }
 
-export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false) {
+export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
   plane.mod = new Float32Array(width * height);
@@ -499,7 +499,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
     }
     if (!(gain > 0)) return;
     let value = raw[i];
-    if (isDefect(raw, width, i)) {
+    if (!listedOnly && !(globalThis.__lytro && globalThis.__lytro.noDefect) && isDefect(raw, width, i)) {
       // HotPixelCorrectionImage::SimpleCorrection: the mean of the two same-colour neighbours along the smoother axis, if the pixel is
       // 1.2 times brighter than it (cfg 0xa30) or above 0.99 of the white level.
       const b = dev.black[ch];
@@ -850,7 +850,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
-  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal);
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   if (dm && opts.sharpen) dm = opts.bisg ? bisgFilter(dm, raw, cam, dev, width, cam.height, opts.sharpen) : sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);

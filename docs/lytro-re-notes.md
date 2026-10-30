@@ -741,3 +741,10 @@ Reverse-engineered from the PE (Ghidra) and checked stage by stage against dumps
 - Our views vs the engine's: the tone spline lowered the colour error 0.035 -> 0.0044; raw sharpen amount for the depth views fits at 0.35 (`VIEW_SHARPEN`); remaining raw per-pixel difference about 0.0085 (the engine's are smoother; the splat kernel is not exact yet).
 - Own depth against Lytro Desktop (fitted MAE): b4-1 1.36 -> 1.01 (engine depth 0.86), 5b8b8107 1.35 -> 0.78 (0.74), b4-4 1.34 -> 0.81 (0.69), b4-2 1.96 (1.00, open: zoom step 11 geometry).
 - Opt-in: `settings.engineViews` or `__lytro.engineViews` (CPU only, minutes).
+
+### Depth views, second pass (hooked MNOAPTask::Run, 0x140269aa0 in the PE)
+- The aperture raster handed to the multi-aperture projection is 256 x 256: 9 label discs (183..188 cells, radius 7.65 cells = 0.06 pitches; ring discs at 31.9 cells = 0.25), weights binary, lookup `(int)(dir * 127.5 + 127.5 + 0.5)`. The window radius is 0.06, not 0.12 (view coherence with the engine's views 0.6 -> 0.9). Four bilinear taps, weight = raster value (as ported).
+- The engine's views are smoothed after the splat, the fitted separable kernel is about [0.17, 0.66, 0.17] (premultiplied colour and weight; the reconstruction filter bank at lambda 0 for a 7728 px standardized image gives [.183 .718 .183]); raw sharpen amount refitted 0.35 -> 0.2.
+- The app's heuristic hot pixel test in `correctedPlane` (isDefect) is not in the engine (impulse test patterns survive in its views): only the calibration list is corrected; the exact path no longer runs it.
+- Result: b4-2 raster depth against the engine's own 97.5 % within 0.5 lambda (mean abs 3.29 -> 0.47); own depth renders vs Lytro Desktop: b4-1 0.91 (engine depth 0.86), b4-2 1.06 (1.00).
+- Open: for b4-2 the engine's view colour matrix fits the perCcm blend at about 3500 K (as-shot 2984 K): the engine's own AWB (awb2.cpp, 0x14025c050 / 0x14025bda0) decides the temperature.

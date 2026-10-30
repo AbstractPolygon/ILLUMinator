@@ -1589,7 +1589,9 @@ function measureClassic(id, fast, progress) {
 // The engine's depth views (CreateSubApertureImages): a window of radius 0.12 lens pitches centred at each point of the ring (radius 0.25, every 45 degrees) and at the center, every ray taken
 // through the geometry table and the ray table and placed at lambda 0 (RefocusSimpleMultiAperture, cfg 0x380 and 0x2660 on), rendered on the sampler's raster.
 // Sharpening amount of the raw picture the depth views are rendered from (fitted: the engine's depth from our views is closest at 0.3 to 0.4; 0.25 and 0.5 are worse).
-const VIEW_SHARPEN = 0.35;
+const VIEW_SHARPEN = 0.2;
+// The engine's depth views are smoothed by its reconstruction filter at lambda 0 (fitted on b4-2 against the engine's views: separable, normalised).
+const VIEW_KERNEL = [0.1688, 0.6624, 0.1688];
 const DEPTH_VIEW_RING = [0, 45, 90, 135, null, 180, 225, 270, 315];
 async function prepareEngineViews(id) {
   state.engineViews = null;
@@ -1600,7 +1602,8 @@ async function prepareEngineViews(id) {
   if (!state.vignetting) state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
   if (!state.modulation) return;
-  const radius = dbg.viewRadius ?? 0.12;
+  // the engine's aperture raster (256 x 256, dumped from MNOAPTask): discs of radius 7.65 cells = 0.06 pitches around the 0.25 ring
+  const radius = dbg.viewRadius ?? 0.06;
   const ring = dbg.viewRing ?? 0.25;
   const views = DEPTH_VIEW_RING.map((deg) => ({ deg, u: deg === null ? 0 : ring * Math.cos((deg * Math.PI) / 180), v: deg === null ? 0 : ring * Math.sin((deg * Math.PI) / 180), r2: radius * radius }));
   // The engine measures depth on its own raster: one sample per lens pitch over the whole sensor (the standardized image over the pitch), texel (i, j) centred at ((i + 0.5) / W, (j + 0.5) / H) of the sensor.
@@ -1617,6 +1620,7 @@ async function prepareEngineViews(id) {
   const pitch = lf.grid.pitch;
   const list = sp.views.map((acc, k) => {
     const rgb = new Float32Array(W * H * 3);
+    if (dbg.viewKernel !== null) filterPremultiplied(acc, W, H, dbg.viewKernel || VIEW_KERNEL, dbg.viewKernelY || dbg.viewKernel || VIEW_KERNEL);
     const filled = fillHoles(acc, W, H);
     for (let p = 0; p < W * H; p++) {
       const a = acc[4 * p + 3];
@@ -1626,6 +1630,28 @@ async function prepareEngineViews(id) {
   });
   if (raster) list.raster = { w: W, h: H };
   state.engineViews = list;
+}
+
+// Separable filter over the premultiplied view (colour and weight), zero outside.
+function filterPremultiplied(acc, W, H, kx, ky) {
+  const pass = (src, dst, n, stride, lines, lineStride, k) => {
+    const r = (k.length - 1) >> 1;
+    for (let l = 0; l < lines; l++) {
+      for (let i = 0; i < n; i++) {
+        for (let c = 0; c < 4; c++) {
+          let a = 0;
+          for (let t = -r; t <= r; t++) {
+            const j = i + t;
+            if (j >= 0 && j < n) a += k[t + r] * src[4 * (l * lineStride + j * stride) + c];
+          }
+          dst[4 * (l * lineStride + i * stride) + c] = a;
+        }
+      }
+    }
+  };
+  const tmp = new Float32Array(acc.length);
+  pass(acc, tmp, W, 1, H, W, kx);
+  pass(tmp, acc, H, W, W, 1, ky);
 }
 
 function depthViews() {
@@ -1655,7 +1681,9 @@ function engineViewMatrix() {
   const ccm = state.lf && state.lf.cam && state.lf.cam.ccm;
   const o = globalThis.__lytro || {};
   if (o.engineView === false || state.pp || !state.engineScale || !Array.isArray(ccm) || ccm.length !== 9) return null;
-  return ccm.map((v, i) => v * state.engineScale[i % 3]);
+  const cct = o.viewCct;
+  const base = cct ? blendedCcm(state.lf.cam.perCcm, cct, ccm) : ccm;
+  return base.map((v, i) => v * state.engineScale[i % 3]);
 }
 
 // The Lytro-style depth (core/depthmatch.js): on the GPU when there is one,
