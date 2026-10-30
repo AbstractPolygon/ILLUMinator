@@ -1243,7 +1243,7 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
-  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? 'combined');
+  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? (engineDepthAvailable() ? 'match' : 'combined'));
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
@@ -1512,8 +1512,11 @@ async function ensureDepth(id) {
     // (core/depthcombine.js). Without a real GPU the Lytro-style half would take
     // minutes, so classic alone is measured there. ('match' measures the
     // Lytro-style depth alone.)
-    let style = state.settings.depthStyle ?? 'combined';
-    if ((style === 'combined' || style === 'match') && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
+    // Raw photos with the engine's ray tables measure depth the engine's way by default (its views and its estimator, core/enginedepth.js:
+    // within 0.05 of Lytro Desktop's own pictures, the blend scores worse), on the CPU too.
+    const engineDefault = engineDepthAvailable();
+    let style = state.settings.depthStyle ?? (engineDefault ? 'match' : 'combined');
+    if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
@@ -1593,12 +1596,19 @@ const VIEW_SHARPEN = 0.2;
 // The engine's depth views are smoothed by its reconstruction filter at lambda 0 (fitted on b4-2 against the engine's views: separable, normalised).
 const VIEW_KERNEL = [0.1688, 0.6624, 0.1688];
 const DEPTH_VIEW_RING = [0, 45, 90, 135, null, 180, 225, 270, 315];
+// The engine's depth path needs the photo's own tables; settings.engineViews = false (or the debug hooks) turns it off.
+function engineDepthAvailable() {
+  const { lf } = state;
+  const dbg = globalThis.__lytro || {};
+  return !!lf && state.settings.engineViews !== false && dbg.engineViews !== false && !dbg.legacy && !dbg.noExact && !state.pp && !!lf.geometryBytes && !!lf.rayWarpBytes && !!lf.metadata;
+}
+
 async function prepareEngineViews(id) {
   state.engineViews = null;
   const { lf, dev, sampler } = state;
   const dbg = globalThis.__lytro || {};
-  // Opt in (settings.engineViews or the debug hook): the views are rendered by the GPU ray splat when there is one (gpu/lytroengine.js, agrees with the CPU to about 1 %), else by the CPU (about a minute on a full sensor). The combined style (the default) blends the classic depth and scores worse with them (b4-1 1.71 against 1.56); the match style with them is the engine's own (0.91).
-  if (!lf || (!dbg.engineViews && !state.settings.engineViews) || dbg.legacy || dbg.noExact || state.pp || !lf.geometryBytes || !lf.rayWarpBytes || !lf.metadata) return;
+  // On by default for raw photos (settings.engineViews = false turns it off): the GPU ray splat when there is one (gpu/lytroengine.js, agrees with the CPU to about 1 %), else the CPU (about a minute on a full sensor).
+  if (!lf || !engineDepthAvailable() || dbg.legacy || dbg.noExact || state.pp || !lf.geometryBytes || !lf.rayWarpBytes || !lf.metadata) return;
   if (!state.vignetting) state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
   if (!state.modulation) return;
