@@ -709,3 +709,19 @@ With the frame and size fixes, the engine and the app were rendered at a constan
 2022 x 1404 pictures, without any registration step, finds them aligned to 0.00-0.07 px in all nine tiles (centre and corners) on both photos, at both depths. The 0.3-0.6 px
 "shift" that `score_gt.py` / `linscore.py` print is a bias of their affine registration (it warps about the picture centre in pixel-corner coordinates), not an offset between the
 pictures; it is the same at lambda 0 and 25 (b4-2: -0.5 and -0.6), so the old "depth-proportional shift" of zoom-step photos was only the old frame and size. Geometry is closed.
+
+## Noise reduction: NILib (Neat Image) ported (`core/enginenr.js`, `core/enginenr-profiles.js`)
+
+The engine's noise reduction is the Neat Image library (NILib.dll) run on the colour-matrixed picture, before the tone curve (step 10), in ProPhoto-D50 gamma 2.2 planes 0..255
+(CopyIn: clamp, x^(1/2.2) x 255 through a 65536 entry table; CopyOut the inverse). The port was checked against the real library (Unicorn emulation of the DLL, plus the Wine harness):
+tile helpers, one level, one channel, the noise maps and whole pictures of many sizes, profiles 10/12/14/17 (`test/enginenr.test.mjs`, golden output from the library; max error 0.02 of 255, mean 0.001).
+
+- Profiles: "502" format, 18 in tnt.exe (the ILLUM's are 10..17), keyed by total gain (1.32 .. 41.11), the nearest key wins (`nrProfileIndex`). A profile holds per channel (Y, Cb, Cr) a type, 12 scalars, 3x63 control floats (9 control points)
+  and the A (88 B) / B (640 B) blocks. The luma strength is `YNRAmountVsTotalGain` (`nrLumaStrength`: gain 1 -> 0.1, 4 -> 0.133, 8 -> 0.2); the colour strengths are 1.5 / 1.5; every other setting 1.0. The engine runs at slider 50.
+- Colour: BT.601 YCbCr (offset 127.5, 0.2989/0.5866/0.1145, Cr = (R-Y) 0.713165, Cb = (B-Y) 0.564653).
+- Filter: 3 level pyramid (2x2 box down, 0.75/0.25 bilinear up). Per level: Z = X / (sigma + 1e-4), 3x3 box RMS, soft limit, 8 (luma, radius 4) or 4 (chroma, radius 3) directional box filters along digital lines
+  (angles 0, pi/2, pi/4, 3pi/4 and atan(0.5), atan(2), ...; offsets rint(k tan + 0.25)), energy per direction, argmax direction, clamp-affine weights, carried maps. Straight lines mirror at the ends, diagonals use a truncated window,
+  lines shorter than 2r+1 their whole mean. Tiles 96 core + 16 context. Noise sigma maps come from per-level LUTs indexed by the 2x2-averaged intensity, mixed through the squared YCbCr matrix.
+- In the app (`worker.js` `engineNrOn`): raw photos in the Lytro look with the exact engine colour, pictures at least 1000 px wide (the profiles describe the engine's own size), `settings.engineNr !== false`, sliders `engineNrLuma` / `engineNrColor`
+  (50 = the engine). The GPU path reads the picture back for it. About 14 s at 2022 x 1404.
+- Result against Lytro Desktop's default-recipe pictures with its own depth (registered, fitted MAE): b4-1 1.23 -> 0.86, b4-2 1.32 -> 1.00. NR off against its NR-off pictures: 0.89.
