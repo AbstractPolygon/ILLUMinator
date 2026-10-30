@@ -363,6 +363,10 @@ const cropOf = (img, w, ylo, xlo, rh, rw) => {
 // ---- per channel (FUN_180021b80) ----
 function chanPass(Y, Spyr, rect, A, B, W, H) {
   const nlev = Number(A.getBigInt64(0x48, true));
+  // no strength at any level: the channel passes through (the library's own shortcut)
+  let any = A.getFloat32(0x20, true) > 0;
+  for (let l = 0; l < 4 && !any; l++) any = A.getFloat32(0x10 + 4 * l, true) !== 0 || A.getFloat32(0x34 + 4 * l, true) !== 0;
+  if (!any) return Float32Array.from(Y);
   const mi = Number(A.getBigInt64(0x50, true));
   const sizes = [[W, H]];
   for (let i = 0; i < 4; i++) sizes.push([sizes[i][0] >> 1, sizes[i][1] >> 1]);
@@ -477,8 +481,8 @@ const b64 = (s) => {
 };
 const profileCache = new Map();
 // The table set for profile `index` and the luma strength `luma` (the gain table value).
-export function nrTables(index, luma) {
-  const key = `${index}:${luma}`;
+export function nrTables(index, luma, lum = 1, col1 = 1.5, col2 = 1.5) {
+  const key = `${index}:${luma}:${lum}:${col1}:${col2}`;
   if (profileCache.has(key)) return profileCache.get(key);
   const P = ENGINE_NR_PROFILES.profiles[index];
   const sc = new Float32Array(b64(P.scalars).buffer);
@@ -488,7 +492,10 @@ export function nrTables(index, luma) {
   const A = [0, 1, 2].map((c) => {
     const u = Abytes.slice(c * 88, (c + 1) * 88);
     const dv = new DataView(u.buffer);
+    // the strengths: luma level amounts come from the gain table, each plane's band factor is 1.6 x its slider factor
     if (c === 0) for (let l = 0; l < 4; l++) dv.setFloat32(0x10 + 4 * l, luma, true);
+    const factor = [lum, col1, col2][c];
+    for (let l = 0; l < 4; l++) dv.setFloat32(4 * l, f32(1.6 * factor), true);
     return dv;
   });
   const B = [0, 1, 2].map((c) => new DataView(Bbytes.slice(c * 640, (c + 1) * 640).buffer));
@@ -587,6 +594,77 @@ export function nrFilter(planes, w, h, tables, onProgress) {
     }
   }
   return out;
+}
+
+// The slider values (0..100, 50 = the engine's default) as the engine's three strengths and the gain-table amount.
+export function nrStrengths(lumSlider, colSlider, totalGain) {
+  const ramp = (v, base, top) => (v < 50 ? (base * v) / 50 : base + ((top - base) * (v - 50)) / 50);
+  const y = nrLumaStrength(totalGain);
+  return {
+    lum: ramp(lumSlider, 1.0, 2.5),
+    col: ramp(colSlider, 1.5, 2.5),
+    luma: lumSlider < 50 ? (y * lumSlider) / 50 : y + ((1 - y) * (lumSlider - 50)) / 50,
+  };
+}
+
+// ---- the picture in and out of the filter's planes: linear sRGB <-> gamma 2.2 ProPhoto (D50) x 255, through 65536 entry lookups ----
+const XYZ_PP = [[1.3459433, -0.2556075, -0.0511118], [-0.5445989, 1.5081673, 0.0205351], [0, 0, 1.2118128]];
+const SRGB_XYZ_D50 = [[0.4360747, 0.3850649, 0.1430804], [0.2225045, 0.7168786, 0.0606169], [0.0139322, 0.0971045, 0.7141733]];
+const mul3 = (a, b) => a.map((r, i) => b[0].map((_, j) => r[0] * b[0][j] + r[1] * b[1][j] + r[2] * b[2][j]));
+const inv3 = (m) => {
+  const [[a, b, c], [d, e, f], [g, h, i]] = m;
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  return [[(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det], [(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det], [(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det]];
+};
+const TO_PP = mul3(XYZ_PP, SRGB_XYZ_D50).map((r) => r.map(f32));
+const FROM_PP = inv3(mul3(XYZ_PP, SRGB_XYZ_D50)).map((r) => r.map(f32));
+let GAMMA_IN = null;
+let GAMMA_OUT = null;
+function gammaTables() {
+  if (!GAMMA_IN) {
+    GAMMA_IN = new Float32Array(65536);
+    GAMMA_OUT = new Float32Array(65536);
+    const e1 = f32(1 / 2.2);
+    const e2 = f32(2.2);
+    for (let i = 0; i < 65536; i++) {
+      const x = f32(i / 65535);
+      GAMMA_IN[i] = f32(Math.pow(x, e1));
+      GAMMA_OUT[i] = f32(Math.pow(x, e2));
+    }
+  }
+}
+// rgb: interleaved linear sRGB (w x h x 3, nominal 0..1, after the colour matrix). Returns the filtered picture the same way.
+export function engineDenoise(rgb, w, h, { gain = 1, luminance = 50, color = 50 } = {}, onProgress) {
+  gammaTables();
+  const n = w * h;
+  const st = nrStrengths(luminance, color, gain);
+  const tables = nrTables(nrProfileIndex(gain), st.luma, st.lum, st.col, st.col);
+  const planes = [new Float32Array(n), new Float32Array(n), new Float32Array(n)];
+  const T = TO_PP;
+  for (let i = 0; i < n; i++) {
+    const r = rgb[3 * i];
+    const g = rgb[3 * i + 1];
+    const b = rgb[3 * i + 2];
+    for (let c = 0; c < 3; c++) {
+      let v = f32(f32(f32(r * T[c][0]) + f32(g * T[c][1])) + f32(b * T[c][2]));
+      v = v < 0 ? 0 : v > 1 ? 1 : v;
+      planes[c][i] = f32(GAMMA_IN[Math.trunc(f32(v * 65535) + 0.5)] * 255);
+    }
+  }
+  const out = nrFilter(planes, w, h, tables, onProgress);
+  const F = FROM_PP;
+  const res = new Float32Array(3 * n);
+  const k = f32(1 / 255);
+  for (let i = 0; i < n; i++) {
+    const q = [0, 0, 0];
+    for (let c = 0; c < 3; c++) {
+      let v = f32(out[c][i] * k);
+      v = v < 0 ? 0 : v > 1 ? 1 : v;
+      q[c] = GAMMA_OUT[Math.trunc(f32(v * 65535) + 0.5)];
+    }
+    for (let c = 0; c < 3; c++) res[3 * i + c] = f32(f32(f32(q[0] * F[c][0]) + f32(q[1] * F[c][1])) + f32(q[2] * F[c][2]));
+  }
+  return res;
 }
 
 export const __internals = { makeLine, lineFilt, levelPass, chanPass, noisePyramids, down2, up2, lineSet, tileLayout };

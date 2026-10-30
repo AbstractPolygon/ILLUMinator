@@ -24,6 +24,7 @@ import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
+import { engineDenoise } from './core/enginenr.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -274,17 +275,38 @@ function usmMap() {
   return state.usmMap;
 }
 
-function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false) {
-  rgb = applyDetail(rgb, w, h, detailForSize(state.detail, w, lensColumns()));
+function engineNrOn(cs, w) {
+  return !state.pp && !!(cs.lytro && cs.lytro.exact) && !!(state.detail && state.detail.engine) && cs.settings.engineNr !== false && w >= 1000 && !!(state.lf && state.lf.cam);
+}
+
+function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu = false) {
+  // (from the GPU path the detail pass, the spatial effects and the depth of field are already in the picture)
+  if (!onGpu) rgb = applyDetail(rgb, w, h, detailForSize(state.detail, w, lensColumns()));
   rgb = subtractVeil(rgb, w, h, cs.veil, cs.veilAmount);
   rgb = applyLens(rgb, w, h, distortionCorrected ? withoutDistortion(cs.lens) : cs.lens);
   const exposure = cs.baseExposure * Math.pow(2, cs.settings.ev);
   const f = cs.settings.defringe;
   const local = localFor(w, h, ctx);
   // Blur, pixelate and sketch look at neighbouring pixels: before the rest.
-  if (local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
+  if (!onGpu && local && hasSpatial(local.masks)) rgb = applySpatial(rgb, w, h, local);
   const grade = state.lut ? { lut: state.lut, amount: cs.settings.lutAmount ?? 1 } : null;
   const sharp = (px) => (state.detail && state.detail.engine && !state.pp ? engineUnsharp(px, w, h, state.detail.engine, usmMap()) : px);
+  // The engine's noise reduction (Neat Image) runs on the colour-matrixed picture, before the tone curve; at the engine's own picture size only, where its noise profiles hold.
+  if (engineNrOn(cs, w)) {
+    const m = cs.matrix.map((v) => v * exposure);
+    const srgb = new Float32Array(rgb.length);
+    for (let i = 0; i < rgb.length; i += 3) {
+      const r = rgb[i];
+      const g = rgb[i + 1];
+      const b = rgb[i + 2];
+      srgb[i] = m[0] * r + m[1] * g + m[2] * b;
+      srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
+      srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
+    }
+    const clean = engineDenoise(srgb, w, h, { gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 });
+    const flt = cs.settings.defringe;
+    return sharp(toneMap(flt && flt.on && flt.colors.some(([amount]) => amount > 0) ? defringe(clean, w, h, flt) : clean, IDENTITY, 1, undefined, cs.look, local, grade, cs.lytro));
+  }
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return sharp(toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade, cs.lytro));
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = cs.matrix;
@@ -330,7 +352,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
-  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected);
+  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected, masks);
 }
 
 // Local adjustments resolved for a picture, packed for the GPU, or null.
@@ -340,7 +362,20 @@ function packedMasks(ctx) {
 }
 
 // The color pass: color, defringing, local adjustments and tone mapping.
-function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false) {
+function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false, ctx = undefined) {
+  // The noise reduction is a CPU filter: read the picture back and finish it there.
+  if (engineNrOn(cs, w)) {
+    const planes = state.gpu.readChannels(tex, w, h, 3);
+    const rgb = new Float32Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) {
+      rgb[3 * i] = planes[0][i];
+      rgb[3 * i + 1] = planes[1][i];
+      rgb[3 * i + 2] = planes[2][i];
+    }
+    const pixels = toPixels(rgb, w, h, ctx, cs, distortionCorrected, true);
+    post({ ...message, width: w, height: h, pixels: pixels.buffer }, [pixels.buffer]);
+    return;
+  }
   const bitmap = state.gpu.present(tex, w, h, {
     matrix: cs.matrix,
     exposure: cs.baseExposure * Math.pow(2, cs.settings.ev),
