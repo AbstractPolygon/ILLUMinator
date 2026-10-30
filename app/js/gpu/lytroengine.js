@@ -100,6 +100,7 @@ uniform vec2 uOrigin;
 uniform ivec4 uLens;     // first row, first column, rows, columns
 uniform float uRadius;
 uniform float uRefMin;
+uniform int uListedOnly;
 out vec4 o;
 float rawAt(int x, int y) { return float(texelFetch(uRaw, ivec2(x, y), 0).r); }
 void main() {
@@ -135,7 +136,7 @@ void main() {
   if (!(gain > 0.0)) return;
   float value = rawAt(x, y);
   float mean = 0.25 * (rawAt(x - 2, y) + rawAt(x + 2, y) + rawAt(x, y - 2) + rawAt(x, y + 2));
-  if (value > mean * 3.0 + 40.0 || (value < mean * 0.2 && mean > 100.0)) {
+  if (uListedOnly == 0 && (value > mean * 3.0 + 40.0 || (value < mean * 0.2 && mean > 100.0))) {
     // HotPixelCorrectionImage::SimpleCorrection
     float vert = abs(rawAt(x, y - 2) - rawAt(x, y + 2)) + abs(rawAt(x, y - 1) - rawAt(x, y + 1));
     float horiz = abs(rawAt(x - 2, y) - rawAt(x + 2, y)) + abs(rawAt(x - 1, y) - rawAt(x + 1, y));
@@ -401,6 +402,9 @@ uniform vec4 uRayMin;
 uniform vec4 uRayStep;
 uniform ivec4 uRayN;
 uniform float uRayBorder;
+uniform highp int uViewN;        // depth views (0: the usual splat)
+uniform vec3 uViewC[9];    // each view's window: u, v, radius squared
+uniform float uViewH;
 flat out vec2 vQ;
 flat out vec4 vRgb;
 flat out float vW;
@@ -501,6 +505,7 @@ void main() {
   // (on the direction after the geometry table, like the engine: centred on the table's mean shift)
   float ap = uHex.x;
   float rise = uHex.y;
+  int view = -1;
   vec2 ev = vec2(0.0);
   vec2 centreIdx = vec2(uOrigin.x + cosR * lensX - sinR * lensY, uOrigin.y + sinR * lensX + cosR * lensY);
   if (uExact == 1) {
@@ -511,7 +516,14 @@ void main() {
     vec2 G = texelFetch(uGct, gi, 0).rg;
     ev = vec2(u / pitch, v / uExactA.x) - G;
     float eau = abs(ev.x);
-    if (max(eau, (eau + 1.7320508 * abs(ev.y)) / 2.0) > ap / pitch) return;
+    if (uViewN > 0) {
+      for (int k = 0; k < 9; k++) {
+        if (k >= uViewN) break;
+        vec2 dd = ev - uViewC[k].xy;
+        if (dot(dd, dd) <= uViewC[k].z) { view = k; break; }
+      }
+      if (view < 0) return;
+    } else if (max(eau, (eau + 1.7320508 * abs(ev.y)) / 2.0) > ap / pitch) return;
   } else {
     float au = abs(u + uRayShift.x);
     float av = abs(v + uRayShift.y);
@@ -566,6 +578,18 @@ void main() {
     ru = fr.x;
     rv = fr.y;
   }
+  if (uViewN > 0) {
+    // lambda 0, the engine's own raster: texel (i, j) of W x H centred at ((i + 0.5) / W, (j + 0.5) / H) of the sensor
+    vec4 wv2 = rayWarpAt(vec4((centreIdx + 0.5) / uCam - 0.5, ev));
+    vec2 qv = ((centreIdx + wv2.xy * uCam + 0.5) / uCam) * vec2(uOutSize.x, uViewH) - 0.5;
+    vec2 fv = floor(qv) + vec2(0.0, float(view) * uViewH);
+    gl_Position = vec4(((fv + 1.0) / vec2(uOutSize)) * 2.0 - 1.0, 0.0, 1.0);
+    vQ = qv + vec2(0.0, float(view) * uViewH);
+    vRgb = vec4(rgb, 1.0);
+    vW = uModPow > 0.0 ? pow(pm.g, uModPow) : 1.0;
+    vLam = 0.0;
+    return;
+  }
   // BackProjectDepthMap::RayTraceRegion
   float lam0 = sampleDepth(uDepthLo, lens) / LTA;
   float lam1 = sampleDepth(uDepthHi, lens) / LTA + 1.0;
@@ -606,6 +630,7 @@ const SPLAT_FRAGMENT = `#version 300 es
 precision highp float;
 uniform highp sampler2D uZ;
 uniform float uTolerance;
+uniform highp int uViewN;
 flat in vec2 vQ;
 flat in vec4 vRgb;
 flat in float vW;
@@ -615,7 +640,7 @@ void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec2 k = vec2(1.0) - abs(vec2(p) - vQ);
   if (k.x <= 0.0 || k.y <= 0.0) discard;
-  if (vLam - texelFetch(uZ, p, 0).r >= uTolerance) discard;
+  if (uViewN == 0 && vLam - texelFetch(uZ, p, 0).r >= uTolerance) discard;
   float w = k.x * k.y * vW;
   o = vec4(vRgb.rgb * w, w);
 }`;
@@ -715,8 +740,11 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   const zTex = keep(upload(gpu, W, H, gl.R32F, gl.RED, gl.FLOAT, P.zMap));
   const ex = !!P.opts.exact && !!P.geoTable;
   const gctTex = keep(ex ? upload(gpu, P.geoTable.w, P.geoTable.h, gl.RG32F, gl.RG, gl.FLOAT, P.geoTable.data, 4) : upload(gpu, 1, 1, gl.RG32F, gl.RG, gl.FLOAT, new Float32Array(2), 4));
-  const acc = tex(W, H, gl.RGBA32F);
-  gpu.target(acc, W, H);
+  const nV = P.views ? P.views.length : 0;
+  const HA = H * Math.max(1, nV);
+  if (HA > gl.getParameter(gl.MAX_TEXTURE_SIZE)) return null;
+  const acc = tex(W, HA, gl.RGBA32F);
+  gpu.target(acc, W, HA);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -788,6 +816,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
       gl.uniform4i(U.uLens, range.r0, range.c0, refs.rows, refs.cols);
       gl.uniform1f(U.uRadius, P.planeRadius);
       gl.uniform1f(U.uRefMin, P.opts.modGlobal ? 0.02 : 0.15);
+      gl.uniform1i(U.uListedOnly, P.listedOnly ? 1 : 0);
     });
     fullscreen(prog.complete, compTex, cam.width, th, (U) => {
       common(U, t0);
@@ -849,7 +878,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
 
     // the rays of this band
     gl.useProgram(prog.splat.p);
-    gpu.target(acc, W, H);
+    gpu.target(acc, W, HA);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
     const U = prog.splat.u;
@@ -870,7 +899,10 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform1i(U.uY0, y0);
     gl.uniform1i(U.uRows, y1 - y0);
     gl.uniform1f(U.uScaleOut, P.scale);
-    gl.uniform2i(U.uOutSize, W, H);
+    gl.uniform2i(U.uOutSize, W, HA);
+    gl.uniform1i(U.uViewN, nV);
+    gl.uniform1f(U.uViewH, H);
+    if (nV) gl.uniform3fv(U.uViewC, Float32Array.from(P.views.flatMap((v) => [v.u, v.v, v.r2])));
     gl.uniform2f(U.uSharpen, sharp.amount, sharp.clampPre || 0);
     bisgUniforms(U);
     bind(7 + 3, rawTex, U.uRaw);
@@ -899,9 +931,9 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.disable(gl.BLEND);
   }
 
-  gpu.target(acc, W, H);
-  const out = new Float32Array(W * H * 4);
-  gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, out);
+  gpu.target(acc, W, HA);
+  const out = new Float32Array(W * HA * 4);
+  gl.readPixels(0, 0, W, HA, gl.RGBA, gl.FLOAT, out);
   for (const t of created) gl.deleteTexture(t);
   return out;
 }

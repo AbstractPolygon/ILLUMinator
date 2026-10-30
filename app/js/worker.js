@@ -1597,7 +1597,7 @@ async function prepareEngineViews(id) {
   state.engineViews = null;
   const { lf, dev, sampler } = state;
   const dbg = globalThis.__lytro || {};
-  // Opt in (settings.engineViews or the debug hook): the views are rendered by the CPU ray splat, about a minute on a full sensor; the GPU version is not written. The combined style (the default) blends the classic depth and scores worse with them (b4-1 1.71 against 1.56); the match style with them is the engine's own (0.91).
+  // Opt in (settings.engineViews or the debug hook): the views are rendered by the GPU ray splat when there is one (gpu/lytroengine.js, agrees with the CPU to about 1 %), else by the CPU (about a minute on a full sensor). The combined style (the default) blends the classic depth and scores worse with them (b4-1 1.71 against 1.56); the match style with them is the engine's own (0.91).
   if (!lf || (!dbg.engineViews && !state.settings.engineViews) || dbg.legacy || dbg.noExact || state.pp || !lf.geometryBytes || !lf.rayWarpBytes || !lf.metadata) return;
   if (!state.vignetting) state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
   if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
@@ -1617,7 +1617,16 @@ async function prepareEngineViews(id) {
     raw: lf.raw, cam: lf.cam, dev, grid: engineLatticeIdx(lf), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: new Float32Array(W * H), scale: 1, lens: null, W, H,
     rayWarp: (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }),
-  }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: null, views, sensorRaster: raster, sharpen: { ...LYTRO_SPLAT.sharpen, amount: VIEW_SHARPEN }, ...(dbg.splat || {}) });
+  }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: state.gpu && !dbg.noGpuEngine && !dbg.noGpuViews ? (input) => {
+      try {
+        const acc = lytroSplatGpu(state.gpu, input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
+        if (acc) state.lytroGpu = true;
+        return acc;
+      } catch (e) {
+        console.warn('GPU depth views failed, using the CPU:', e);
+        return null;
+      }
+    } : null, views, sensorRaster: raster, sharpen: { ...LYTRO_SPLAT.sharpen, amount: VIEW_SHARPEN }, ...(dbg.splat || {}) });
   if (dbg.logTime) console.error('VIEWS_MS', Date.now() - tViews);
   const pitch = lf.grid.pitch;
   const list = sp.views.map((acc, k) => {

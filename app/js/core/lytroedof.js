@@ -844,10 +844,15 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
-  const gpuInput = { rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  const gpuInput = { views: viewHits ? views : null, listedOnly: ex, rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
-  if (opts.gpu && !viewHits && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+  if (opts.gpu && (!viewHits || (opts.sensorRaster && !opts.noGpuViews)) && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
+    if (gpuAcc && viewHits) {
+      // the views are stacked, view k in rows k * H .. (k + 1) * H
+      const n = W * H * 4;
+      return { acc: new Float32Array(n), W, H, zMap, views: views.map((_, k) => gpuAcc.subarray(k * n, (k + 1) * n)), stats: { rays: 0, accepted: 0 } };
+    }
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
@@ -1074,7 +1079,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       }
     }
   }, onProgress);
-  if (globalThis.__dumpSplatAcc) globalThis.__dumpSplatAcc(acc);
+  if (globalThis.__dumpSplatAcc) globalThis.__dumpSplatAcc(viewAcc ? Float32Array.from(viewAcc.flatMap((a) => Array.from(a))) : acc);
   return { acc, W, H, zMap, views: viewAcc, stats: { rays: count, accepted } };
 }
 
