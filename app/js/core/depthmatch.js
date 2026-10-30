@@ -109,6 +109,7 @@ export function hdtvGamma(x) {
 }
 
 function engineViewColors(views, n, matrix) {
+  if (globalThis.__viewRawDump) globalThis.__viewRawDump(views.map((v) => v.rgb), matrix);
   const colors = views.map((v) => {
     const out = new Float32Array(n * 3);
     const g = v.gain;
@@ -121,6 +122,7 @@ function engineViewColors(views, n, matrix) {
     return out;
   });
   matchColor(colors, Math.floor(views.length / 2), n);
+  if (globalThis.__viewColorsDump) globalThis.__viewColorsDump(colors);
   return colors;
 }
 

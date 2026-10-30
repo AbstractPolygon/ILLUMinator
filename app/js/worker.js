@@ -1704,6 +1704,7 @@ function measureLytro(progress) {
       if (v > hi) hi = v;
     }
     const map = { width: outW, height: outH, data: Float32Array.from(lam, (v) => (v - lo) / (hi - lo || 1)), min: lo, max: hi };
+    if (globalThis.__rasterDump) globalThis.__rasterDump(lam, outW, outH, state.userDepth);
     const dbg = globalThis.__lytro || {};
     const fr = engineDepthInFrame(map, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL, true);
     const n = state.sampler.outW * state.sampler.outH;
