@@ -725,3 +725,19 @@ tile helpers, one level, one channel, the noise maps and whole pictures of many 
 - In the app (`worker.js` `engineNrOn`): raw photos in the Lytro look with the exact engine colour, pictures at least 1000 px wide (the profiles describe the engine's own size), `settings.engineNr !== false`, sliders `engineNrLuma` / `engineNrColor`
   (50 = the engine). The GPU path reads the picture back for it. About 14 s at 2022 x 1404.
 - Result against Lytro Desktop's default-recipe pictures with its own depth (registered, fitted MAE): b4-1 1.23 -> 0.86, b4-2 1.32 -> 1.00. NR off against its NR-off pictures: 0.89.
+
+## Depth estimator (shipped Windows tnt.exe; `core/enginedepth.js`)
+
+Reverse-engineered from the PE (Ghidra) and checked stage by stage against dumps taken under Wine with a hook DLL (vtable patching, return-address hijacks, real engine functions called on synthetic inputs). It differs from the Mach-O reading in several places; the PE is what the app ships.
+
+- Raster: 541 x 376 (one sample per lens pitch). Labels: whole lambdas -35 .. floor(infinityLambda)+3 (max 100), padded to a multiple of 4.
+- Views: 9 (eight on a ring of radius 0.25 at 0,45,..,315 degrees, indices 0..7, centre last at index 8). Each view is colour-rendered hdtvGamma(engineTone(clamp(M x rawlin))), M = ccm x engineScale, then MatchColor against the centre (mean/variance). The app's `DEPTH_VIEW_RING` has the centre at index 4: permutation `[0,1,2,3,5,6,7,8,4]`.
+- Cost: bilinear samples at (x + lambda u, y + lambda v); per view min(L1 sad, 0.2); cost = 1.25 x the sum of the 4 largest of the 8. Float32 arithmetic including the floor-by-rounding tie at integer positions (the only source of the last 0.2 % of mismatches).
+  A pixel's label vector is zeroed if any label's mean ring colour exceeds 8 x 0.95 or the cost curve is flat (value at rank ceil((L-1) x 0.5) minus the minimum < 0.075).
+- Aggregation: cross arms (tau1 0.04, tau2 0.025, max 34, long 17), 4 alternating rounds, blended with a Sobel map (lo/hi) smoothed by a 5-tap Gaussian sigma 1 whose truncated border weights are renormalised (replicate, mirror, zero and erf borders all fail).
+- Edge cues 1.0 / 0.5 (threshold 0.2); TRW-S: 4 message volumes, belief order data + M0 + M1 + M3 + M2, gamma 0.5, slope 0.1, truncation 6, 10 iterations, two alternating sweep orders.
+- Sub-label: parabola on the beliefs (nearest index; the Mach-O used the data cost with floor index and fails), then a 3x3 median.
+- Verified: cost volume 8.1M entries, no mismatch above 1e-5; aggregation under 2e-5; TRW-S labels 100.000 % identical; final map identical; the whole chain on the engine's own views 99.8 % identical pixels.
+- Our views vs the engine's: the tone spline lowered the colour error 0.035 -> 0.0044; raw sharpen amount for the depth views fits at 0.35 (`VIEW_SHARPEN`); remaining raw per-pixel difference about 0.0085 (the engine's are smoother; the splat kernel is not exact yet).
+- Own depth against Lytro Desktop (fitted MAE): b4-1 1.36 -> 1.01 (engine depth 0.86), 5b8b8107 1.35 -> 0.78 (0.74), b4-4 1.34 -> 0.81 (0.69), b4-2 1.96 (1.00, open: zoom step 11 geometry).
+- Opt-in: `settings.engineViews` or `__lytro.engineViews` (CPU only, minutes).
