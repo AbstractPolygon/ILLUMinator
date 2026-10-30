@@ -6,6 +6,7 @@
 // itself: a capped color difference against the reference at each trial
 // depth, cross-based aggregation, message-passing smoothing, whole labels,
 // and a 3 x 3 median. See depth.js for the pieces.
+import { engineTone } from './base.js';
 import { crossArms, aggregateCross, flatness, trwsVolume, bestDepth, depthColorGuide, median3, DEPTH_CBCA, DEPTH_EDGE, DEPTH_TRWS, DEPTH_LCOST } from './depth.js';
 
 export const DEPTH_PASSES = {
@@ -117,7 +118,11 @@ function engineViewColors(views, n, matrix) {
       const r = v.rgb[3 * i] * g;
       const gg = v.rgb[3 * i + 1] * g;
       const b = v.rgb[3 * i + 2] * g;
-      for (let k = 0; k < 3; k++) out[3 * i + k] = hdtvGamma(matrix[3 * k] * r + matrix[3 * k + 1] * gg + matrix[3 * k + 2] * b);
+      for (let k = 0; k < 3; k++) {
+        // the engine's views go through its tone spline as well (measured: with it the colours differ from the engine's by 0.004, without by 0.035)
+        const x = matrix[3 * k] * r + matrix[3 * k + 1] * gg + matrix[3 * k + 2] * b;
+        out[3 * i + k] = hdtvGamma(engineTone(x < 0 ? 0 : x > 1 ? 1 : x));
+      }
     }
     return out;
   });

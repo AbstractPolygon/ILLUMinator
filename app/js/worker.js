@@ -14,7 +14,7 @@ import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
 import { pickObjects, signatures } from './core/objects.js';
-import { DEPTH_PASSES, measureMatch } from './core/depthmatch.js';
+import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
 import { measureMatchGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { removePeriodicPattern } from './core/notch.js';
@@ -25,6 +25,7 @@ import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { engineDenoise } from './core/enginenr.js';
+import { engineDepthMap, engineLabels } from './core/enginedepth.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -1587,6 +1588,8 @@ function measureClassic(id, fast, progress) {
 // lens pitches, checked against the parallax of those images). The center is the middle one.
 // The engine's depth views (CreateSubApertureImages): a window of radius 0.12 lens pitches centred at each point of the ring (radius 0.25, every 45 degrees) and at the center, every ray taken
 // through the geometry table and the ray table and placed at lambda 0 (RefocusSimpleMultiAperture, cfg 0x380 and 0x2660 on), rendered on the sampler's raster.
+// Sharpening amount of the raw picture the depth views are rendered from (fitted: the engine's depth from our views is closest at 0.3 to 0.4; 0.25 and 0.5 are worse).
+const VIEW_SHARPEN = 0.35;
 const DEPTH_VIEW_RING = [0, 45, 90, 135, null, 180, 225, 270, 315];
 async function prepareEngineViews(id) {
   state.engineViews = null;
@@ -1610,7 +1613,7 @@ async function prepareEngineViews(id) {
     raw: lf.raw, cam: lf.cam, dev, grid: engineLatticeIdx(lf), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: new Float32Array(W * H), scale: 1, lens: null, W, H,
     rayWarp: (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
     onProgress: (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }),
-  }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: null, views, sensorRaster: raster, ...(dbg.splat || {}) });
+  }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: null, views, sensorRaster: raster, sharpen: { ...LYTRO_SPLAT.sharpen, amount: VIEW_SHARPEN }, ...(dbg.splat || {}) });
   const pitch = lf.grid.pitch;
   const list = sp.views.map((acc, k) => {
     const rgb = new Float32Array(W * H * 3);
@@ -1686,7 +1689,14 @@ function measureLytro(progress) {
   }
   if ((globalThis.__lytro || {}).depthViews && globalThis.__lytro.depthViews.single) DEPTH_PASSES.refs = [4];
   let measured = null;
-  if (state.gpu) {
+  if (raster && !(globalThis.__lytro || {}).oldEstimator && state.engineViews) {
+    // The engine's own estimator on its views (core/enginedepth.js): in the engine's order, the centre last.
+    const colors = viewColors(depthViews(), outW * outH, outW, outH);
+    const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
+    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p));
+    measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
+  }
+  if (!measured && state.gpu) {
     try {
       measured = measureMatchGpu(state.gpu, depthViews(), outW, outH, { onProgress: progress });
     } catch (e) {
