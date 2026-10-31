@@ -101,6 +101,7 @@ uniform ivec4 uLens;     // first row, first column, rows, columns
 uniform float uRadius;
 uniform float uRefMin;
 uniform int uListedOnly;
+uniform float uSatBoost;
 out vec4 o;
 float rawAt(int x, int y) { return float(texelFetch(uRaw, ivec2(x, y), 0).r); }
 void main() {
@@ -144,6 +145,8 @@ void main() {
     if (value - b > 1.2 * est || value > 0.99 * uSaturated[ch]) value = est + b;
     else return;
   }
+  float sl = uSaturated[ch] - 3.0;
+  if (uSatBoost != 1.0 && value >= sl && rawAt(x - 2, y) >= sl && rawAt(x + 2, y) >= sl && rawAt(x, y - 2) >= sl && rawAt(x, y + 2) >= sl) value = b + (value - b) * uSatBoost;
   o = vec4(max(0.0, value - b) * uScale[ch] * gain, 1.0 / gain, 0.0, 0.0);
 }`;
 
@@ -817,6 +820,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
       gl.uniform1f(U.uRadius, P.planeRadius);
       gl.uniform1f(U.uRefMin, P.opts.modGlobal ? 0.02 : 0.15);
       gl.uniform1i(U.uListedOnly, P.listedOnly ? 1 : 0);
+      gl.uniform1f(U.uSatBoost, P.opts.satBoost ?? 1);
     });
     fullscreen(prog.complete, compTex, cam.width, th, (U) => {
       common(U, t0);

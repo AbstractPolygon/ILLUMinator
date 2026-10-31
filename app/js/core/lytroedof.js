@@ -417,7 +417,9 @@ export function engineAperture(cam, fraction = 0.5) {
   return nominal === SPLAT.aperture ? nominal : nominal * fraction;
 }
 
-export const SPLAT = { modGlobal: true, aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 } };
+export const SPLAT = { modGlobal: true, aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 },
+  // the engine keeps going above white where the sensor clips (its pre-adjust picture reaches 2.5 in a blown window, ours 1.26): saturated raw pixels whose four same colour neighbours are saturated too count 1.4 times (fitted on f72b3923 against its picture, display clipped: MAE 1.18 -> 0.86; isolated saturated pixels, wire glints, are left alone)
+  satBoost: 1.4 };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -450,7 +452,7 @@ export function engineColorScale(modulation, cam, dev, g) {
   });
 }
 
-export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false) {
+export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false, satBoost = 1) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
   plane.mod = new Float32Array(width * height);
@@ -510,6 +512,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
       else return;
     }
     if (globalThis.__radialFix) gain *= globalThis.__radialFix(Math.hypot(u, v) / g.pitch);
+    if (satBoost !== 1 && value >= dev.saturated[ch] - 3 && raw[i - 2] >= dev.saturated[ch] - 3 && raw[i + 2] >= dev.saturated[ch] - 3 && raw[i - 2 * width] >= dev.saturated[ch] - 3 && raw[i + 2 * width] >= dev.saturated[ch] - 3) value = dev.black[ch] + (value - dev.black[ch]) * satBoost;
     plane.mod[i] = 1 / gain;
     plane[i] = Math.max(0, value - dev.black[ch]) * dev.scale[ch] * gain;
   });
@@ -855,7 +858,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     }
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
-  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex, opts.satBoost ?? 1);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   if (dm && opts.sharpen) dm = opts.bisg ? bisgFilter(dm, raw, cam, dev, width, cam.height, opts.sharpen) : sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
