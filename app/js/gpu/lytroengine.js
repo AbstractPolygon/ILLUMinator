@@ -101,7 +101,6 @@ uniform ivec4 uLens;     // first row, first column, rows, columns
 uniform float uRadius;
 uniform float uRefMin;
 uniform int uListedOnly;
-uniform float uSatBoost;
 out vec4 o;
 float rawAt(int x, int y) { return float(texelFetch(uRaw, ivec2(x, y), 0).r); }
 void main() {
@@ -145,8 +144,6 @@ void main() {
     if (value - b > 1.2 * est || value > 0.99 * uSaturated[ch]) value = est + b;
     else return;
   }
-  float sl = uSaturated[ch] - 3.0;
-  if (uSatBoost != 1.0 && value >= sl && rawAt(x - 2, y) >= sl && rawAt(x + 2, y) >= sl && rawAt(x, y - 2) >= sl && rawAt(x, y + 2) >= sl) value = b + (value - b) * uSatBoost;
   o = vec4(max(0.0, value - b) * uScale[ch] * gain, 1.0 / gain, 0.0, 0.0);
 }`;
 
@@ -156,11 +153,17 @@ uniform sampler2D uPlane;
 uniform usampler2D uRaw;
 uniform vec3 uBlack;
 uniform vec3 uScale;
+uniform sampler2D uSat;  // the saturation recovery's values for the masked pixels (-1 elsewhere)
+uniform int uHasSat;
 out vec4 o;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   int x = p.x;
   int y = p.y + uT0;
+  if (uHasSat == 1) {
+    float ov = texelFetch(uSat, ivec2(x, y), 0).r;
+    if (ov >= 0.0) { o = vec4(ov); return; }
+  }
   float v = texelFetch(uPlane, p, 0).r;
   if (v >= 0.0) { o = vec4(v); return; }
   float s = 0.0;
@@ -736,6 +739,8 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     for (let k = 0; k < refs.data.length; k += 4) for (let ch = 0; ch < 3; ch++) if (refs.data[k + ch] > 0) refs.data[k + ch] = mean[ch];
   }
   const refTex = keep(upload(gpu, refs.cols, refs.rows, gl.RGBA32F, gl.RGBA, gl.FLOAT, refs.data));
+  // SaturationRecoveryDiffusion: sequential sweeps, so the CPU computes the masked pixels' values (core/lytroedof.js saturationOverride) and the completing pass takes them
+  const satTex = keep(P.satOver ? upload(gpu, cam.width, cam.height, gl.R32F, gl.RED, gl.FLOAT, P.satOver) : upload(gpu, 1, 1, gl.R32F, gl.RED, gl.FLOAT, new Float32Array([-1])));
   const d5 = P.depth5;
   const depthTex = keep(d5 ? upload(gpu, d5.width, d5.height, gl.R32F, gl.RED, gl.FLOAT, d5.data) : upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.depth));
   const loTex = keep(upload(gpu, P.lw, P.lh, gl.R32F, gl.RED, gl.FLOAT, P.lo));
@@ -820,12 +825,13 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
       gl.uniform1f(U.uRadius, P.planeRadius);
       gl.uniform1f(U.uRefMin, P.opts.modGlobal ? 0.02 : 0.15);
       gl.uniform1i(U.uListedOnly, P.listedOnly ? 1 : 0);
-      gl.uniform1f(U.uSatBoost, P.opts.satBoost ?? 1);
     });
     fullscreen(prog.complete, compTex, cam.width, th, (U) => {
       common(U, t0);
       bind(0, planeTex, U.uPlane);
       bind(1, rawTex, U.uRaw);
+      bind(2, satTex, U.uSat);
+      gl.uniform1i(U.uHasSat, P.satOver ? 1 : 0);
       gl.uniform3fv(U.uBlack, dev.black);
       gl.uniform3fv(U.uScale, dev.scale);
     });

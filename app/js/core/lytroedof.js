@@ -417,9 +417,7 @@ export function engineAperture(cam, fraction = 0.5) {
   return nominal === SPLAT.aperture ? nominal : nominal * fraction;
 }
 
-export const SPLAT = { modGlobal: true, aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 },
-  // the engine keeps going above white where the sensor clips (its pre-adjust picture reaches 2.5 in a blown window, ours 1.26): saturated raw pixels whose four same colour neighbours are saturated too count 1.4 times (fitted on f72b3923 against its picture, display clipped: MAE 1.18 -> 0.86; isolated saturated pixels, wire glints, are left alone)
-  satBoost: 1.4 };
+export const SPLAT = { modGlobal: true, aperture: 0.4, modPow: 2, shape: 'hex', tolerance: 2, tolA: 1, tolB: 2, reach: 'engine', step: 1, demosaic: 'engine', nearest: true, sharpen: { amount: 0.25, c: 0.7, clampPre: 1 } };
 
 // The raw picture corrected for the lens (black level, white balance,
 // vignetting) at every pixel under a lens: NaN where it cannot be used.
@@ -452,7 +450,7 @@ export function engineColorScale(modulation, cam, dev, g) {
   });
 }
 
-export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false, satBoost = 1) {
+export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false, need = null) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
   plane.mod = new Float32Array(width * height);
@@ -488,6 +486,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
       lastLens = lensX + lensY * 1e6;
       tw = tileWeights(vg, x, y);
     }
+    if (need && !need[i]) return;
     const ch = dev.cfa[y & 1][x & 1];
     const bin = Math.floor((v + vg.rMax) * binScale) * vg.bins + Math.floor((u + vg.rMax) * binScale);
     let gain = 0;
@@ -512,7 +511,6 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
       else return;
     }
     if (globalThis.__radialFix) gain *= globalThis.__radialFix(Math.hypot(u, v) / g.pitch);
-    if (satBoost !== 1 && value >= dev.saturated[ch] - 3 && raw[i - 2] >= dev.saturated[ch] - 3 && raw[i + 2] >= dev.saturated[ch] - 3 && raw[i - 2 * width] >= dev.saturated[ch] - 3 && raw[i + 2 * width] >= dev.saturated[ch] - 3) value = dev.black[ch] + (value - dev.black[ch]) * satBoost;
     plane.mod[i] = 1 / gain;
     plane[i] = Math.max(0, value - dev.black[ch]) * dev.scale[ch] * gain;
   });
@@ -602,7 +600,7 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts, up = null) {
 // unusable ones (saturated, defect) the mean of their valid same colour
 // neighbours. (The engine's SaturationRecoveryType defaults to 2, which does not
 // diffuse; its highlight recovery is the clip rule of sharpenHighlights.)
-function completePlane(plane, raw, cam, dev) {
+function completePlane(plane, raw, cam, dev, diffuse = true) {
   const { width, height } = cam;
   const out = Float32Array.from(plane);
   for (let y = 0; y < height; y++) {
@@ -625,6 +623,78 @@ function completePlane(plane, raw, cam, dev) {
       out[i] = n ? s / n : Math.max(0, raw[i] - dev.black[ch]) * dev.scale[ch];
     }
   }
+  if (diffuse) diffuseSaturation(out, raw, cam, dev);
+  return out;
+}
+
+// SaturationState + SaturationRecoveryDiffusion (ILLUM: SaturationRecoveryType 1, threshold 0.98 of the white level): the mask is raw / white > 0.98 (raw level 1003 and up of 1023), and 20
+// in-place raster sweeps (x, y = 2 .. size - 3) make every masked pixel the mean of its four same colour neighbours (the diagonals at green sites, two pixels up, down, left and right
+// at red and blue) when that is larger than its own value. It runs on the demodulated, white balanced mosaic, so the vignetting gain varying over each lens disk is what the diffusion
+// spreads: dumped from the engine (constant raw photos), a saturated lens centre is raised toward the bright rim of its disk. The optional clamp to the limits is off (cfg 0x1068 = 0).
+export function diffuseSaturation(a, raw, cam, dev) {
+  const { width: W, height: H } = cam;
+  const mask = new Uint8Array(W * H);
+  let any = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (raw[i] > 0.98 * cam.white[dev.cfa[y & 1][x & 1]]) {
+        mask[i] = 1;
+        any++;
+      }
+    }
+  }
+  if (!any) return a;
+  for (let it = 0; it < 20; it++) {
+    for (let y = 2; y < H - 2; y++) {
+      for (let x = 2; x < W - 2; x++) {
+        const i = y * W + x;
+        if (!mask[i]) continue;
+        const m = dev.cfa[y & 1][x & 1] === 1
+          ? a[i - W - 1] + a[i - W + 1] + a[i + W - 1] + a[i + W + 1]
+          : a[i - 2 * W] + a[i - 2] + a[i + 2] + a[i + 2 * W];
+        const v = m * 0.25;
+        if (a[i] < v) a[i] = v;
+      }
+    }
+  }
+  return a;
+}
+
+// The diffusion's result for the masked pixels only (-1 elsewhere), for the GPU path: the plane is computed just around the masked pixels (a 9 x 9 box, which holds
+// the neighbours the sweeps read and the pixels the completing step averages), diffused on the CPU, and the completing shader takes the values.
+export function saturationOverride(raw, cam, dev, g, vg, radius, modulation, globalRef, listedOnly) {
+  const { width: W, height: H } = cam;
+  const mask = new Uint8Array(W * H);
+  let any = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (raw[y * W + x] > 0.98 * cam.white[dev.cfa[y & 1][x & 1]]) {
+        mask[y * W + x] = 1;
+        any++;
+      }
+    }
+  }
+  if (!any) return null;
+  const need = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!mask[y * W + x]) continue;
+      for (let dy = -4; dy <= 4; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= H) continue;
+        for (let dx = -4; dx <= 4; dx++) {
+          const xx = x + dx;
+          if (xx >= 0 && xx < W) need[yy * W + xx] = 1;
+        }
+      }
+    }
+  }
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius, modulation, globalRef, listedOnly, need);
+  const full = completePlane(plane, raw, cam, dev, false);
+  diffuseSaturation(full, raw, cam, dev);
+  const out = new Float32Array(W * H).fill(-1);
+  for (let i = 0; i < W * H; i++) if (mask[i]) out[i] = full[i];
   return out;
 }
 
@@ -847,9 +917,10 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
-  const gpuInput = { views: viewHits ? views : null, listedOnly: ex, rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  const gpuInput = { satOver: null, views: viewHits ? views : null, listedOnly: ex, rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
   if (opts.gpu && (!viewHits || (opts.sensorRaster && !opts.noGpuViews)) && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
+    gpuInput.satOver = saturationOverride(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc && viewHits) {
       // the views are stacked, view k in rows k * H .. (k + 1) * H
@@ -858,7 +929,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     }
     if (gpuAcc) return { acc: gpuAcc, W, H, zMap, stats: { rays: 0, accepted: 0 } };
   }
-  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex, opts.satBoost ?? 1);
+  const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
   if (dm && opts.sharpen) dm = opts.bisg ? bisgFilter(dm, raw, cam, dev, width, cam.height, opts.sharpen) : sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
