@@ -23,9 +23,12 @@ const f = {
   yramp: (x, y) => 100 + 0.4 * (y % 1000),
   xramp2: (x, y) => 100 + 0.8 * (x % 500),
   yramp2: (x, y) => 100 + 0.8 * (y % 500),
+  gsat: (x, y) => (((x ^ y) & 1) === 0 ? 1023 : 700),
+  rbsat: (x, y) => (((x ^ y) & 1) === 1 ? 1023 : 700),
+  blk64: (x, y) => (((Math.floor(x / 64) + Math.floor(y / 64)) & 1) ? 1023 : 700),
   xstep: (x, y) => ((Math.floor(x / 64) & 1) ? 700 : 200),
   ystep: (x, y) => ((Math.floor(y / 64) & 1) ? 700 : 200),
-}[kind];
+}[kind] || (/^c\d+$/.test(kind) ? () => +kind.slice(1) : null);
 if (!f) { console.error('kind?'); process.exit(1); }
 for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) px[y * W + x] = Math.max(0, Math.min(1023, Math.round(f(x, y))));
 const packed = bytes.subarray(sec.offset, sec.offset + sec.length);
