@@ -802,3 +802,7 @@ whole atlas, and the digital lines are looked up from small tables (`al`, per-ro
 Two traps found on the way: (1) a sampler left at its default unit can alias the render target and make the draw fail with INVALID_OPERATION - every
 declared sampler is now bound; (2) recycled textures can hold NaN/Inf, so accumulators are cleared with a constant, never `0 * v`. `worker.js` uses the GPU
 path when a GPU is present (`__lytro.noGpuNr` forces the CPU), falling back to the CPU on any error.
+
+The post-splat view blur (worker.js VIEW_KERNEL, `filterPremultiplied`) is a 3-tap separable filter on the engine's 541 x 376 raster: a few milliseconds
+on the CPU, so it stays there. The two whole-pixel cost rules are 0.1 s and stay too. With the noise reduction ported, no step of the engine path that costs
+more than a fraction of a second is left on the CPU.
