@@ -371,10 +371,28 @@ export function engineLabels(infinityLambda) {
 }
 
 // views: nine Float32Array (RGB, w x h; the colour views after the colour matrix, gamma and match colour; index 8 the centre). Returns the depth map (lambda).
-export function engineDepthMap(views, w, h, labels, onProgress = () => {}) {
+export function engineDepthMap(views, w, h, labels, onProgress = () => {}, costFn = null, solveFn = null) {
   const L = labels.length;
   onProgress('cost', 0);
-  const cost = engineCostVolume(views, w, h, labels);
+  // `costFn`: the same volume computed elsewhere (the GPU, gpu/enginecost.js); it may throw, and the CPU takes over
+  let cost = null;
+  if (costFn) {
+    try {
+      cost = costFn(views, w, h, labels);
+    } catch (e) {
+      cost = null;
+    }
+  }
+  if (!cost) cost = engineCostVolume(views, w, h, labels);
+  // `solveFn`: aggregation, message passing and finish on the GPU (gpu/depthmatch.js engineSolveGpu); the CPU takes over if it throws
+  if (solveFn) {
+    try {
+      onProgress('smooth', 0.4);
+      return solveFn(cost, views[8], w, h, labels, onProgress);
+    } catch (e) {
+      // fall through to the CPU
+    }
+  }
   onProgress('aggregate', 0.3);
   const agg = engineAggregate(cost, views[8], w, h, L);
   onProgress('smooth', 0.4);

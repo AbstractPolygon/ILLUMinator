@@ -15,7 +15,7 @@ import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
 import { pickObjects, signatures } from './core/objects.js';
 import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
-import { measureMatchGpu } from './gpu/depthmatch.js';
+import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { removePeriodicPattern } from './core/notch.js';
 import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
@@ -26,6 +26,7 @@ import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhi
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { engineDenoise } from './core/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
+import { engineCostVolumeGpu } from './gpu/enginecost.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -1775,7 +1776,7 @@ function measureLytro(progress) {
     // The engine's own estimator on its views (core/enginedepth.js): in the engine's order, the centre last.
     const colors = viewColors(depthViews(), outW * outH, outW, outH);
     const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
-    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p));
+    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuCost) ? (v, w, h, labels) => engineCostVolumeGpu(state.gpu, v, w, h, labels) : null, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuSolve) ? (cost, guide, w, h, labels, prog) => engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog) : null);
     measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
   }
   if (!measured && state.gpu) {

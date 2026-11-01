@@ -11,6 +11,7 @@
 import { program } from './renderer.js';
 import { DEPTH_CBCA, DEPTH_EDGE, DEPTH_TRWS, DEPTH_LCOST, depthColorGuide, median3 } from '../core/depth.js';
 import { DEPTH_PASSES, viewColors } from '../core/depthmatch.js';
+import { ENGINE_AGG, ENGINE_MRF } from '../core/enginedepth.js';
 
 const MAX_VIEWS = 64;
 const MAX_LABELS = 64;
@@ -228,16 +229,22 @@ const GAUSS = `${HEAD}
 uniform sampler2D uSrc;
 uniform ivec2 uDir;
 uniform float uSigma;
+uniform int uTap;      // > 0: this many taps each side and edges renormalised over the taps inside (the engine's blend map); 0: 2.6 sigma, edges replicated
 out vec4 outColor;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   ivec2 size = textureSize(uSrc, 0);
-  int r = max(1, int(ceil(2.6 * uSigma)));
+  int r = uTap > 0 ? uTap : max(1, int(ceil(2.6 * uSigma)));
   float a = 0.0;
   float ks = 0.0;
   for (int t = -r; t <= r; t++) {
     float k = exp(-float(t * t) / (2.0 * uSigma * uSigma));
-    ivec2 q = clamp(p + uDir * t, ivec2(0), size - 1);
+    ivec2 q = p + uDir * t;
+    if (uTap > 0) {
+      if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
+    } else {
+      q = clamp(q, ivec2(0), size - 1);
+    }
     a += k * texelFetch(uSrc, q, 0).r;
     ks += k;
   }
@@ -519,6 +526,47 @@ void main() {
   outColor = vec4(hole * uHole + uPer * diff, (1.0 - hole) * uHole + uHidden, 0.0, 0.0);
 }`;
 
+// The engine's finish (core/enginedepth.js engineFinishDepth, before its median): the label of the smallest belief (first on ties), refined by a parabola
+// through the beliefs of the label and its neighbours, kept when it moves less than one label. Beliefs are sums here (smaller is better).
+const ENGINE_RESULT = `${HEAD}
+${ATLAS_COMMON}
+uniform sampler2D uU;
+uniform sampler2D uML;
+uniform sampler2D uMR;
+uniform sampler2D uMU;
+uniform sampler2D uMD;
+uniform int uK;
+uniform float uFirst;
+out vec4 outColor;
+
+float belief(ivec2 p, int k) {
+  ivec2 t = at(p, k >> 2);
+  int c = k & 3;
+  return (((texelFetch(uU, t, 0)[c] + texelFetch(uML, t, 0)[c]) + texelFetch(uMR, t, 0)[c]) + texelFetch(uMD, t, 0)[c]) + texelFetch(uMU, t, 0)[c];
+}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  int best = 0;
+  float bv = belief(p, 0);
+  for (int k = 1; k < ${MAX_LABELS}; k++) {
+    if (k >= uK) break;
+    float v = belief(p, k);
+    if (v < bv) { bv = v; best = k; }
+  }
+  float value = uFirst + float(best);
+  if (best > 0 && best < uK - 1) {
+    float cp = belief(p, best + 1);
+    float cm = belief(p, best - 1);
+    float den = (cp + cm) - bv * 2.0;
+    if (abs(den) > 0.0) {
+      float delta = (cp - cm) / (den * 2.0);
+      if (abs(delta) < 1.0) value -= delta;
+    }
+  }
+  outColor = vec4(value, float(best), 0.0, 0.0);
+}`;
+
 const WRITE_LAYER = `${HEAD}
 uniform sampler2D uSrc;
 uniform float uInvert;
@@ -544,6 +592,7 @@ function programs(gpu) {
       pack: program(gl, PACK),
       sweep: program(gl, SWEEP, SWEEP_VERTEX),
       result: program(gl, RESULT),
+      engineResult: program(gl, ENGINE_RESULT),
       landed: program(gl, LANDED, LANDED_VERTEX),
       seen: program(gl, SEEN),
       layer: program(gl, WRITE_LAYER),
@@ -761,6 +810,146 @@ function uploadLayer(work, array, layer, data, perPixel) {
   gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, work.w, work.h, 1, gl.RGBA, gl.FLOAT, rgba);
 }
 
+
+// The engine's aggregation, message passing and finish on the GPU (core/enginedepth.js engineAggregate + engineTrws + engineFinishDepth), for a cost
+// volume computed elsewhere (gpu/enginecost.js). volume: Float32Array ((y * w + x) * L + l); guide: the centre view, RGB; labels: consecutive whole
+// lambdas (a multiple of four of them). Returns the depth map in lambda, like engineDepthMap. Throws when the GPU cannot do it.
+export function engineSolveGpu(gpu, volume, guide, w, h, labels, onProgress = () => {}) {
+  const gl = gpu.gl;
+  const A = ENGINE_AGG;
+  const M = ENGINE_MRF;
+  const pr = programs(gpu);
+  const L = labels.length;
+  const n = w * h;
+  if (L % 4 || L > MAX_LABELS) throw new Error('Label count not supported by the GPU solver');
+  for (let l = 1; l < L; l++) if (labels[l] - labels[l - 1] !== 1) throw new Error('The GPU solver needs consecutive labels');
+  const work = new Work(gpu, w, h);
+  try {
+    const guideTex = work.tex(w, h);
+    const armsTex = work.tex(w, h);
+    const flatTmp = work.tex(w, h, gl.R32F);
+    const flatTex = work.tex(w, h, gl.R32F);
+    const gaussTmp = work.tex(w, h, gl.R32F);
+    const edgeTex = work.tex(w, h);
+    const costTex = work.tex(w, h, gl.R32F);
+    const aggA = work.tex(w, h);
+    const aggB = work.tex(w, h);
+    const outTex = work.tex(w, h);
+    const shape = work.atlasShape(L / 4);
+    const big = solverSet(work, shape);
+    const fullscreen = (prog, target) => {
+      gpu.target(target, w, h);
+      gl.useProgram(prog.p);
+    };
+    const bind = (prog, name, unit, tex) => {
+      gl.uniform1i(prog.u[name], unit);
+      gpu.bindTex(unit, tex);
+    };
+    upload2D(work, guideTex, guide, 3);
+    let Q = pr.arms;
+    fullscreen(Q, armsTex);
+    bind(Q, 'uGuide', 1, guideTex);
+    gl.uniform1i(Q.u.uArm, A.arm);
+    gl.uniform1i(Q.u.uLong, A.long);
+    gl.uniform1f(Q.u.uTau, A.tau1);
+    gl.uniform1f(Q.u.uTau2, A.tau2);
+    gpu.draw();
+    Q = pr.sobel;
+    fullscreen(Q, flatTmp);
+    bind(Q, 'uGuide', 1, guideTex);
+    gl.uniform1f(Q.u.uLo, A.lo);
+    gl.uniform1f(Q.u.uHi, A.hi);
+    gpu.draw();
+    Q = pr.gauss;
+    fullscreen(Q, gaussTmp);
+    bind(Q, 'uSrc', 1, flatTmp);
+    gl.uniform2i(Q.u.uDir, 1, 0);
+    gl.uniform1f(Q.u.uSigma, A.sigma);
+    gl.uniform1i(Q.u.uTap, A.tap);
+    gpu.draw();
+    fullscreen(Q, flatTex);
+    bind(Q, 'uSrc', 1, gaussTmp);
+    gl.uniform2i(Q.u.uDir, 0, 1);
+    gpu.draw();
+    Q = pr.edge;
+    fullscreen(Q, edgeTex);
+    bind(Q, 'uGuide', 1, guideTex);
+    gl.uniform1f(Q.u.uEdge, 0.2);
+    gl.uniform1f(Q.u.uLow, 0.5);
+    gpu.draw();
+    const slice = new Float32Array(n);
+    for (let k = 0; k < L; k++) {
+      for (let i = 0; i < n; i++) slice[i] = volume[i * L + k];
+      upload2D(work, costTex, slice, 1);
+      let src = costTex;
+      for (let round = 0; round < A.rounds; round++) {
+        const horizontalFirst = round % 2 === 0;
+        const aggPass = (from, to, axis, first, final) => {
+          const Z = pr.agg;
+          fullscreen(Z, to);
+          bind(Z, 'uSrc', 1, from);
+          bind(Z, 'uArms', 2, armsTex);
+          gl.uniform1i(Z.u.uAxis, axis);
+          gl.uniform1i(Z.u.uFirst, first);
+          gl.uniform1i(Z.u.uFinal, final);
+          gpu.draw();
+        };
+        aggPass(src, aggA, horizontalFirst ? 0 : 1, 1, 0);
+        aggPass(aggA, aggB, horizontalFirst ? 1 : 0, 0, 1);
+        src = aggB;
+      }
+      Q = pr.pack;
+      const g = k >> 2;
+      const ox = (g % shape.cols) * w;
+      const oy = Math.floor(g / shape.cols) * h;
+      const ch = k & 3;
+      gpu.target(big.U, shape.width, shape.height);
+      gl.viewport(ox, oy, w, h);
+      gl.useProgram(Q.p);
+      bind(Q, 'uCost', 1, costTex);
+      bind(Q, 'uAgg', 2, src);
+      bind(Q, 'uFlat', 3, flatTex);
+      gl.uniform1i(Q.u.uUseFlat, 1);
+      gl.uniform1f(Q.u.uScale, 1);
+      gl.uniform2i(Q.u.uOrigin, ox, oy);
+      gl.colorMask(ch === 0, ch === 1, ch === 2, ch === 3);
+      gpu.draw();
+      gl.colorMask(true, true, true, true);
+    }
+    onProgress('smooth', 0.4);
+    solve(work, big, L, { iterations: M.iterations, slope: M.slope, trunc: M.truncate, gamma: M.gamma }, edgeTex);
+    const R = pr.engineResult;
+    gpu.target(outTex, w, h);
+    gl.useProgram(R.p);
+    gl.uniform1i(R.u.uW, w);
+    gl.uniform1i(R.u.uH, h);
+    gl.uniform1i(R.u.uG, shape.groups);
+    gl.uniform1i(R.u.uCols, shape.cols);
+    gl.uniform1i(R.u.uK, L);
+    gl.uniform1f(R.u.uFirst, labels[0]);
+    [big.U, big.ML, big.MR, big.MU, big.MD].forEach((t, i) => {
+      gl.uniform1i(R.u[['uU', 'uML', 'uMR', 'uMU', 'uMD'][i]], i);
+      gpu.bindTex(i, t);
+    });
+    gpu.draw();
+    const buf = readRGBA(work, outTex);
+    const sub = new Float32Array(n);
+    for (let i = 0; i < n; i++) sub[i] = buf[4 * i];
+    // the 3 x 3 median of the engine (interior pixels only)
+    const out = new Float32Array(sub);
+    const a = new Float32Array(9);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      let q = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) a[q++] = sub[(y + dy) * w + x + dx];
+      a.sort();
+      out[y * w + x] = a[4];
+    }
+    return out;
+  } finally {
+    work.dispose();
+  }
+}
+
 // Depth of the center view, as core/depthmatch.js measureMatch: { alpha, cost, meanCost }.
 // `views`: [{ u, v, rgb, gain, detail }]. Throws when the GPU cannot do it
 // (the caller falls back to the CPU version).
@@ -848,6 +1037,7 @@ export function measureMatchGpu(gpu, views, w, h, { onProgress } = {}) {
         bind(Q, 'uSrc', 1, flatTmp);
         gl.uniform2i(Q.u.uDir, 1, 0);
         gl.uniform1f(Q.u.uSigma, DEPTH_EDGE.sigma);
+        gl.uniform1i(Q.u.uTap, 0);
         gpu.draw();
         fullscreen(Q, flatTex);
         bind(Q, 'uSrc', 1, outTex);
