@@ -870,3 +870,23 @@ Dumped for batch4-2, batch4-1 and 5b8b8107 (`dd/rwm*`).
   sensor is not 1 per colour (b4-2: 1.002 / 1.022 / 1.049; b4-1: 1.010 / 1.007 / 1.009; 5b8b: 0.998 / 1.016 / 1.038), so the plane is changed after the
   mean normalisation (a lift of the dark rim), and the lift tracks the photo's analog gain / white balance, not the frame. Next: hook `Fit` after each of its
   stages (or read the pointwise curve on a photo with analogGain 1 and a non-node zoom, and one with gain 8 on a node) to separate the two causes.
+
+### Colour tilt, round 4: the plane depends on the photo's white balance gains
+
+Controlled series (photos taken at nearly the same zoom / focus, 479 / 1146 .. 1207, so the same calibration node, with analog gain 1, 2, 4, 8; hook dump of the
+plane for each): the lift E - N of the engine's plane over ours changes with the photo, not with the frame. Per-colour linear fit of the median curve
+(E = (m - b'_c) / M_c; m is the frame's pixel value):
+
+| photo | analog gain | as-shot gains r / g / b | b'_R / b'_G / b'_B |
+|---|---|---|---|
+| 2bc3358c | 1 | 1.30 / 1.00 / 1.34 | 24 / 25 / 25 |
+| 017c4fd7 | 2 | 1.34 / 1.00 / 1.28 | 24 / 23 / 8 |
+| batch4-4 | 8 | 1.13 / 1.00 / 1.76 | 39 / 8 / -25 |
+| 09eba2d6 | 4 | 1.10 / 1.00 / 1.85 | 42 / 4 / -35 |
+| batch4-2 | 8 | 1.00 / 1.02 / 1.78 | 52 / -3 / -72 (far from its calibration node) |
+
+For R, b' is about 145 - 93 w_R (24 .. 52 for w from 1.34 to 1.0); for B about 179 - 115 w_B for the photos on the node (the far-from-node photo goes lower
+still). So the engine builds the modulation plane with something that depends on the as-shot white balance gains (and, a little, on the distance of the photo
+from the frame's node), e.g. the plane is white balanced / clipped before the division, or a colour-dependent term enters the black. Our plane uses neither.
+Next test: apply the as-shot gains to the frame (m * w_c - black) before the per-colour mean normalisation, and the radial / pointwise residual against the dumps
+(`dd/ser_g1 .. g8`, `dd/rwm*`, frames via `extmod.mjs`) will say if that is the missing term.
