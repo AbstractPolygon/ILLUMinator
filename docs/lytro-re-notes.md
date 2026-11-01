@@ -925,3 +925,11 @@ Library after the engine plane (own depth, default path, fitted MAE against Lytr
 d24cf288 0.50 (0.50), eba001cb 0.46 (0.49), f72b3923 0.56 (0.58). The unfitted MAE (the engine's own colour units) falls on most photos (09eba2d6 1.65 -> 0.68, 2bc3358c 1.41 -> 0.68, 57f2af75 2.15 -> 0.79,
 5b8b8107 2.19 -> 0.92, b4-1 1.32 -> 0.72) and the shifts against the engine's picture are 0 .. -0.7 px (b4-2 was +2.7 / +1.7) with scale 0.9995 .. 1.0000. The setting `engineModulation: false`
 (or `__lytro.rawModulation`) returns to the plain white image.
+
+### AWB reads the plain modulation frame (regression from the engine plane, fixed)
+
+The engine's white balance (`crgb2cct` at 0x16f5b0 in tnt.exe) was hooked on 017c4fd7 and 09eba2d6: it receives the gains (1.3013, 1, 1.6512) and (1.1171, 1, 1.8517). The port, once the demodulation plane
+(`core/enginemod.js`) replaced the plain frame as the AWB image's divisor, gave (1.3164, 1, 1.6296) and (1.1447, 1, 1.8405) (1 to 2.5 % off, temperature 4151 K against 4052 K). With the plain frame
+divided by its mean per colour (the image the engine's AWB uses) it gives (1.3022, 1, 1.6529) and (1.1181, 1, 1.8527), within 0.1 % of the engine. `loadModulation` keeps the frame on the plane (`.frame`)
+and `computeEngineWb` uses it. The R +2.6 % / B -2 % offset found when comparing ours with the engine's picture per channel was this.
+Note: `linscore.py` compares camera RGB before any gain, so it cannot see a white balance change; colour checks need the final picture or the hooked gains.

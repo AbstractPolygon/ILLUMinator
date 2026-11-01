@@ -228,7 +228,7 @@ function computeEngineWb() {
   try {
     const W = Math.round(cam.width / lf.grid.pitch);
     const H = Math.round(cam.height / lf.grid.pitch);
-    const image = awbImage(lf.raw, state.modulation, cam, state.dev, engineLatticeIdx(lf), W, H);
+    const image = awbImage(lf.raw, state.modulation.frame || state.modulation, cam, state.dev, engineLatticeIdx(lf), W, H);
     const res = engineAwb({ image, W, H, exposure: cam.capture.exposure, gain: cam.capture.analogGain || 1, responses: cam.capture.responses, camera: cam.wb });
     const rel = res.gains.map((g, i) => g / cam.wb[i]);
     if (dbg.logTime) console.error('ENGINE_WB', JSON.stringify(res.gains), 'camera', JSON.stringify(cam.wb), 'cct', Math.round(res.cct));
@@ -1648,7 +1648,10 @@ async function loadModulation(lf) {
     hot = null;
   }
   try {
-    return engineModulation(raw, lf.cam, state.dev, lf.grid, hot);
+    const plane = engineModulation(raw, lf.cam, state.dev, lf.grid, hot);
+    // the engine's white balance reads the plain frame (its image is divided by the frame over its mean), not the demodulation plane
+    plane.frame = raw;
+    return plane;
   } catch (e) {
     console.error('ENGINEMOD failed', e && e.message);
     return raw;
