@@ -832,3 +832,19 @@ Dumped for batch4-2, batch4-1 and 5b8b8107 (`dd/rwm*`).
   colour-dependent remap, which is what the data shows, but a first emulation (block means of the photo raw as A, our plane as B) anti-correlates with the
   engine, so the roles / scalings of the two images are not yet right. Next: hook CompensateBitmap's two image arguments (before / after) and read the
   config flags 0x2b69 / 0x2b6b for the ILLUM.
+
+### Colour tilt, round 2 (hooking CompensateBitmap, curve of the plane)
+
+- `CompensateBitmap` (tnt.exe RVA 0x1e3a70, hooked with a 15-byte displacement) is never called for b4-2: its config flag (0x2b69 in the Mach-O build) is
+  off for the ILLUM, so that lead is closed. (Hook note: the Ghidra project `p160` is the Mach-O / Middleware image, whose offsets are not tnt.exe's; locate
+  tnt.exe code by scanning for the constant's RIP-relative reference and the `.pdata` entry, as done here.)
+- The engine's plane is a deterministic, smooth, curved function of the modulation value at the same pixel, per colour: for pixels with the same value
+  (e.g. R = 300) E is identical (0.5710) except a few corrected pixels, and the curve is the same in the centre, edges and corners to about 0.01 (the small
+  drift is RemoveIlluminationVariation's smooth shift). It is not linear: the slope of the green curve falls 20 % between 250 and 525 and rises again to
+  750 (b4-2: G 250 -> 0.401, 400 -> 0.680, 600 -> 1.000, 750 -> 1.256). The curve differs per colour and per modulation frame (b4-1 and 5b8b have their own),
+  so it is not a fixed camera curve either, and (m - b)^p / a m^p + c fits leave 1 - 3 % errors with no common p.
+- Everything in Fit() that is pointwise (hot pixel fix, outlier replacement, floor, divide by the per-colour mean) is linear in the value, so the curve has
+  to come from the accumulate / interpolate stage (InterpolateModulationBitmap: weighted sum of whole-image samples chosen by zoom / focus, with a black
+  value returned by the sample selection and zeroed when its bool argument is false) or from the frame's own metadata (CompressionSimulation runs the
+  lossy codec only when the compression config is on). Next: hook AccumulateModulationImages' arguments (black, weights, sample ids) and the sample list
+  for b4-2 (zoom 80 / focus 650 is exactly calibration node MOD_0026) to see which frames and weights the engine used.
