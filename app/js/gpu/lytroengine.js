@@ -11,6 +11,7 @@ import { program } from './renderer.js';
 import { EXPFLUT, H1, V1, S1, H2, V2 } from '../core/lfdemosaic.js';
 import { forEachLensPixel } from '../core/superres.js';
 import { lensRange } from '../core/lenslet.js';
+import { bisgMatrix } from '../core/lytroedof.js';
 import { LAMBDA_TO_ALPHA } from '../core/recipe.js';
 import { DEPTH_STEP_TOLERANCE } from '../core/superres.js';
 
@@ -770,7 +771,7 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   const a = 1 - c;
 
   const bis = !!P.opts.bisg;
-  const ccm = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const ccm = bisgMatrix(cam);
   const inv3 = (m) => {
     const [a0, b0, c0, d0, e0, f0, g0, h0, i0] = m;
     const A = e0 * i0 - f0 * h0;

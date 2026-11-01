@@ -943,3 +943,13 @@ photo's colour matrix M (metadata +0xd0 .. 0xf0, blended at the engine's tempera
 chroma at +0x18 .. , per row). The YCbCr task multiplies by g when bit 0 of its flags is set, computes a weight per pixel from the local neighbour differences (scaled by 1 / (+0x30)) clamped to 0 .. 1, and mixes the
 pixel's Cb and Cr toward those offsets by that weight, times (weight + 1 + (+0x34)). The chroma suppression task (matrix at +0x50, inverse at +0x80, weight curve from the saturation map) is what `bisgFilter` ports.
 Not yet checked against the engine pixel for pixel: the (weight + 1 + (+0x34)) factor of the YCbCr task and whether the ILLUM sets the gain flag; the R/G +1.5 % left in the midtones is the candidate effect.
+
+### The blend stage's matrix is the file's lowest-temperature matrix (hooked)
+
+Hook on the chroma suppression task (tnt.exe 0x299bf0, object dumped at entry, `bi_task10`): thresholds -0.8 / -0.3 / 4 / 6 (as in `bisgFilter`), forward matrix at +0x50 (columns Y, Cb, Cr; rows by input colour)
+and back matrix at +0x80 (Y, Cb, Cr to XYZ, first column the D65 white). Multiplying them out and removing the XYZ of sRGB gives exactly the file's 2850 K matrix (2.0063 -0.5363 -0.4700 / -0.6019 1.8361 -0.2341 /
+-0.8173 -1.6435 3.4608) on 017c4fd7 and the same bytes on 09eba2d6 (different as-shot matrices 2.3132 and 2.109, AWB temperatures 4052 K and 3157 K). So the stage is independent of the photo's colour:
+`bisgMatrix` (lytroedof.js, also the GPU path) now takes the lowest temperature entry of `perCcm`; `__bisgAsShot` brings the old behaviour back. The YCbCr task (0x29f420) is never called with the ILLUM config
+(hooked, no hit), which settles the open question about its gain flag and the (weight + 1 + offset) factor.
+Effect on 017c4fd7 against the engine's picture is small (bright bin 0.4 .. 0.8 B/G 1.0945 -> 1.0924, midtones unchanged): the excess blue in bright pixels (B/G 1.09, 1.22 above 0.8) comes from elsewhere
+(saturation recovery on the demosaiced image, not the matrix).

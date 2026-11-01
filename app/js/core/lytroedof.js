@@ -4,6 +4,7 @@
 // reconstructionFilterRef) reconstructs the picture from the splat.
 
 import { lensWarp } from './lens.js';
+import { blendedCcm } from './raw.js';
 import { FILTER_DESCRIPTORS } from './lytrofilters.js';
 
 // ---- the photo's reconstruction filter bank --------------------------------
@@ -780,8 +781,16 @@ function suppressCurve(v) {
   return 1;
 }
 
+// The matrix the engine's chroma suppression and highlight stage works in: hooked on the running engine (BlendIlluminant task at 0x299bf0, object +0x50 / +0x80), it is the file's matrix of the
+// LOWEST colour temperature (2850 K), on every photo tried (017c4fd7, 09eba2d6), not the photo's as-shot matrix nor the one blended at its white balance temperature.
+export function bisgMatrix(cam) {
+  const asShot = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  if (globalThis.__bisgAsShot || !cam.perCcm || !cam.perCcm.length) return asShot;
+  return blendedCcm(cam.perCcm, 0, asShot);
+}
+
 function bisgFilter(dm, raw, cam, dev, W, H, { amount = 0.25, c = 0.7 } = {}) {
-  const ccm = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const ccm = bisgMatrix(cam);
   const ccmInv = inv3(ccm);
   const toXyz = mul3.bind(null, SRGB_XYZ);
   const fromXyz = inv3(SRGB_XYZ);
