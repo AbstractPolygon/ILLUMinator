@@ -806,3 +806,29 @@ path when a GPU is present (`__lytro.noGpuNr` forces the CPU), falling back to t
 The post-splat view blur (worker.js VIEW_KERNEL, `filterPremultiplied`) is a 3-tap separable filter on the engine's 541 x 376 raster: a few milliseconds
 on the CPU, so it stays there. The two whole-pixel cost rules are 0.1 s and stay too. With the noise reduction ported, no step of the engine path that costs
 more than a fraction of a second is left on the CPU.
+
+## Colour tilt: it is the engine's modulation plane (found with a new hook dump)
+
+Hook change (hook.c, class 13 = `DemodulationBitmapReweightSubset`): the task's state holds two full-sensor float planes (7728 x 5368): the engine's
+normalised modulation plane (state member 0x10, header at +0xe8; mean about 1.0, range 0.2 .. 1.46) and the demodulated input (member 0x18, +0x20).
+Dumped for batch4-2, batch4-1 and 5b8b8107 (`dd/rwm*`).
+
+- Substituting the engine's plane for ours (modulation frame rebuilt as `E * mean_c + black`) removes the radial colour tilt in the pixel comparison:
+  G/R 0.972 .. 0.979 and B/R 0.987 .. 1.004 flat over r = 0.03 .. 0.47 (was 0.964 -> 0.930 and 0.984 -> 0.908), correlation 0.9954 -> 0.9967,
+  relative rms 10 % -> 8 %. So the tilt is entirely the modulation normalisation; demosaic and the rest line up.
+- The engine's plane equals ours in the lens centre (within 0.2 %) and differs at the disc rim, more for B than G than R, more on the +u side (B up to
+  +19 % at r 0.45 .. 0.5 on the +u side). Per colour it is close to linear in ours: E = 0.975 O + 0.027 (R), 0.913 O + 0.112 (G), 0.796 O + 0.259 (B)
+  on b4-2; the same fit on b4-1 and 5b8b gives different constants (implied black 22/23/25 on b4-1; 60/-9/-94 on 5b8b), so the rule depends on the photo.
+  The frame is not just (m - black) / mean.
+- Ruled out: a weighted (m^2) demosaic (G/R still 0.93 at the rim), a sub-pixel shift, a pure spatial smoothing kernel (a 5 x 5 or 9 x 9 fit leaves 50 %
+  of the difference), a blend with the per-lens template, a blend of the neighbouring calibration white images (MOD_0022 .. 0030), and
+  `RemoveIlluminationVariation` (sigma 30 Gaussian high-pass per Bayer phase plane, floor 1/65536: locally an identity).
+- Fit() order (Mach-O 100462990): InterpolateModulationBitmap -> (if cfg 0x2408 off) average the two green means -> correctAllHotPixelsInModulationImage
+  (cfg 0x23f0) -> removeModulationImageOutliers (flag 0x2b6a) -> RemoveIlluminationVariation (flag 0x2b6b) -> floor -> divide by the per-colour mean ->
+  floor. `PerformInitialDemodulation` (100465 3d0) calls `CompensateBitmap` once (flag 0x2b69, state +0xa0) before the demodulate tasks.
+- Open lead: `CompensateBitmap` (1004642c0). Per colour it builds 8 x 8 block means of one image (x 1/16 for R and B, 1/32 for G), smooths them
+  (SpatiallyFilterImage), fills a 30 x 30 table indexed by (block mean x 30, (1 / pixel of the other image) x 8.5714) with bilinear weights holding
+  sum(1/pixel) and sum(pixel / mean), divides, and rewrites the second image as pixel x table(mean, 1/pixel). That is a photo-dependent, level-dependent,
+  colour-dependent remap, which is what the data shows, but a first emulation (block means of the photo raw as A, our plane as B) anti-correlates with the
+  engine, so the roles / scalings of the two images are not yet right. Next: hook CompensateBitmap's two image arguments (before / after) and read the
+  config flags 0x2b69 / 0x2b6b for the ILLUM.
