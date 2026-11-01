@@ -441,7 +441,7 @@ export function engineColorScale(modulation, cam, dev, g) {
   forEachLensPixel(g, cam, 2.3, (i, x, y, u, v) => {
     if (u * u + v * v > 5.3) return;
     const ch = dev.cfa[y & 1][x & 1];
-    centre[ch] += Math.max(0, modulation[i] - dev.black[ch]);
+    centre[ch] += Math.max(0, modulation[i] - dev.black[ch] * MOD_BLACK());
     nCentre[ch]++;
   }, null, 3);
   return [0, 1, 2].map((ch) => {
@@ -450,6 +450,7 @@ export function engineColorScale(modulation, cam, dev, g) {
   });
 }
 
+const MOD_BLACK = () => (globalThis.__modBlack === undefined ? 1 : globalThis.__modBlack);
 export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false, need = null) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
@@ -464,7 +465,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
       const key = lensX + lensY * 1e6;
       let c = centres.get(key);
       if (!c) centres.set(key, (c = new Float64Array(6)));
-      c[ch] += Math.max(0, modulation[i] - dev.black[ch]);
+      c[ch] += Math.max(0, modulation[i] - dev.black[ch] * MOD_BLACK());
       c[3 + ch]++;
     });
   }
@@ -492,7 +493,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
     let gain = 0;
     if (centres) {
       const c = centres.get(lastLens);
-      const m = Math.max(0, modulation[i] - dev.black[ch]);
+      const m = Math.max(0, modulation[i] - dev.black[ch] * MOD_BLACK());
       const ref = refAll ? refAll[ch] : c && c[3 + ch] ? c[ch] / c[3 + ch] : 0;
       gain = m > ref * (refAll ? 0.02 : 0.15) ? ref / m : 0;
     } else {
