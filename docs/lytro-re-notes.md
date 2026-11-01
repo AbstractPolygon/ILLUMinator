@@ -933,3 +933,7 @@ The engine's white balance (`crgb2cct` at 0x16f5b0 in tnt.exe) was hooked on 017
 divided by its mean per colour (the image the engine's AWB uses) it gives (1.3022, 1, 1.6529) and (1.1181, 1, 1.8527), within 0.1 % of the engine. `loadModulation` keeps the frame on the plane (`.frame`)
 and `computeEngineWb` uses it. The R +2.6 % / B -2 % offset found when comparing ours with the engine's picture per channel was this.
 Note: `linscore.py` compares camera RGB before any gain, so it cannot see a white balance change; colour checks need the final picture or the hooked gains.
+
+Check after the fix (017c4fd7, camera RGB before the blend stage, ours x engine colour scale x engine gains / camera gains, against Lytro Desktop's pre-adjust picture, box mean 9 px, by brightness):
+at 0.02 .. 0.15 R 1.007, G 0.993, B 0.987; at 0.15 .. 0.4 R 1.001, G 0.987, B 0.993 (R/G +1.5 %, B/G about 0). The whole offset that was R +2.6 % / B -2 % is gone; what is left is about the constant
+the blend stage is known to add (R/G 0.9927, B/G 0.9877). Above 0.4 the picture diverges (B/G 1.09) because the compared plane is before the chroma suppression and highlight stage (`bisgFilter`), which the engine's picture already includes.
