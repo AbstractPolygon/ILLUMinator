@@ -864,3 +864,9 @@ Dumped for batch4-2, batch4-1 and 5b8b8107 (`dd/rwm*`).
   B 0.941; centre offsets under 0.05 px; b4-1: about 0.985 for all colours), or an additive position-in-lens profile per colour. The pointwise curve fits best.
   None of them is derived from a known quantity yet, so nothing was changed in the app. `ApplyDemodulation` is a plain per-pixel division by the plane, so
   the whole effect sits in how the plane is built from the frame (Interpolate / Accumulate / Fit).
+
+- Correlates found (3 photos only): the big lift of the plane (E - N up to +0.17 for B) occurs on the two photos with analogGain 8 (b4-2, 5b8b; photo black 66,
+  as-shot blue gain 1.78 / 1.92) and is 4 times smaller on b4-1 (analogGain 1, black 64, blue gain 1.34, photo on a calibration node). The mean of E over the
+  sensor is not 1 per colour (b4-2: 1.002 / 1.022 / 1.049; b4-1: 1.010 / 1.007 / 1.009; 5b8b: 0.998 / 1.016 / 1.038), so the plane is changed after the
+  mean normalisation (a lift of the dark rim), and the lift tracks the photo's analog gain / white balance, not the frame. Next: hook `Fit` after each of its
+  stages (or read the pointwise curve on a photo with analogGain 1 and a non-node zoom, and one with gain 8 on a node) to separate the two causes.
