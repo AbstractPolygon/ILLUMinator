@@ -6,11 +6,14 @@ import { scanTar, readTarEntry } from './tar.js';
 import { cameraInfo, unpackRaw } from './raw.js';
 import { gridFromCamera, lensCenters, lensCenter, toLocal } from './lenslet.js';
 
-// HOTPIXEL.BIN: a 32-bit count N, then N/2 column entries followed by N/2
-// row pairs, all little-endian 32-bit words made of two 16-bit halves.
-//   first half:  the column x of each entry (both halves equal x)
-//   second half: two rows of that column, (rowB << 16) | rowA
-// So the file lists N defective pixels, two per entry. Returns the sorted
+// HOTPIXEL.BIN: a 32-bit count N, then N/2 column words followed by N/2
+// row words, all little-endian 32-bit words made of two 16-bit halves.
+//   column word: (xB << 16) | xA
+//   row word:    (yB << 16) | yA
+// Entry i names the pixels (xA, yA) and (xB, yB), so the file lists N defective
+// pixels, two per entry (usually in one column, xA = xB, but not always: the
+// engine's modulation correction on a real file differs from the one-column
+// reading at the entries where the halves differ). Returns the sorted
 // pixel indices (y * width + x), or null when the file does not fit.
 export function parseHotPixels(bytes, width, height) {
   if (!bytes || bytes.length < 8) return null;
@@ -21,12 +24,13 @@ export function parseHotPixels(bytes, width, height) {
   const out = new Uint32Array(n);
   let k = 0;
   for (let i = 0; i < half; i++) {
-    const x = view.getUint32(4 + i * 4, true) & 0xffff;
+    const cols = view.getUint32(4 + i * 4, true);
     const rows = view.getUint32(4 + (half + i) * 4, true);
-    if (x >= width) return null;
-    for (const y of [rows & 0xffff, rows >>> 16]) {
-      if (y >= height) return null;
-      out[k++] = y * width + x;
+    const xs = [cols & 0xffff, cols >>> 16];
+    const ys = [rows & 0xffff, rows >>> 16];
+    for (let j = 0; j < 2; j++) {
+      if (xs[j] >= width || ys[j] >= height) return null;
+      out[k++] = ys[j] * width + xs[j];
     }
   }
   return out.sort().filter((v, i, a) => i === 0 || v !== a[i - 1]);

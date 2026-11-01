@@ -432,7 +432,7 @@ export function engineColorScale(modulation, cam, dev, g) {
     const row = dev.cfa[y & 1];
     for (let x = 0; x < width; x++) {
       const ch = row[x & 1];
-      whole[ch] += Math.max(0, modulation[y * width + x] - dev.black[ch]);
+      if (!modulation.eUnit) whole[ch] += Math.max(0, modulation[y * width + x] - dev.black[ch]);
       nWhole[ch]++;
     }
   }
@@ -445,7 +445,8 @@ export function engineColorScale(modulation, cam, dev, g) {
     nCentre[ch]++;
   }, null, 3);
   return [0, 1, 2].map((ch) => {
-    const f = nCentre[ch] && nWhole[ch] && centre[ch] ? whole[ch] / nWhole[ch] / (centre[ch] / nCentre[ch]) : 0.82;
+    // the engine's own plane (core/enginemod.js) is in units where the engine divides by it directly, i.e. its "whole sensor mean" is the unit
+    const f = nCentre[ch] && nWhole[ch] && centre[ch] ? (modulation.eUnit ? modulation.eUnit : whole[ch] / nWhole[ch]) / (centre[ch] / nCentre[ch]) : 0.82;
     return ((cam.white[ch] - cam.black[ch]) / 1023) * f;
   });
 }

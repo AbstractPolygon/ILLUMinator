@@ -1,5 +1,6 @@
 // High level decoding shared by the worker and the command line tool.
 
+import { parseHotPixels } from './calibration.js';
 import { bufferReader, isLfp, readLightFieldPicture, photoIdOf, LfpError } from './lfp.js';
 import { cameraInfo, guessRawLayout, packedSize, unpackRaw } from './raw.js';
 import { findRecipe } from './recipe.js';
@@ -69,13 +70,34 @@ export async function decodeLightField(bytes, { onProgress = () => {}, calibrate
     // Not a sensor image we understand (e.g. a processed file); show stacks only.
     return result;
   }
+  // The camera's defective pixel list stored with the photo (the engine's modulation correction reads it), as sensor pixel indices.
+  if (picture && picture.frame && picture.frame.hotPixelRef) {
+    result.readHotPixels = async () => {
+      try {
+        const bytes = await picture.container.readSection(picture.frame.hotPixelRef);
+        return parseHotPixels(bytes, cam.width, cam.height);
+      } catch {
+        return null;
+      }
+    };
+  }
   // The camera's white image stored with the photo (what the engine divides out: DemodulationAlgorithm), read on demand.
   if (picture && picture.frame && picture.frame.modulationDataRef) {
     const ref = picture.frame.modulationDataRef;
     result.readModulation = async () => {
       try {
         const bytes = await picture.container.readSection(ref);
-        return bytes && bytes.length >= packedSize(cam.width, cam.height, cam.bits) ? unpackRaw(bytes, cam.width, cam.height, cam.bits) : null;
+        const img = bytes && bytes.length >= packedSize(cam.width, cam.height, cam.bits) ? unpackRaw(bytes, cam.width, cam.height, cam.bits) : null;
+        if (img && picture.frame.modulationDataMetadataRef) {
+          // the white image's own black level (its metadata), which the engine subtracts from it
+          try {
+            const meta = JSON.parse(new TextDecoder().decode(await picture.container.readSection(picture.frame.modulationDataMetadataRef)));
+            const fm = meta.master.picture.frameArray[0].frame.metadata.image.rawDetails.pixelFormat.black;
+            const b = Number(fm.r);
+            if (Number.isFinite(b)) img.black = b;
+          } catch {}
+        }
+        return img;
       } catch {
         return null;
       }

@@ -25,6 +25,7 @@ import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { engineDenoise } from './core/enginenr.js';
+import { engineModulation } from './core/enginemod.js';
 import { nrFilterGpu } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
 import { engineCostVolumeGpu } from './gpu/enginecost.js';
@@ -570,7 +571,7 @@ async function open({ id, bytes, synthetic, userDepth = null }) {
     state.usmMap = null;
     if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
       try {
-        state.modulation = await state.lf.readModulation();
+        state.modulation = await loadModulation(state.lf);
         state.engineScale = state.modulation ? engineColorScale(state.modulation, state.lf.cam, state.dev, state.lf.grid) : null;
         state.engineWb = state.modulation ? computeEngineWb() : null;
       } catch (e) {
@@ -1009,7 +1010,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
   }
   if (exactDepth) depth5 = dbg.shiftConst ? { ...state.depthExact.up, data: Float32Array.from(state.depthExact.up.data, (x) => x + dbg.shiftConst * LAMBDA_TO_ALPHA) } : state.depthExact.up;
   progress('Splatting the rays', 0);
-  if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
+  if (state.modulation === undefined) state.modulation = lf.readModulation ? await loadModulation(lf) : null;
   const sp = lytroSplat({
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
@@ -1634,6 +1635,26 @@ function engineDepthAvailable() {
   return !!lf && state.settings.engineViews !== false && dbg.engineViews !== false && !dbg.legacy && !dbg.noExact && !state.pp && !!lf.geometryBytes && !!lf.rayWarpBytes && !!lf.metadata;
 }
 
+// The engine's demodulation plane for the photo (core/enginemod.js): the white image run through the engine's Fit (hot pixel list, per-colour means, response curve, disk
+// centre rescale). settings.engineModulation = false (or __lytro.rawModulation) keeps the plain white image.
+async function loadModulation(lf) {
+  const raw = await lf.readModulation();
+  const dbg = globalThis.__lytro || {};
+  if (!raw || dbg.rawModulation || state.settings.engineModulation === false) return raw;
+  let hot = null;
+  try {
+    hot = lf.readHotPixels ? await lf.readHotPixels() : null;
+  } catch {
+    hot = null;
+  }
+  try {
+    return engineModulation(raw, lf.cam, state.dev, lf.grid, hot);
+  } catch (e) {
+    console.error('ENGINEMOD failed', e && e.message);
+    return raw;
+  }
+}
+
 async function prepareEngineViews(id) {
   state.engineViews = null;
   const { lf, dev, sampler } = state;
@@ -1641,7 +1662,7 @@ async function prepareEngineViews(id) {
   // On by default for raw photos (settings.engineViews = false turns it off): the GPU ray splat when there is one (gpu/lytroengine.js, agrees with the CPU to about 1 %), else the CPU (about a minute on a full sensor).
   if (!lf || !engineDepthAvailable() || dbg.legacy || dbg.noExact || state.pp || !lf.geometryBytes || !lf.rayWarpBytes || !lf.metadata) return;
   if (!state.vignetting) state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
-  if (state.modulation === undefined) state.modulation = lf.readModulation ? await lf.readModulation() : null;
+  if (state.modulation === undefined) state.modulation = lf.readModulation ? await loadModulation(lf) : null;
   if (!state.modulation) return;
   // the engine's aperture raster (256 x 256, dumped from MNOAPTask): discs of radius 7.65 cells = 0.06 pitches around the 0.25 ring
   const radius = dbg.viewRadius ?? 0.06;

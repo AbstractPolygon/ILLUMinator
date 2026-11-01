@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import { parseHotPixels, makeHotPixelFile } from '../app/js/core/calibration.js';
 import { fixHotPixels } from '../app/js/core/raw.js';
 
+test('hot pixel entries name two pixels with their own columns and rows', () => {
+  // (xB << 16 | xA), (yB << 16 | yA): pixels (3, 5) and (4, 9) in one entry
+  const bytes = new Uint8Array(4 + 8);
+  const v = new DataView(bytes.buffer);
+  v.setUint32(0, 2, true);
+  v.setUint32(4, (4 << 16) | 3, true);
+  v.setUint32(8, (9 << 16) | 5, true);
+  const px = parseHotPixels(bytes, 10, 30);
+  assert.deepEqual(Array.from(px), [5 * 10 + 3, 9 * 10 + 4]);
+});
+
 test('a hot pixel file lists two rows for each column entry', () => {
   const file = makeHotPixelFile([[3, 5, 9], [3, 20, 21], [7, 0, 11]]);
   const px = parseHotPixels(file, 10, 30);

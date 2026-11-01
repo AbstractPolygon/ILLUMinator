@@ -890,3 +890,38 @@ still). So the engine builds the modulation plane with something that depends on
 from the frame's node), e.g. the plane is white balanced / clipped before the division, or a colour-dependent term enters the black. Our plane uses neither.
 Next test: apply the as-shot gains to the frame (m * w_c - black) before the per-colour mean normalisation, and the radial / pointwise residual against the dumps
 (`dd/ser_g1 .. g8`, `dd/rwm*`, frames via `extmod.mjs`) will say if that is the missing term.
+
+## Colour tilt solved: the engine's demodulation plane (core/enginemod.js)
+
+The radial colour tilt came from the plane the engine divides each photo by. It is not the white image over its mean; after the per-colour mean it runs a response correction that lifts the
+dim rim of every lens disk (most for blue). Found by dumping the plane at every stage with hooks (tnt.exe, Fit at 0x1e6230 and the methods it calls), then decompiling the stages.
+
+Stage by stage (all checked against the plane dumped from the running engine, same run):
+1. `Accumulate` (0x1e4fc0): one sample, weight 1.0: `P = expand16(m) - 4100`, where `expand16(m) = m << 6 | m >> 4` (the 10 bit white image as a 16 bit sample) and 4100 = expand16(64), the white
+   image's own black (its metadata `black.r`; the photo's black is not used).
+2. Hot pixels (0x1e5f20): the photo's `hotPixelRef` list (HOTPIXEL.BIN, 401 976 pixels on b4-2) is replaced by the mean of the not listed, not negative neighbours in the radius 2 diamond (12 pixels),
+   every neighbour scaled by `mean(target phase) / mean(its phase)`. Pixels within 3 of the border keep their value. **Format fix**: the column word of an entry is `(xB << 16) | xA`, the row word
+   `(yB << 16) | yA`, i.e. the two pixels of an entry have their own columns (our parser used xA for both; the two readings differ at about 5000 entries).
+3. Outlier removal (0x1e0670, flag 0x6632 on; values above 3.5 x the phase mean are replaced) did not change any pixel in the frames tested; not ported.
+4. Division (0x1e08c0): `A = max(0.02, max(1e-6, P) / M)`, M the mean of P over the whole plane per Bayer phase, the two greens averaged. Then **stage 1** (0x2bc7c0): `S1 = A / max(A)`.
+5. **Stage 2** (0x2b92a0, with 0x2bc0a0 and 0x2ba550): per phase, `norm` = the 0.998 quantile of S1, `tile` = the 100 x 100 grid of phase means (cell = floor(100 x / W), floor(100 y / H)) divided by
+   its centre cell (50, 50); `S2 = S1 * curve[c][clamp(floor(4096 * S1 / (tile * norm)), 0, 4095)]`. The curve is the first entry (key 2300 K) of the 4-entry table at 0x1408a5e50
+   (4 x 4096 floats, channel order R, Gr, B, Gb). The table is keyed by colour temperature and `FUN_1402baf30` should interpolate between neighbouring keys, but on all three photos
+   tested (2610, 3821, 4803 K) the result equals the 2300 K entry exactly, so the port uses it alone (`enginemod-tables.js`).
+6. Rescale (0x1e2610, the float argument is the photo's colour temperature, unused in the end): `E = S2 * D(A) / D(S2)`, D the mean over the central third of the lens centres of the colour at the
+   lens centre, so the disk centres keep their level. Greens use the average of the two green phases.
+
+Results: S1 reproduced to 1e-6 rms, S2 to 6e-5, the rescale to 0.05 %. Effect on the engine comparison of b4-2 (pixel level, blend input): the radial drift of G/R (0.964 -> 0.930) and B/R (0.984 -> 0.908)
+is gone (0.973 .. 0.990 and 0.988 .. 1.028); correlation 0.9954 -> 0.9967. Whole picture against Lytro Desktop's render (b4-2): MAE 1.30 -> 0.95, fitted 1.14 -> 0.61, shift +2.7 / +1.7 px -> -0.1 / -0.6, scale 1.0183 -> 0.9999.
+Everything about "photo dependent" was the frame's own statistics (tile means, quantile): the table is the same for every photo.
+
+Ruled out on the way (see the round notes above): CompensateBitmap (never called), RemoveIlluminationVariation (flag off), the colour temperature interpolation, calibration whites.
+Tooling notes: `hook.c` gained a vectored exception handler that single-steps writes to one page of a plane (tells which routine writes a pixel and the value after each writer), an aligned trampoline
+for mid-function hooks (`align_mode`), and float argument capture (xmm0..3) in the short hook; `tnt.exe` is imported into Ghidra as project `ptw` (image base 0x140000000) for Windows decompiles.
+The engine's runs differ slightly from run to run in the plane's rim (the quantile and the disk centre means are sums over threads); use planes from one run when comparing stages.
+
+Library after the engine plane (own depth, default path, fitted MAE against Lytro Desktop's pre-adjust pictures; before in brackets = after the saturation diffusion): 017c4fd7 0.43 (0.42), 09eba2d6 0.49 (0.50),
+154bedc9 0.36 (0.37), 16d960f3 0.32 (0.35), 2bc3358c 0.36 (0.36), 57f2af75 0.57 (0.57), 5b8b8107 0.71 (0.73), aae68775 0.63 (0.64), b4-1 0.41 (0.41), b4-2 0.61 (0.67), b4-3 0.32 (0.31), b4-4 0.68 (0.69),
+d24cf288 0.50 (0.50), eba001cb 0.46 (0.49), f72b3923 0.56 (0.58). The unfitted MAE (the engine's own colour units) falls on most photos (09eba2d6 1.65 -> 0.68, 2bc3358c 1.41 -> 0.68, 57f2af75 2.15 -> 0.79,
+5b8b8107 2.19 -> 0.92, b4-1 1.32 -> 0.72) and the shifts against the engine's picture are 0 .. -0.7 px (b4-2 was +2.7 / +1.7) with scale 0.9995 .. 1.0000. The setting `engineModulation: false`
+(or `__lytro.rawModulation`) returns to the plain white image.
