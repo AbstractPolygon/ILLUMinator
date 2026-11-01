@@ -848,3 +848,19 @@ Dumped for batch4-2, batch4-1 and 5b8b8107 (`dd/rwm*`).
   value returned by the sample selection and zeroed when its bool argument is false) or from the frame's own metadata (CompressionSimulation runs the
   lossy codec only when the compression config is on). Next: hook AccumulateModulationImages' arguments (black, weights, sample ids) and the sample list
   for b4-2 (zoom 80 / focus 650 is exactly calibration node MOD_0026) to see which frames and weights the engine used.
+
+### Colour tilt, round 3 (accumulate hook, what the engine's plane is)
+
+- `AccumulateModulationImages` (tnt.exe RVA 0x1e4fc0, hooked) runs once for b4-2 with ONE sample (weight 1.0, index 0) and a black argument of 4100.0 on
+  the 16-bit scale = 64.0625 on the 10-bit scale (the modulation frame's metadata black is 64; ours used the photo's measured 66.39). So the plane is not
+  a blend of several calibration whites. The photo is not at the frame's calibration node (b4-2: photo zoom 11 / focus 600, frame node zoom 80 / focus 650;
+  b4-1: photo 471 / 1179 = node 33, 5b8b: 159 / 912); `modulationExposureBias` in the photo metadata is about -0.245 on all three.
+- The engine plane E is, for the bulk of pixels, a deterministic smooth monotone function of the pixel's own modulation value per colour (residual
+  0.008 .. 0.012 against 3 free curves, the noise floor of the corrected pixels). A common per-colour curve with a per-photo scale explains R and G to 1 %
+  and B to 3 % across the three photos; in normalised units E - N (N = (m - 64.06) / mean) is +0.17 at N = 0.45 for B, +0.07 for G, +0.01 for R, falling to 0
+  at N = 1.35 (b4-2, 5b8b). On b4-1, whose photo sits on a calibration node, the lift is 4 .. 5 times smaller. In count terms the curve equals
+  (m - b'_c) / M_c with b' = 56 / 3 / -64 (R / G / B) on b4-2, 22 .. 25 on b4-1, 60 / -9 / -94 on 5b8b.
+- Equivalent descriptions that fit about equally (rms against E, b4-2, central region): a per-colour radial scale about every lens centre (R 0.996, G 0.977,
+  B 0.941; centre offsets under 0.05 px; b4-1: about 0.985 for all colours), or an additive position-in-lens profile per colour. The pointwise curve fits best.
+  None of them is derived from a known quantity yet, so nothing was changed in the app. `ApplyDemodulation` is a plain per-pixel division by the plane, so
+  the whole effect sits in how the plane is built from the frame (Interpolate / Accumulate / Fit).
