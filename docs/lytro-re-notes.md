@@ -937,3 +937,9 @@ Note: `linscore.py` compares camera RGB before any gain, so it cannot see a whit
 Check after the fix (017c4fd7, camera RGB before the blend stage, ours x engine colour scale x engine gains / camera gains, against Lytro Desktop's pre-adjust picture, box mean 9 px, by brightness):
 at 0.02 .. 0.15 R 1.007, G 0.993, B 0.987; at 0.15 .. 0.4 R 1.001, G 0.987, B 0.993 (R/G +1.5 %, B/G about 0). The whole offset that was R +2.6 % / B -2 % is gone; what is left is about the constant
 the blend stage is known to add (R/G 0.9927, B/G 0.9877). Above 0.4 the picture diverges (B/G 1.09) because the compared plane is before the chroma suppression and highlight stage (`bisgFilter`), which the engine's picture already includes.
+
+Blend stage read again (Windows `tnt.exe`, 0x140299bf0 chroma suppression task, 0x14029f420 `BlendIlluminantYCbCrTask`, 0x1402a0680 its constructor, 0x1402a0930 apply). The constructor takes the
+photo's colour matrix M (metadata +0xd0 .. 0xf0, blended at the engine's temperature), its inverse, the gain vector g and the target white vector, and stores the offsets `M.target - M.(1/g)` (luma at +0x10 / +0x14,
+chroma at +0x18 .. , per row). The YCbCr task multiplies by g when bit 0 of its flags is set, computes a weight per pixel from the local neighbour differences (scaled by 1 / (+0x30)) clamped to 0 .. 1, and mixes the
+pixel's Cb and Cr toward those offsets by that weight, times (weight + 1 + (+0x34)). The chroma suppression task (matrix at +0x50, inverse at +0x80, weight curve from the saturation map) is what `bisgFilter` ports.
+Not yet checked against the engine pixel for pixel: the (weight + 1 + (+0x34)) factor of the YCbCr task and whether the ILLUM sets the gain flag; the R/G +1.5 % left in the midtones is the candidate effect.
