@@ -600,7 +600,7 @@ function marchRay(lx, ly, rdu, rdv, lam0, lam1, D, lw, lh, opts, up = null) {
 // unusable ones (saturated, defect) the mean of their valid same colour
 // neighbours. (The engine's SaturationRecoveryType defaults to 2, which does not
 // diffuse; its highlight recovery is the clip rule of sharpenHighlights.)
-function completePlane(plane, raw, cam, dev, diffuse = true) {
+export function completePlane(plane, raw, cam, dev, diffuse = true) {
   const { width, height } = cam;
   const out = Float32Array.from(plane);
   for (let y = 0; y < height; y++) {
