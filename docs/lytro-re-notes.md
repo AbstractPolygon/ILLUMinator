@@ -953,3 +953,7 @@ and back matrix at +0x80 (Y, Cb, Cr to XYZ, first column the D65 white). Multipl
 (hooked, no hit), which settles the open question about its gain flag and the (weight + 1 + offset) factor.
 Effect on 017c4fd7 against the engine's picture is small (bright bin 0.4 .. 0.8 B/G 1.0945 -> 1.0924, midtones unchanged): the excess blue in bright pixels (B/G 1.09, 1.22 above 0.8) comes from elsewhere
 (saturation recovery on the demosaiced image, not the matrix).
+
+`SharpenRecoverGainTask` (0x29a5e0) object hooked on 017c4fd7: mode (+0x38) 1, sharpen amount (+0x40) 0.25, post gain (+0x48) 1.0. So the uniform gain at the end of that task is 1 and the highlight
+threshold is -infinity (mode other than 2), as `bisgFilter` has it: nothing there explains the saturated / unsaturated ratio of 1.84 (ours) against 1.77 (engine). That ratio is left to the saturation
+diffusion itself (`SaturationRecoveryDiffusion`: its sweep order and whether the GPU 9 x 9 box stands in for the 20 sequential sweeps faithfully).
