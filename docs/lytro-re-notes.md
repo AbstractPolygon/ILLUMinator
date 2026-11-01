@@ -791,3 +791,14 @@ Reverse-engineered from the PE (Ghidra) and checked stage by stage against dumps
 - Cost volume: one draw per four labels, the bilinear taps by integer fetch with the engine's clamping, top four of eight by sorting. The engine floors `p + 1` on its own in float32, so for a tiny negative `p` (such as the ring view at lambda 0.25 x sin) the upper tap is 1 and not 0; using `floor(p) + 1` was wrong at the picture border and is not what the engine does. The two whole-pixel rules (any label blown out; flat cost curve) need every label of a pixel and run on the CPU after the read-back (about 0.1 s).
 - Aggregation, smoothing and finish: the older GPU module's shaders implement the same rules as the engine's CPU stages (arm growth with the max norm, Sobel flatness, arm sums in alternating order, raw / aggregated blend, the scan order of the message passing), so `engineSolveGpu` reuses them with the engine's constants; two things were added: the flatness Gaussian with 5 taps and edges renormalised over the taps inside (`uTap`), and a finish shader with the engine's rule (first smallest belief, parabola kept when it moves less than one label, then the interior 3 x 3 median).
 - Checked against the CPU on the engine's own views (b4-1, a 270 x 188 crop, 64 labels): cost volume identical, final depth identical (largest difference 0, 50 760 pixels). On a synthetic test (61 x 47, 12 labels, in `test/enginecost-gpu.test.mjs`) the cost volume is identical and the depth differs by at most 2e-4. Timing on a real GPU is not measured here (the software GL renderer is draw-call bound: the message passing is 20 passes x (w + h - 1) diagonals).
+
+## Noise reduction on the GPU (gpu/enginenr.js)
+
+`nrFilterGpu` runs the NILib port on the GPU: tiles of identical shape are batched into one R32F atlas per plane, every step (colour transform, sigma pyramids
+through the 257-entry profile LUT, the 3-level pyramid, per-level directional box means, blend weights, M/I propagation, tile paste) is a fragment pass over the
+whole atlas, and the digital lines are looked up from small tables (`al`, per-row records). Against the CPU port (`test/enginenr-gpu.test.mjs`): line filters
+3e-5, whole filter worst 0.013 of 255 (chroma), mean 1e-5.
+
+Two traps found on the way: (1) a sampler left at its default unit can alias the render target and make the draw fail with INVALID_OPERATION - every
+declared sampler is now bound; (2) recycled textures can hold NaN/Inf, so accumulators are cleared with a constant, never `0 * v`. `worker.js` uses the GPU
+path when a GPU is present (`__lytro.noGpuNr` forces the CPU), falling back to the CPU on any error.

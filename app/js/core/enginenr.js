@@ -56,7 +56,7 @@ function makeLine(w, h, angle, slope) {
       recs.push(row * w, k0, len);
     }
   }
-  return { flagH: false, flagV: false, table, recs: Int32Array.from(recs), nrec: recs.length / 3 };
+  return { flagH: false, flagV: false, table, recs: Int32Array.from(recs), nrec: recs.length / 3, al, steep, mirrored };
 }
 // round half to even (what the library's ROUND does)
 function rint(x) {
@@ -634,7 +634,7 @@ function gammaTables() {
   }
 }
 // rgb: interleaved linear sRGB (w x h x 3, nominal 0..1, after the colour matrix). Returns the filtered picture the same way.
-export function engineDenoise(rgb, w, h, { gain = 1, luminance = 50, color = 50 } = {}, onProgress) {
+export function engineDenoise(rgb, w, h, { gain = 1, luminance = 50, color = 50 } = {}, onProgress, filterFn = null) {
   gammaTables();
   const n = w * h;
   const st = nrStrengths(luminance, color, gain);
@@ -651,7 +651,15 @@ export function engineDenoise(rgb, w, h, { gain = 1, luminance = 50, color = 50 
       planes[c][i] = f32(GAMMA_IN[Math.trunc(f32(v * 65535) + 0.5)] * 255);
     }
   }
-  const out = nrFilter(planes, w, h, tables, onProgress);
+  let out = null;
+  if (filterFn) {
+    try {
+      out = filterFn(planes, w, h, tables, onProgress);
+    } catch (e) {
+      console.warn('GPU noise reduction failed, using the CPU:', e);
+    }
+  }
+  if (!out) out = nrFilter(planes, w, h, tables, onProgress);
   const F = FROM_PP;
   const res = new Float32Array(3 * n);
   const k = f32(1 / 255);
@@ -667,4 +675,4 @@ export function engineDenoise(rgb, w, h, { gain = 1, luminance = 50, color = 50 
   return res;
 }
 
-export const __internals = { makeLine, lineFilt, levelPass, chanPass, noisePyramids, down2, up2, lineSet, tileLayout };
+export const __internals = { makeLine, lineFilt, levelPass, chanPass, noisePyramids, down2, up2, lineSet, tileLayout, MODES };

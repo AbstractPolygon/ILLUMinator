@@ -25,6 +25,7 @@ import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { engineDenoise } from './core/enginenr.js';
+import { nrFilterGpu } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
 import { engineCostVolumeGpu } from './gpu/enginecost.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
@@ -332,7 +333,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
       srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
       srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
     }
-    const clean = engineDenoise(srgb, w, h, { gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 });
+    const clean = engineDenoise(srgb, w, h, { gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 }, undefined, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuNr) ? (planes, pw, ph, tables, prog) => nrFilterGpu(state.gpu, planes, pw, ph, tables, prog) : null);
     const flt = cs.settings.defringe;
     return sharp(toneMap(flt && flt.on && flt.colors.some(([amount]) => amount > 0) ? defringe(clean, w, h, flt) : clean, IDENTITY, 1, undefined, cs.look, local, grade, cs.lytro));
   }
