@@ -957,3 +957,10 @@ Effect on 017c4fd7 against the engine's picture is small (bright bin 0.4 .. 0.8 
 `SharpenRecoverGainTask` (0x29a5e0) object hooked on 017c4fd7: mode (+0x38) 1, sharpen amount (+0x40) 0.25, post gain (+0x48) 1.0. So the uniform gain at the end of that task is 1 and the highlight
 threshold is -infinity (mode other than 2), as `bisgFilter` has it: nothing there explains the saturated / unsaturated ratio of 1.84 (ours) against 1.77 (engine). That ratio is left to the saturation
 diffusion itself (`SaturationRecoveryDiffusion`: its sweep order and whether the GPU 9 x 9 box stands in for the 20 sequential sweeps faithfully).
+
+### Response curve table: entry 0 at every temperature (dumped S2 on two more photos)
+
+`FUN_1402baf30` reads like a linear blend of the table's entries (keys 2300 / 2800 / 4100 / 6500 K, which differ by up to 0.59) around the temperature it is given, and the hook shows the temperature really is
+passed (stage 1, 0x2bc7c0, xmm1: 4053.9 K on 017c4fd7, 5984.8 K on f72b3923). Yet the engine's own plane (S2 dumped after the stage, whole frame) equals the port with entry 0 alone: rms 6.5e-5 on
+017c4fd7 and 5.4e-5 on f72b3923, against 2.2e-2 and 3.6e-2 with the blended curve. With the earlier photos (2610, 3821, 4803 K) that is five temperatures from 2.6 to 6 kK: the entry 0 only rule stands,
+whatever the selection code does with its argument (not understood; the decompile of the selection loops is not trusted). `val2.mjs`-style check: run the plane on the photo and compare E / ratio with the dump.
