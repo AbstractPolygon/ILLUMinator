@@ -183,7 +183,7 @@ function updateColor() {
   const awb = s.autoWb ? autoWhiteBalance(state.centerMeans, lf.cam) : null;
   const manual = awb ? awb.manual : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = (awb ? awb.auto : [1, 1, 1]).map((g, i) => g * manual[i]);
-  state.wbGains = customWbGains(s) || state.wbGains;
+  state.wbGains = customWbGains(s) || engineAutoGains(s) || state.wbGains;
   state.look = makeLook(s);
   state.detail = makeDetail({ ...s, engineSharpen: s.engineSharpen ?? !!(state.lf && state.lf.raw && !state.pp) });
   state.lens = lensParams(s.lens, state.lf && state.lf.cam);
@@ -211,7 +211,7 @@ function updateColor() {
   if (state.gpu) state.gpu.setVeil(state.veil);
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
-  if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('COLOR', JSON.stringify({ exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
+  if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('COLOR', JSON.stringify({ swb: s.wb, autoWb: s.autoWb, exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
   state.baseExposure = state.lytro ? (exactColor ? 1 : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
@@ -247,6 +247,13 @@ function engineWbRel(s) {
   return state.engineWb && !(globalThis.__lytro && globalThis.__lytro.noWbRel) && !(s && s.wb && s.wb.kelvin) && !(s && s.autoWb) ? state.engineWb.rel : [1, 1, 1];
 }
 
+// The photo's own white balance on a raw photo (no temperature set, not automatic in our sense): the engine's automatic gains over the camera's (the engine's picture is balanced with its own gains; the camera's only start it).
+function engineAutoGains(s) {
+  const dbg = globalThis.__lytro || {};
+  if ((s && s.wb && s.wb.kelvin) || (s && s.autoWb) || !state.engineWb || !state.engineScale || state.pp || dbg.noAutoGains) return null;
+  return state.engineWb.rel;
+}
+
 // A temperature (and tint) set by the user or a recipe, on a raw photo with the engine's own white balance known: the engine's gains for it (core/enginewb.js customGains) over the camera's, which the raw data already carries.
 function customWbGains(s) {
   const k = s && s.wb && s.wb.kelvin;
@@ -276,7 +283,7 @@ function colorState(color) {
     const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
     return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0, lytro: null };
   }
-  const gains = customWbGains(s) || auto.map((g, i) => g * manual[i]);
+  const gains = customWbGains(s) || engineAutoGains(s) || auto.map((g, i) => g * manual[i]);
   // The engine's own colour pipeline when the photo's engine units are known (colour matrix, tone spline, sRGB); the fitted Lytro look otherwise.
   const ccm = engineCcm(s);
   const exact = s.lytroLook !== false && !!state.engineScale && Array.isArray(ccm) && ccm.length === 9 && s.engineColor !== false;
