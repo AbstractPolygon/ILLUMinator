@@ -980,3 +980,13 @@ the window at row 772, col 6376 is 45 % saturated. The engine's Color4 image at 
 < 0.5: 0.98 / 1.00 / 1.00, 0.5 .. 1: 0.975 each, 1 .. 2: 0.98 / 0.98 / 0.97, > 2: 0.993 / 0.995 / 0.987. So the saturation diffusion, the demodulation and the demosaic agree to about 2 % even in the blown part:
 the G / B shortfall of the final picture (18 .. 28 % in the brightest areas) comes after this point (chroma suppression + highlight sharpen, or the ray splat of saturated values), and the
 2 % overall deficit here is the colour scale / gain ratio. Next: the engine's output of the chroma suppression task (`bi_gain_in`, in the blend colour space) against `bisgFilter`'s.
+
+### Chroma suppression verified exactly against the engine (f72b3923 blown window)
+
+The hook dumps `bi_in` (the Color4 image entering the chroma suppression task) and `bi_gain_in` (its output, entering `SharpenRecoverGainTask`) for a chosen window (`win.txt`: "row col"; here 772, 6376, 45 % saturated), plus
+the task object (`bi_task10`: matrices, thresholds) and its converter (`bi_conv10`: D65 normalisation 1/0.95047, 1, 1/1.08883, Lab constants 500 / 200). `bi_gain_in` is (Y, a, b): channel 0 is the XYZ luminance
+of the suppressed colour, 1 and 2 are Lab a, b (500 (fx - fy), 200 (fy - fz)). Solving the suppression factor per pixel from `Y_xyz = Y*Mb10 + k (Mb11 Cb + Mb12 Cr)` and comparing with the model
+k = 1 - map * w (w the hue weight from -0.8 / -0.3 and 4 / 6, map = curve(0.4 R + 0.4 G + 0.2 B) of the per-colour 3x3 maxima of the black-subtracted raw / 1023, no gains): MAE 0.0003, correlation 0.999 over 26 000
+pixels. So `bisgFilter`'s suppression is exact; every variant I tried first (per-pixel map, gained map, other neighbourhoods) was worse, and the early ones were polluted by an off-by-one window offset in my test.
+What is left of the 18 .. 28 % G / B shortfall in the blown window is therefore not here: the luminance step after it (`SharpenRecoverGain` IIR on Y, weight B3(2Y)), the colour matrix used when the Lab goes back to RGB
+(the engine goes back through the converter's matrix at +0x60), or the ray splat of the saturated values.
