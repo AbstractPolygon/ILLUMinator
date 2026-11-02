@@ -213,6 +213,7 @@ export function engineModulationPlane(mod, cam, dev, grid, hot, opts = {}) {
   const dAfter = diskCentre(P, W, H, grid, cfa);
   // E = S2 * D(A) / D(S2), A = S1 * max(A)
   const ratio = [0, 1, 2].map((c) => (dAfter[c] ? (dBefore[c] * amax) / dAfter[c] : 1));
+  if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('DISKC', JSON.stringify({ dA: dBefore.map((d) => d * amax), inv: dBefore.map((d) => 1 / (d * amax)), dAfter }));
   for (let y = 0; y < H; y++) {
     const rowBase = y * W;
     const crow = cfa[y & 1];
