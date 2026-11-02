@@ -994,3 +994,11 @@ What is left of the 18 .. 28 % G / B shortfall in the blown window is therefore 
 ## Photos 4 and 6 colour gap (open)
 
 Photo 6 (eba001cb) recipe: viewWhiteBalance "as shot", viewTemperature 2850, viewTint -30, whiteBalanceMode 0. Against Lytro's page JPEG (central 80%, ours/Lytro): default [0.918 0.834 0.760]; tint -30 [0.863 0.844 0.733]; tint +30 and 2850 K + tint -30 [1.00 0.851 0.752]; engine AWB gains on the display [1.64 0.74 0.62]. By brightness band the green and blue gap is about 0.8 at mid and high tones whatever the white balance, so it is a tone/exposure difference, not a white balance one (photo 7: [1.02 0.99 0.95]). cct2crgb (0x182de0 in the Mach-O) returns gains normalised so the smallest is 1, like the camera gains, so it does not explain it. Still to find: the engine stage that makes "as shot" pictures about 20% brighter.
+
+### Photos 4 and 6: the library edit is "as shot" (measured, 2nd pass)
+
+`edof_preview.jpg` in each library folder equals Lytro's page picture (mean ratio 1.005), so it is the exact colour target. Fitting three channel gains (applied before our colour matrix and the engine tone spline) that bring our linear render onto that preview (`/tmp/claude-0/fitgain.py`, 200x140 box downsample):
+- batch4-2 (cct 2984, AWB): gains [0.997 0.985 1.021], rms 0.023 -> 0.016: our default is already right.
+- eba001cb (photo 6, cct 2850, "as shot", tint -30): [1.248 1.277 1.354], rms 0.060 -> 0.025.
+- 017c4fd7 (photo 4, cct 2850, "as shot", tint -30): [1.250 1.288 1.344], rms 0.049 -> 0.018.
+So both "as shot" photos need the same near-uniform x1.28 plus about +3 % G, +8 % B over R. It is not the demodulation scale f (photo 4 has the usual 0.8176; photo 6 has 0.645, but the fit does not follow f). Photos 4 and 6 are the only ones whose capture cct is the table minimum, 2850. The app default is Auto; Lytro renders these two from the "as shot" override (cct2crgb at 0x182de0, gains over the smallest, calibration table at config +0x19b0 not decoded), so the comparison is not like for like until that table is decoded. `__lytro.printColor` prints the matrix parts.

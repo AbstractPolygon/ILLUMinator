@@ -210,6 +210,7 @@ function updateColor() {
   if (state.gpu) state.gpu.setVeil(state.veil);
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
+  if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('COLOR', JSON.stringify({ exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
   state.baseExposure = state.lytro ? (exactColor ? 1 : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }

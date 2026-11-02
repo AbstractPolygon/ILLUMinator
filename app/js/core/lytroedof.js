@@ -448,6 +448,7 @@ export function engineColorScale(modulation, cam, dev, g) {
   return [0, 1, 2].map((ch) => {
     // the engine's own plane (core/enginemod.js) is in units where the engine divides by it directly, i.e. its "whole sensor mean" is the unit
     const f = nCentre[ch] && nWhole[ch] && centre[ch] ? (modulation.eUnit ? modulation.eUnit : whole[ch] / nWhole[ch]) / (centre[ch] / nCentre[ch]) : 0.82;
+    if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('SCALEPARTS', ch, JSON.stringify({ white: cam.white[ch], black: cam.black[ch], f, eUnit: modulation.eUnit, gain: cam.capture && cam.capture.analogGain }));
     return ((cam.white[ch] - cam.black[ch]) / 1023) * f;
   });
 }
