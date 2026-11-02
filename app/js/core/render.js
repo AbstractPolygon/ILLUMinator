@@ -6,7 +6,7 @@
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
 
-import { lytroTable, lytroColor, engineTable, CURVE_MAX } from './base.js';
+import { lytroTable, lytroColor, engineTable, engineToneColor, srgbEncode, CURVE_MAX } from './base.js';
 import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
@@ -544,8 +544,9 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
   const px = out || new Uint8ClampedArray(n * 4);
   // Linear values become table indexes: 0..1 for sRGB, 0..CURVE_MAX for
   // the Lytro curve.
-  const steps = lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
-  const top = lytro ? LYTRO_STEPS : 4096;
+  const exact = !!(lytro && lytro.exact);
+  const steps = exact ? 1 : lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
+  const top = exact ? Infinity : lytro ? LYTRO_STEPS : 4096;
   const table = lytro ? (lytro.exact ? ENGINE_TABLE : LYTRO_TABLE) : SRGB;
   // In the Lytro look the sliders come after the curve.
   const linearLook = lytro ? null : look;
@@ -584,14 +585,25 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
       G = p[1] * steps;
       B = p[2] * steps;
     }
-    R = R < 0 ? 0 : R > top ? top : R;
-    G = G < 0 ? 0 : G > top ? top : G;
-    B = B < 0 ? 0 : B > top ? top : B;
+    if (exact) {
+      // the engine's tone spline in ProPhoto primaries, then sRGB encoding
+      engineToneColor(R, G, B, q);
+      p[0] = srgbEncode(q[0] < 0 ? 0 : q[0] > 1 ? 1 : q[0]);
+      p[1] = srgbEncode(q[1] < 0 ? 0 : q[1] > 1 ? 1 : q[1]);
+      p[2] = srgbEncode(q[2] < 0 ? 0 : q[2] > 1 ? 1 : q[2]);
+      lytroColor(p, sat, true);
+    } else {
+      R = R < 0 ? 0 : R > top ? top : R;
+      G = G < 0 ? 0 : G > top ? top : G;
+      B = B < 0 ? 0 : B > top ? top : B;
+    }
     if (lytro) {
-      p[0] = table[R | 0] / 255;
-      p[1] = table[G | 0] / 255;
-      p[2] = table[B | 0] / 255;
-      lytroColor(p, sat, !!lytro.exact);
+      if (!exact) {
+        p[0] = table[R | 0] / 255;
+        p[1] = table[G | 0] / 255;
+        p[2] = table[B | 0] / 255;
+        lytroColor(p, sat, false);
+      }
       let r1 = 255 * p[0];
       let g1 = 255 * p[1];
       let b1 = 255 * p[2];

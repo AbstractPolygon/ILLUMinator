@@ -18,7 +18,7 @@ import { ENGINE_USM, engineUsmMap, rangeSigma, chromaSigma, sharpenWindow, HALO_
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
-import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP, ENGINE_SPLINE } from '../core/base.js';
+import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP, ENGINE_SPLINE, PROPHOTO, PROPHOTO_INV } from '../core/base.js';
 import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX, BACK_PROJECTION_EDGE, depthEdgeMask, RAY_MATCH, depthFilter } from '../core/superres.js';
 import { LAMBDA_TO_ALPHA } from '../core/recipe.js';
 
@@ -1074,9 +1074,24 @@ float engineTone(float x) {
   float t = v - TK[i];
   return ((TD[i] * t + TC[i]) * t + TB[i]) * t + TA[i];
 }
+const vec3 PP0 = vec3(${PROPHOTO.slice(0, 3).map((v) => v.toFixed(10)).join(', ')});
+const vec3 PP1 = vec3(${PROPHOTO.slice(3, 6).map((v) => v.toFixed(10)).join(', ')});
+const vec3 PP2 = vec3(${PROPHOTO.slice(6, 9).map((v) => v.toFixed(10)).join(', ')});
+const vec3 PI0 = vec3(${PROPHOTO_INV.slice(0, 3).map((v) => v.toFixed(10)).join(', ')});
+const vec3 PI1 = vec3(${PROPHOTO_INV.slice(3, 6).map((v) => v.toFixed(10)).join(', ')});
+const vec3 PI2 = vec3(${PROPHOTO_INV.slice(6, 9).map((v) => v.toFixed(10)).join(', ')});
 vec3 encodeOut(vec3 c) {
   if (uLytro == 0) return vec3(srgb(c.r), srgb(c.g), srgb(c.b));
-  vec3 s = uLytroExact == 1 ? vec3(srgb(engineTone(c.r)), srgb(engineTone(c.g)), srgb(engineTone(c.b))) : vec3(lytroCurve(c.r), lytroCurve(c.g), lytroCurve(c.b));
+  vec3 s;
+  if (uLytroExact == 1) {
+    // the spline acts in ProPhoto primaries (core/base.js PROPHOTO)
+    vec3 pp = vec3(dot(PP0, c), dot(PP1, c), dot(PP2, c));
+    vec3 tt = vec3(engineTone(pp.r), engineTone(pp.g), engineTone(pp.b));
+    vec3 lin = vec3(dot(PI0, tt), dot(PI1, tt), dot(PI2, tt));
+    s = vec3(srgb(clamp(lin.r, 0.0, 1.0)), srgb(clamp(lin.g, 0.0, 1.0)), srgb(clamp(lin.b, 0.0, 1.0)));
+  } else {
+    s = vec3(lytroCurve(c.r), lytroCurve(c.g), lytroCurve(c.b));
+  }
   // Color per hue (lytroColor in core/base.js).
   float u = 0.70710678 * (s.r - s.g);
   float v = 0.40824829 * (s.r + s.g - 2.0 * s.b);

@@ -142,7 +142,24 @@ export function engineTone(x) {
   const t = v - S.x[i];
   return ((S.d[i] * t + S.c[i]) * t + S.b[i]) * t + S.a[i];
 }
-const srgbEncode = (x) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
+// The engine applies its tone spline in linear ProPhoto RGB, not in sRGB primaries: after the colour matrix the picture goes through this matrix (sRGB -> ProPhoto, measured on the running engine
+// as the exact 3 x 3 relation between two stages of its final image pipeline, residual 0 on 131072 pixels, identical on two photos), the spline acts on each ProPhoto channel, and the inverse
+// matrix brings it back (a 3 x 3 fit of "pipeline output = inverse(M) T(M input)" leaves 0.0001 rms on the whole picture; the per-channel spline in sRGB left 0.0034 in red on photo 6).
+export const PROPHOTO = [0.5293725057, 0.3301011390, 0.1405982793, 0.0983806380, 0.8734805434, 0.0281413877, 0.0168900154, 0.1177197667, 0.8657922794];
+export const PROPHOTO_INV = [2.0339856753, -0.7273438443, -0.3066629575, -0.2288129832, 1.2317047621, -0.0028773292, -0.0085681502, -0.1532828967, 1.1613851088];
+// Linear sRGB (r, g, b; unclamped) -> the engine's tone-mapped linear sRGB, into `out`.
+export function engineToneColor(r, g, b, out) {
+  const M = PROPHOTO;
+  const a = engineTone(M[0] * r + M[1] * g + M[2] * b);
+  const c = engineTone(M[3] * r + M[4] * g + M[5] * b);
+  const d = engineTone(M[6] * r + M[7] * g + M[8] * b);
+  const N = PROPHOTO_INV;
+  out[0] = N[0] * a + N[1] * c + N[2] * d;
+  out[1] = N[3] * a + N[4] * c + N[5] * d;
+  out[2] = N[6] * a + N[7] * c + N[8] * d;
+  return out;
+}
+export const srgbEncode = (x) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
 // Byte lookup for linear input 0..CURVE_MAX in `size` steps (the engine's colour pipeline).
 export function engineTable(size) {
   const t = new Uint8ClampedArray(size + 1);
