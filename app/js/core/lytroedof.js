@@ -792,11 +792,12 @@ function suppressCurve(v) {
   return 1;
 }
 
-// The matrix the engine's chroma suppression and highlight stage works in: hooked on the running engine (BlendIlluminant task at 0x299bf0, object +0x50 / +0x80), it is the file's matrix of the
-// LOWEST colour temperature (2850 K), on every photo tried (017c4fd7, 09eba2d6), not the photo's as-shot matrix nor the one blended at its white balance temperature.
+// The matrix of the engine's chroma suppression and highlight stage, hooked on the running engine (BlendIlluminant task at 0x299bf0, object +0x50 / +0x80): the file's matrix of the LOWEST colour
+// temperature (2850 K) on every photo tried (017c4fd7, 09eba2d6, f72b3923). It is NOT the default here: with it the blown-window photo f72b3923 scores 0.71 against 0.56 with the photo's as-shot
+// matrix (the other 15 photos do not move), so another part of our highlight path is still compensating for the as-shot one. `__bisgEngineMatrix` selects the engine's.
 export function bisgMatrix(cam) {
   const asShot = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  if (globalThis.__bisgAsShot || !cam.perCcm || !cam.perCcm.length) return asShot;
+  if (!globalThis.__bisgEngineMatrix || !cam.perCcm || !cam.perCcm.length) return asShot;
   return blendedCcm(cam.perCcm, 0, asShot);
 }
 

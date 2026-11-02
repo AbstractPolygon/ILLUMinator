@@ -964,3 +964,10 @@ diffusion itself (`SaturationRecoveryDiffusion`: its sweep order and whether the
 passed (stage 1, 0x2bc7c0, xmm1: 4053.9 K on 017c4fd7, 5984.8 K on f72b3923). Yet the engine's own plane (S2 dumped after the stage, whole frame) equals the port with entry 0 alone: rms 6.5e-5 on
 017c4fd7 and 5.4e-5 on f72b3923, against 2.2e-2 and 3.6e-2 with the blended curve. With the earlier photos (2610, 3821, 4803 K) that is five temperatures from 2.6 to 6 kK: the entry 0 only rule stands,
 whatever the selection code does with its argument (not understood; the decompile of the selection loops is not trusted). `val2.mjs`-style check: run the plane on the photo and compare E / ratio with the dump.
+
+### Correction: the engine's blend matrix is not the default (regression on the blown-window photo)
+
+Full library re-run after the matrix change (fitted MAE, before -> after): all photos within 0.01 except f72b3923, 0.56 -> 0.71. With the as-shot matrix it is 0.56 again. The hook on f72b3923 shows the engine
+uses the same 2850 K matrix there too, so the engine's matrix is right and something else in our highlight path is tuned around the wrong one. Folding the engine / camera gain ratio into the matrix (the pixels
+reach the engine's stage with its gains) does not help (0.70). `bisgMatrix` therefore defaults to the as-shot matrix; `__bisgEngineMatrix` selects the engine's. Open: what compensates (candidates: the
+saturated pixel values after the diffusion, which are 18 .. 28 % low in G and B in the blown window, and the chroma-suppression map).
