@@ -971,3 +971,12 @@ Full library re-run after the matrix change (fitted MAE, before -> after): all p
 uses the same 2850 K matrix there too, so the engine's matrix is right and something else in our highlight path is tuned around the wrong one. Folding the engine / camera gain ratio into the matrix (the pixels
 reach the engine's stage with its gains) does not help (0.70). `bisgMatrix` therefore defaults to the as-shot matrix; `__bisgEngineMatrix` selects the engine's. Open: what compensates (candidates: the
 saturated pixel values after the diffusion, which are 18 .. 28 % low in G and B in the blown window, and the chroma-suppression map).
+
+### Blown-window check at the blend stage's input (f72b3923, hooked window)
+
+`hook.c` reads `win.txt` ("row col") for the window `dump_win` dumps (512 x 96, default the sensor centre). On f72b3923 the blown window is in the top-right corner (79 % saturated in the top-right eighth);
+the window at row 772, col 6376 is 45 % saturated. The engine's Color4 image at the entry of the chroma suppression task there (mean 1.166 / 0.779 / 0.787, maximum 4.05) against ours at the same point
+(`__dmDump` in `lytroSplat`: the demosaiced, saturation-recovered image, scaled by the engine colour scale and gains / camera gains): correlation 0.9967 / 0.9926 / 0.9931; ours / engine by engine level
+< 0.5: 0.98 / 1.00 / 1.00, 0.5 .. 1: 0.975 each, 1 .. 2: 0.98 / 0.98 / 0.97, > 2: 0.993 / 0.995 / 0.987. So the saturation diffusion, the demodulation and the demosaic agree to about 2 % even in the blown part:
+the G / B shortfall of the final picture (18 .. 28 % in the brightest areas) comes after this point (chroma suppression + highlight sharpen, or the ray splat of saturated values), and the
+2 % overall deficit here is the colour scale / gain ratio. Next: the engine's output of the chroma suppression task (`bi_gain_in`, in the blend colour space) against `bisgFilter`'s.

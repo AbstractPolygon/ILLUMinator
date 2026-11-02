@@ -954,6 +954,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   }
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
+  if (dm && globalThis.__dmDump) globalThis.__dmDump(dm); // debugging aid: the demosaiced, saturation-recovered image at the entry of the blend stage
   if (dm && opts.sharpen) dm = opts.bisg ? bisgFilter(dm, raw, cam, dev, width, cam.height, opts.sharpen) : sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
   const rgb = [0, 0, 0];
