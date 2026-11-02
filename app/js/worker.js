@@ -1090,6 +1090,8 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
       for (let p = 0; p < W * H; p++) out[3 * p + c] = plane[p];
     }
   }
+  // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 28 at 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings.
+  if (scale >= 3 && !(globalThis.__lytro || {}).noNotch) removePeriodicPattern(out, W, H, { prominence: 10 });
   if (globalThis.__edofLinear) globalThis.__edofLinear(out, W, H);
   globalThis.__lytroStats = sp.stats;
   const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
