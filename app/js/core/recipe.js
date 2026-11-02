@@ -69,8 +69,10 @@ export function recipeToEdits(recipe, ctx = {}) {
   process.awb = wb === 'auto';
   if (wb === 'custom' && typeof r.viewTemperature === 'number') process['wb-temperature'] = Math.round(clamp(r.viewTemperature, 2000, 10000) / 50) * 50;
   else if (PRESET_KELVIN[wb]) process['wb-temperature'] = PRESET_KELVIN[wb];
+  // "as shot" stores the temperature and tint it was set to (the engine renders those, whatever the mode says: checked on two photos at 2850 K, tint -30).
+  else if (wb !== 'auto' && typeof r.viewTemperature === 'number') process['wb-temperature'] = Math.round(clamp(r.viewTemperature, 2000, 10000) / 50) * 50;
   else process['wb-temperature'] = Math.round(asShot / 50) * 50;
-  process['wb-tint'] = Math.round(clamp(wb === 'custom' ? num(r.viewTint, 0) : 0, -150, 150));
+  process['wb-tint'] = Math.round(clamp(wb === 'custom' || (wb !== 'auto' && !PRESET_KELVIN[wb]) ? num(r.viewTint, 0) : 0, -150, 150));
   process['tone-contrast'] = num(r.viewContrast, 0);
   process['tone-highlights'] = num(r.viewHighlights2, num(r.viewHighlights, 0));
   process['tone-shadows'] = num(r.viewShadows2, num(r.viewShadows, 0));

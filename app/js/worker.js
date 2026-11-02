@@ -38,7 +38,7 @@ import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
 import { lytroSplat, engineColorScale, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
 import { fixHotPixels, blendedCcm } from './core/raw.js';
-import { awbImage, engineAwb } from './core/enginewb.js';
+import { awbImage, engineAwb, customGains } from './core/enginewb.js';
 import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } from './core/lens.js';
@@ -183,6 +183,7 @@ function updateColor() {
   const awb = s.autoWb ? autoWhiteBalance(state.centerMeans, lf.cam) : null;
   const manual = awb ? awb.manual : whiteBalanceGains(s.wb.kelvin || asShot, asShot, s.wb.tint);
   state.wbGains = (awb ? awb.auto : [1, 1, 1]).map((g, i) => g * manual[i]);
+  state.wbGains = customWbGains(s) || state.wbGains;
   state.look = makeLook(s);
   state.detail = makeDetail({ ...s, engineSharpen: s.engineSharpen ?? !!(state.lf && state.lf.raw && !state.pp) });
   state.lens = lensParams(s.lens, state.lf && state.lf.cam);
@@ -246,6 +247,14 @@ function engineWbRel(s) {
   return state.engineWb && !(globalThis.__lytro && globalThis.__lytro.noWbRel) && !(s && s.wb && s.wb.kelvin) && !(s && s.autoWb) ? state.engineWb.rel : [1, 1, 1];
 }
 
+// A temperature (and tint) set by the user or a recipe, on a raw photo with the engine's own white balance known: the engine's gains for it (core/enginewb.js customGains) over the camera's, which the raw data already carries.
+function customWbGains(s) {
+  const k = s && s.wb && s.wb.kelvin;
+  const dbg = globalThis.__lytro || {};
+  if (!k || s.autoWb || !state.engineWb || !state.engineScale || state.pp || dbg.noCustomWb || !state.lf.cam.wb) return null;
+  return customGains(k, (s.wb.tint || 0) / 600, state.engineWb.gains).map((g, i) => g / state.lf.cam.wb[i]);
+}
+
 function engineCcm(s) {
   const cam = state.lf.cam;
   if (!cam.ccm) return cam.ccm;
@@ -267,7 +276,7 @@ function colorState(color) {
     const sat = colorMatrix({ ccm: null }, { ...s, useCcm: false, ccm: null });
     return { settings: s, look, lens: state.lens, matrix: sat.map((v, i) => v * auto[i % 3] * manual[i % 3]), baseExposure: 1, veil: null, veilAmount: 0, lytro: null };
   }
-  const gains = auto.map((g, i) => g * manual[i]);
+  const gains = customWbGains(s) || auto.map((g, i) => g * manual[i]);
   // The engine's own colour pipeline when the photo's engine units are known (colour matrix, tone spline, sRGB); the fitted Lytro look otherwise.
   const ccm = engineCcm(s);
   const exact = s.lytroLook !== false && !!state.engineScale && Array.isArray(ccm) && ccm.length === 9 && s.engineColor !== false;

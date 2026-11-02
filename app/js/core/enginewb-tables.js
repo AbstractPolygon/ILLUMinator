@@ -15,3 +15,6 @@ export const AWB_DEFAULT_RESPONSE = [0.7516000270843506, 1.0, 0.7452999949455261
 export const AWB_TARGET_GAINS = [1.4731600284576416, 1.0, 1.2925999164581299];
 // ratio r / b -> cct
 export const AWB_CCT_TABLE = [[0.41496944427490234, 2300.0], [0.5293794870376587, 2800.0], [0.7367781400680542, 3800.0], [0.8176364898681641, 4200.0], [1.3217089176177979, 6700.0], [1.8032609224319458, 10640.0]];
+
+// The engine's gains calibration table (LFE::AutoWhiteBalance, read from the running engine at config +0x19b0): r, g, b gain and cct.
+export const AWB_GAIN_TABLE = [[0.815, 1, 1.964, 2300], [0.964, 1, 1.821, 2800], [1.212, 1, 1.645, 3800], [1.363, 1, 1.667, 4200], [1.516, 1, 1.147, 6700], [1.659, 1, 0.92, 10640]];

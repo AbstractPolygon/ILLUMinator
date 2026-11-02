@@ -3,7 +3,7 @@
 // picture at the lens centre, bilinear between the four pixels, divided by the modulation frame, scattered bilinearly onto a raster of one
 // texel per lens pitch), the statistics are a weighted mean of the colours picked by a 64 x 64 table over chroma, and a correction by
 // colour temperature follows.
-import { AWB_LUT1, AWB_LUT2, AWB_CFG as C, AWB_DEFAULT_RESPONSE, AWB_TARGET_GAINS, AWB_CCT_TABLE } from './enginewb-tables.js';
+import { AWB_LUT1, AWB_LUT2, AWB_CFG as C, AWB_DEFAULT_RESPONSE, AWB_TARGET_GAINS, AWB_CCT_TABLE, AWB_GAIN_TABLE } from './enginewb-tables.js';
 
 const LUT1 = Uint8Array.from(AWB_LUT1, (ch) => parseInt(ch, 16));
 const LUT2 = Uint8Array.from(AWB_LUT2, (ch) => parseInt(ch, 16));
@@ -232,4 +232,28 @@ export function engineAwb({ image, W, H, exposure, gain, responses, camera, mode
   }
   const fin = awbPost(gains, w);
   return { gains: fin.gains, lut, cct: fin.cct, weight };
+}
+
+// The engine's gains for a colour temperature and tint (cct2crgb, Mach-O 0x182de0): per table entry u = ln(g^2 / (r b)), v = ln(r / b); v is interpolated at the temperature
+// (clamped), p = mean(u) - tint, r = exp(-(p - v) / 2), g = 1, b = exp(-(p + v) / 2), all over the smallest. `tint` is the recipe's viewTint / 600.
+export function cct2crgb(cct, tint = 0) {
+  const T = AWB_GAIN_TABLE;
+  const u = T.map((e) => Math.log((e[1] * e[1]) / (e[0] * e[2])));
+  const v = T.map((e) => Math.log(e[0] / e[2]));
+  let vv = v[v.length - 1];
+  if (cct <= T[0][3]) vv = v[0];
+  else for (let i = 0; i < T.length - 1; i++) if (cct >= T[i][3] && cct <= T[i + 1][3]) { const f = (cct - T[i][3]) / (T[i + 1][3] - T[i][3]); vv = (1 - f) * v[i] + f * v[i + 1]; break; }
+  const p = u.reduce((a, b) => a + b, 0) / u.length - tint;
+  const g = [Math.exp(-(p - vv) / 2), 1, Math.exp(-(p + vv) / 2)];
+  const m = Math.min(...g);
+  return g.map((x) => x / m);
+}
+
+// The gains the engine applies for a temperature and tint the user (or the recipe) set: the table's gains over the smallest ratio to its own automatic gains `auto` (the engine
+// states them relative to the automatic white balance and normalises to the smallest), i.e. gains * max(auto / gains). Measured against the engine on two photos at 2850..8000 K
+// (docs/lytro-re-notes.md): colour within 2 %, brightness within 1..4 %.
+export function customGains(cct, tint, auto) {
+  const n = cct2crgb(cct, tint);
+  const m = Math.max(...n.map((g, i) => auto[i] / g));
+  return n.map((g) => g * m);
 }
