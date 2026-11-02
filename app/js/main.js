@@ -1345,19 +1345,8 @@ function scheduleAutoRender(delay = AUTO_RENDER_DELAY) {
     setFullRes(true);
   }, delay);
 }
-try {
-  $('auto-render').checked = localStorage.getItem('illuminator.autoRender') === '1';
-} catch {
-  // Storage unavailable: starts off.
-}
-$('auto-render').onchange = () => {
-  try {
-    localStorage.setItem('illuminator.autoRender', $('auto-render').checked ? '1' : '0');
-  } catch {
-    // Not remembered; it still applies now.
-  }
-  scheduleAutoRender(0);
-};
+// Auto render is saved with each photo (edits.js), not remembered globally.
+$('auto-render').onchange = () => scheduleAutoRender(0);
 
 function renderFullRes() {
   if (!state.fullResMode) return;
@@ -6168,6 +6157,8 @@ async function applyEdits(info, saved) {
   } finally {
     state.restoring = false;
   }
+  // Full sensor is a mode (the panel, the Render button, Auto render), not just a value.
+  setFullResMode($('fullres-on').checked);
 }
 
 // The edits Lytro Desktop saved for a photo (in its stack.view.lfp, or in

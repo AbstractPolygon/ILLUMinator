@@ -17,8 +17,9 @@ export const EDITS_VERSION = 1;
 const HUES = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'];
 const FRINGES = ['purple', 'green', 'red', 'blue'];
 
-// Controls saved with a photo, by panel. View toggles (show depth map, show
-// spread, full resolution) are not edits and are left out.
+// Controls saved with a photo, by panel. Every Render Settings control is one
+// (Full sensor, Auto render and 3D included); view toggles (show depth map,
+// show spread) are not edits and are left out.
 export const EDIT_GROUPS = {
   process: ['lut-data', 'lut-amount', 'awb', 'wb-temperature', 'wb-tint', 'base-look', 'ev', 'tone-contrast', 'tone-highlights', 'tone-shadows', 'tone-whites',
     'tone-blacks', 'saturation', 'vibrance', ...HUES.map((h) => `hue-${h}`),
@@ -28,7 +29,7 @@ export const EDIT_GROUPS = {
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'sharp-masking', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color', 'nr-dust', 'nr-speckle', 'nr-speckle-size', 'nr-hot'],
   defringe: ['lens-auto', 'lens-distortion', 'lens-vignetting', 'lens-midpoint', 'flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim-on', 'fps', 'anim', 'anim-keys', 'frame-zoom', 'frame-pan-x', 'frame-pan-y', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
-  rendering: ['detail', 'still-scale', 'still-passes', 'stereo-mode', 'stereo-baseline', 'photo-format', 'photo-quality', 'photo-size', 'video-format', 'video-codec', 'video-quality', 'video-size', 'upscale-method', 'upscale-sharpen'],
+  rendering: ['detail', 'fullres-on', 'still-scale', 'still-passes', 'auto-render', 'stereo-on', 'stereo-mode', 'stereo-baseline', 'photo-format', 'photo-quality', 'photo-size', 'video-format', 'video-codec', 'video-quality', 'video-size', 'upscale-method', 'upscale-sharpen'],
   local: ['local-masks'],
   geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],
 };
