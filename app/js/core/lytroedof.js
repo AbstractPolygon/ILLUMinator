@@ -439,8 +439,8 @@ export function engineColorScale(modulation, cam, dev, g) {
   }
   const centre = [0, 0, 0];
   const nCentre = [0, 0, 0];
-  forEachLensPixel(g, cam, 2.3, (i, x, y, u, v) => {
-    if (u * u + v * v > 5.3) return;
+  forEachLensPixel(g, cam, (globalThis.__lytro && globalThis.__lytro.centreRad) || 3.2, (i, x, y, u, v) => {
+    if (u * u + v * v > ((globalThis.__lytro && globalThis.__lytro.centreR2) || 9)) return;
     const ch = dev.cfa[y & 1][x & 1];
     centre[ch] += Math.max(0, modulation[i] - dev.black[ch] * MOD_BLACK());
     nCentre[ch]++;
