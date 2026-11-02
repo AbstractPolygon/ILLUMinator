@@ -26,6 +26,7 @@ import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhi
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { engineDenoise } from './core/enginenr.js';
 import { engineModulation } from './core/enginemod.js';
+import { guideDepthEdges } from './core/depthguide.js';
 import { nrFilterGpu } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
 import { engineCostVolumeGpu } from './gpu/enginecost.js';
@@ -1272,12 +1273,17 @@ function useHotPixelFix(on) {
   lf.hotPixels = on ? state.rawFixed.count : 0;
 }
 
+// The depth method a setting stands for: 'auto' (or none) is the engine's own way where its tables are there, the blend otherwise.
+function resolveDepthStyle(v) {
+  return v && v !== 'auto' && v !== 'guided' ? v : (engineDepthAvailable() ? 'match' : 'combined');
+}
+
 async function settings({ id, settings: s }) {
   const hotChanged = s.hotPixels !== undefined && s.hotPixels !== (state.settings.hotPixels ?? true);
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
-  const styleChanged = s.depthStyle !== undefined && s.depthStyle !== (state.settings.depthStyle ?? (engineDepthAvailable() ? 'match' : 'combined'));
+  const styleChanged = s.depthStyle !== undefined && (s.depthStyle === 'guided') !== (state.settings.depthStyle === 'guided') || (s.depthStyle !== undefined && resolveDepthStyle(s.depthStyle) !== resolveDepthStyle(state.settings.depthStyle));
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
@@ -1522,7 +1528,7 @@ async function findObjects(id) {
 async function ensureDepth(id) {
   if (state.depth) return true;
   if (!(await ensureRefocusViews(id))) return false;
-  if (!state.depth && state.userDepth && state.settings.lytroDepth !== false) {
+  if (!state.depth && state.userDepth && state.settings.lytroDepth !== false && state.settings.depthStyle !== 'guided') {
     const { outW, outH } = state.sampler;
     const alpha = userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH));
     let lo = Infinity, hi = -Infinity;
@@ -1549,7 +1555,7 @@ async function ensureDepth(id) {
     // Raw photos with the engine's ray tables measure depth the engine's way by default (its views and its estimator, core/enginedepth.js:
     // within 0.05 of Lytro Desktop's own pictures, the blend scores worse), on the CPU too.
     const engineDefault = engineDepthAvailable();
-    let style = state.settings.depthStyle ?? (engineDefault ? 'match' : 'combined');
+    let style = resolveDepthStyle(state.settings.depthStyle);
     if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
@@ -1571,6 +1577,11 @@ async function ensureDepth(id) {
       }
     } finally {
       DEPTH_REGIONS.objects = null;
+    }
+    // 'Lytro edges, our depth': Lytro Desktop's depth regions filled with our depth (core/depthguide.js), for photos that carry its map.
+    if (state.settings.depthStyle === 'guided' && state.userDepth && state.depthRaw) {
+      const guide = userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH));
+      state.depthRaw = { ...state.depthRaw, alpha: guideDepthEdges(state.depthRaw.alpha, guide, outW, outH) };
     }
     // Lytro Desktop puts depth edges on the picture's edges (a joint adaptive
     // filter and an MRF in its engine): the same here, on the depth as finally
@@ -2032,6 +2043,7 @@ async function depthMap({ id, grey = false, contrast = 0 }) {
   const src = await depthSource(id);
   if (!src) return { cancelled: true };
   const { alpha } = src;
+  if (globalThis.__depthDump) globalThis.__depthDump(alpha, src.w, src.h); // debugging aid: the depth values behind the picture
   const sorted = Float32Array.from(alpha).sort();
   // Contrast pulls the ends of the range in (2% and 98% of the picture, up to
   // 30% and 70%) and adds an S curve, so a narrow span of depth fills the colors.

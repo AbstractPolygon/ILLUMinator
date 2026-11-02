@@ -515,6 +515,15 @@
           </label>
           <label id="lytro-depth-row" class="check" title="Uses the depth map edited in Lytro Desktop, imported with the photo, instead of measuring depth" hidden><input id="lytro-depth" type="checkbox" checked> Lytro Desktop depth map</label>
           <label id="depth-objects-row" class="check" title="Finds the objects in the photo and puts depth edges on their outlines, with or without the High quality depth map. The first time, it downloads a 45 MB object model (kept for later); finding the objects takes a few seconds per photo"><input id="depth-objects" type="checkbox"> Object edges</label>
+          <label id="depth-style-row" title="How the depth map is measured. Automatic: the engine's way for raw camera photos (Lytro-style), the blend otherwise. Blended: the classic and the Lytro-style depth together, as in version 0.5.30 (more fine detail on some photos, slower). Classic: the plain cost volume. Lytro-style: only the engine's measurement. Lytro edges, our depth: Lytro Desktop's depth regions (its sharp edges) filled with our depth values, for photos that carry its depth map">Depth method
+            <select id="depth-style">
+              <option value="auto" selected>Automatic</option>
+              <option value="combined">Blended (as in 0.5.30)</option>
+              <option value="classic">Classic</option>
+              <option value="match">Lytro-style</option>
+              <option value="guided">Lytro edges, our depth</option>
+            </select>
+          </label>
           <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo, for photos and videos; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox" checked> High quality depth map</label>
           <div class="row check-row">
             <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>
