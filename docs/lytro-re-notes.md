@@ -990,3 +990,7 @@ k = 1 - map * w (w the hue weight from -0.8 / -0.3 and 4 / 6, map = curve(0.4 R 
 pixels. So `bisgFilter`'s suppression is exact; every variant I tried first (per-pixel map, gained map, other neighbourhoods) was worse, and the early ones were polluted by an off-by-one window offset in my test.
 What is left of the 18 .. 28 % G / B shortfall in the blown window is therefore not here: the luminance step after it (`SharpenRecoverGain` IIR on Y, weight B3(2Y)), the colour matrix used when the Lab goes back to RGB
 (the engine goes back through the converter's matrix at +0x60), or the ray splat of the saturated values.
+
+## Photos 4 and 6 colour gap (open)
+
+Photo 6 (eba001cb) recipe: viewWhiteBalance "as shot", viewTemperature 2850, viewTint -30, whiteBalanceMode 0. Against Lytro's page JPEG (central 80%, ours/Lytro): default [0.918 0.834 0.760]; tint -30 [0.863 0.844 0.733]; tint +30 and 2850 K + tint -30 [1.00 0.851 0.752]; engine AWB gains on the display [1.64 0.74 0.62]. By brightness band the green and blue gap is about 0.8 at mid and high tones whatever the white balance, so it is a tone/exposure difference, not a white balance one (photo 7: [1.02 0.99 0.95]). cct2crgb (0x182de0 in the Mach-O) returns gains normalised so the smallest is 1, like the camera gains, so it does not explain it. Still to find: the engine stage that makes "as shot" pictures about 20% brighter.
