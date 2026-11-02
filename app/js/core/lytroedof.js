@@ -666,7 +666,18 @@ export function diffuseSaturation(a, raw, cam, dev) {
 
 // The diffusion's result for the masked pixels only (-1 elsewhere), for the GPU path: the plane is computed just around the masked pixels (a 9 x 9 box, which holds
 // the neighbours the sweeps read and the pixels the completing step averages), diffused on the CPU, and the completing shader takes the values.
+// It depends on the photo only (not on focus, depth or the output size), so the last result is kept: every re-render of the same photo used to pay for it again (about 3 s with a million blown pixels).
+let satCache = null;
 export function saturationOverride(raw, cam, dev, g, vg, radius, modulation, globalRef, listedOnly) {
+  const gKey = JSON.stringify(g);
+  const c = satCache;
+  if (c && c.raw === raw && c.modulation === modulation && c.gKey === gKey && c.vg === vg && c.radius === radius && c.globalRef === globalRef && c.listedOnly === listedOnly && c.cam === cam) return c.out;
+  const out = saturationOverrideCompute(raw, cam, dev, g, vg, radius, modulation, globalRef, listedOnly);
+  satCache = { raw, modulation, gKey, vg, radius, globalRef, listedOnly, cam, out };
+  return out;
+}
+
+function saturationOverrideCompute(raw, cam, dev, g, vg, radius, modulation, globalRef, listedOnly) {
   const { width: W, height: H } = cam;
   const mask = new Uint8Array(W * H);
   let any = 0;
