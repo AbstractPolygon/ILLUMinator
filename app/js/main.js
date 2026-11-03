@@ -828,6 +828,7 @@ function scheduleHistogram() {
 }
 
 // RGB histogram of what the picture currently shows.
+let histogramCanvas = null;
 function drawHistogram() {
   const hc = $('histogram');
   const hctx = hc.getContext('2d');
@@ -835,10 +836,26 @@ function drawHistogram() {
   const w = canvas.width;
   const h = canvas.height;
   if (!state.info || !w || !h || canvas.classList.contains('hidden')) return;
-  const data = ctx.getImageData(0, 0, w, h).data;
+  // About 250k pixels at most: a large picture is first drawn small (nearest pixels, so the values stay real ones) and only that is read back.
+  let data;
+  let step = 4;
+  if (w * h <= 300000) {
+    data = ctx.getImageData(0, 0, w, h).data;
+  } else {
+    const k = Math.sqrt(250000 / (w * h));
+    const sw = Math.max(1, Math.round(w * k));
+    const sh = Math.max(1, Math.round(h * k));
+    histogramCanvas ||= document.createElement('canvas');
+    if (histogramCanvas.width !== sw || histogramCanvas.height !== sh) {
+      histogramCanvas.width = sw;
+      histogramCanvas.height = sh;
+    }
+    const sctx = histogramCanvas.getContext('2d', { willReadFrequently: true });
+    sctx.imageSmoothingEnabled = false;
+    sctx.drawImage(canvas, 0, 0, w, h, 0, 0, sw, sh);
+    data = sctx.getImageData(0, 0, sw, sh).data;
+  }
   const bins = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
-  // Sample about 250k pixels at most.
-  const step = Math.max(1, Math.floor((w * h) / 250000)) * 4;
   for (let i = 0; i < data.length; i += step) {
     bins[0][data[i]]++;
     bins[1][data[i + 1]]++;

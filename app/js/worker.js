@@ -945,7 +945,10 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     if (state.jobs.superres !== job) return { cancelled: true };
   }
   const opts = apertureOptions({ u, v, aperture });
-  const base = allInFocus ? await allInFocusBase(id, u, v) : refocusRGB(alpha, opts);
+  // A refocused (not all in focus) base stays on the graphics card when the full render runs there.
+  const baseOnGpu = !allInFocus && state.gpu && state.gpu.views && state.gpu.floatBlend;
+  if (baseOnGpu) state.gpu.refocusTo(alpha, opts);
+  const base = allInFocus ? await allInFocusBase(id, u, v) : baseOnGpu ? null : refocusRGB(alpha, opts);
   if (state.gpu) {
     // The whole render on the GPU: the picture stays there for the color pass.
     progress(label, 0);
@@ -953,7 +956,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     const cs = colorState(color);
     const tex = state.gpu.superRes({
       ...params, alpha, allInFocus, u0: u, v0: v, apertureSigma: allInFocus ? Infinity : opts.sigma,
-      vignetting: state.vignetting, base, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes,
+      vignetting: state.vignetting, base, baseFromView: baseOnGpu, baseW: sampler.outW, baseH: sampler.outH, depth: state.depth.alpha, passes,
       lensOffsets: state.lensOffsets, calibrate: true, lens: cs.lens, rayWarp: activeRayWarp(),
     });
     if (tex) {
@@ -1738,10 +1741,15 @@ async function ensureDepth(id) {
       if (style === 'combined') {
         const classic = measureClassic(id, fast, report(0, 0.4));
         lap.classic = Date.now() - tDepth - lap.views;
+        const tMatch = Date.now();
         const match = measureLytro(report(0.4, 0.95));
+        lap.match = Date.now() - tMatch;
+        lap.inFrame = state.frameMs;
         if (match && classic) {
           state.depthParts = { classic: classic.alpha, match: match.alpha, outW, outH };
+          const tCombine = Date.now();
           state.depthRaw = { ...match, engineMap: undefined, alpha: combineDepth(classic.alpha, match.alpha, outW, outH, undefined, state.settings.depthBlend ?? 0.5) };
+          lap.combine = Date.now() - tCombine;
         } else {
           state.depthRaw = classic || match || measureClassic(id, fast, report(0, 1), true);
         }
@@ -1761,7 +1769,9 @@ async function ensureDepth(id) {
     // Lytro Desktop puts depth edges on the picture's edges (a joint adaptive
     // filter and an MRF in its engine): the same here, on the depth as finally
     // measured, so every style gets it.
-    settleDepth(outW, outH);
+    const tSettle = Date.now();
+    settleDepth(outW, outH, lap);
+    lap.settle = Date.now() - tSettle;
     // Where the time went, and a warning when a GPU step fell back to the CPU.
     console.info(`Depth measured in ${((Date.now() - tDepth) / 1000).toFixed(1)} s (${style}; ${state.gpu ? `GPU ${state.gpu.name || ''}${hardwareGpu() ? '' : ' (software)'}` : 'no GPU'}): ${JSON.stringify(lap)}`);
     if (state.cpuFallbacks && state.cpuFallbacks.size) {
@@ -2052,7 +2062,9 @@ function measureLytro(progress) {
     const map = { width: outW, height: outH, data: Float32Array.from(lam, (v) => (v - lo) / (hi - lo || 1)), min: lo, max: hi };
     if (globalThis.__rasterDump) globalThis.__rasterDump(lam, outW, outH, state.userDepth);
     const dbg = globalThis.__lytro || {};
+    const tFrame = Date.now();
     const fr = engineDepthInFrame(map, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL, true);
+    state.frameMs = Date.now() - tFrame;
     const n = state.sampler.outW * state.sampler.outH;
     return { alpha: fr.plain, confidence: new Float32Array(n).fill(1), range: [DEPTH_SEARCH.min, DEPTH_SEARCH.max], engineMap: map };
   }
@@ -2218,8 +2230,10 @@ function activeRayWarpForShift() {
 }
 
 // The last steps of a measured depth map: edges snapped to the picture's, then the smoothing.
-function settleDepth(outW, outH) {
+function settleDepth(outW, outH, lap = {}) {
+  const t0 = Date.now();
   if (EDGE_SNAP_DEPTH.on && state.depthRaw) state.depthRaw = { ...state.depthRaw, alpha: snapDepthEdges(state.depthRaw.alpha, depthColorGuide(centerView()), outW, outH) };
+  lap.snap = Date.now() - t0;
   if (globalThis.__finalDepthDump) globalThis.__finalDepthDump(state.depthRaw.alpha, centerView(), outW, outH);
   applyDepthSmoothing();
 }

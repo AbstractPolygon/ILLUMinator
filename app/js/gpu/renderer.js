@@ -3361,6 +3361,16 @@ export class GpuRenderer {
   splatInputs(p) {
     const gl = this.gl;
     const base = this.texture(p.baseW, p.baseH, gl.RGBA16F, gl.LINEAR);
+    if (p.baseFromView) {
+      // The refocused view just rendered (refocusTo): copied on the GPU, no read back.
+      const Q = this.programs.copy;
+      this.target(base, p.baseW, p.baseH);
+      gl.useProgram(Q.p);
+      gl.uniform1i(Q.u.uSrc, 1);
+      this.bindTex(1, this.outTex);
+      this.draw();
+      return this.splatVignetting(p, base);
+    }
     const rgba = new Float32Array(p.baseW * p.baseH * 4);
     for (let i = 0, j = 0; i < p.base.length; i += 3, j += 4) {
       rgba[j] = p.base[i];
@@ -3370,6 +3380,11 @@ export class GpuRenderer {
     }
     gl.bindTexture(gl.TEXTURE_2D, base);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, p.baseW, p.baseH, gl.RGBA, gl.FLOAT, rgba);
+    return this.splatVignetting(p, base);
+  }
+
+  splatVignetting(p, base) {
+    const gl = this.gl;
     const vg = p.vignetting;
     const vig = this.texture(vg.bins, vg.bins, gl.RGBA32F);
     const vigData = new Float32Array(vg.bins * vg.bins * 4);
