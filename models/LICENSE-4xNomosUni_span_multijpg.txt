@@ -1,0 +1,11 @@
+4xNomosUni_span_multijpg.onnx
+
+This file is a format conversion (PyTorch safetensors to ONNX, opset 17, by scripts/convert-span.py) of the model 4xNomosUni_span_multijpg:
+
+  Author:    Philip Hofmann (Phhofm)
+  Source:    https://huggingface.co/Phips/4xNomosUni_span_multijpg  (also https://github.com/Phhofm/models/releases/tag/4xNomosUni_span_multijpg)
+  Licence:   Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+  Network:   SPAN, Swift Parameter-free Attention Network, by Cheng Wan, Hongyuan Yu et al. (https://github.com/hongyuanyu/SPAN), Apache License 2.0
+  Training:  4x universal upscaler for photos, trained on the NomosUni dataset with JPEG and multiscale degradations
+
+Changes made: the weights were loaded with spandrel (MIT) and exported to ONNX with dynamic height and width; the network and its weights are otherwise unchanged. Under CC BY 4.0 this file may be used and shared with this attribution kept.

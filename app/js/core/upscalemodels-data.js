@@ -19,6 +19,33 @@ export const MODEL_DATA = [
     "weights": "realesr-general-x4v3.pth (Real-ESRGAN v0.2.5.0)"
   },
   {
+    "id": "4xNomosUni_span_multijpg",
+    "name": "SPAN x4",
+    "note": "fast, photos",
+    "file": "4xNomosUni_span_multijpg.onnx",
+    "size": 1718910,
+    "sha256": "49479befe6370d232fb47c8f03def666b692121862b8afcf93dddb64b125a747",
+    "scale": 4,
+    "weights": "4xNomosUni_span_multijpg (Philip Hofmann, CC BY 4.0), a SPAN network (Wan et al., Apache-2.0)",
+    "converted": {
+      "from": {
+        "repo": "Phips/4xNomosUni_span_multijpg",
+        "file": "4xNomosUni_span_multijpg.safetensors",
+        "revision": "eb7c9845fb088203dcc9b5d94735c2a5f6b6213a",
+        "sha256": "3bedff643a1ba51b12e0174ebca62649a930ae3e7b0868be9706d8659d4d32a2"
+      },
+      "script": "scripts/convert-span.py",
+      "tools": {
+        "torch": "2.15.0",
+        "spandrel": "0.4.2",
+        "onnx": "1.23.2",
+        "opset": 17
+      },
+      "license": "CC-BY-4.0",
+      "licenseFile": "LICENSE-4xNomosUni_span_multijpg.txt"
+    }
+  },
+  {
     "id": "RealESRGAN_x4plus",
     "name": "Real-ESRGAN x4plus",
     "note": "best quality",

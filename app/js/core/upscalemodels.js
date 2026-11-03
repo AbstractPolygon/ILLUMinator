@@ -57,7 +57,8 @@ export async function downloadModel(model, onProgress = () => {}) {
   const cache = await openCache();
   if (!cache) throw new Error('This browser cannot keep downloaded models.');
   let failure = null;
-  for (const base of [REPO_BASE, SOURCE_BASE]) {
+  // (a model converted here has no copy at the source: this repository is its only place)
+  for (const base of model.converted ? [REPO_BASE] : [REPO_BASE, SOURCE_BASE]) {
     try {
       const bytes = await fetchBytes(base + model.file, model, onProgress);
       if (bytes.length !== model.size || (await sha256Hex(bytes)) !== model.sha256) throw new Error(`${model.name} did not download correctly. Try again.`);

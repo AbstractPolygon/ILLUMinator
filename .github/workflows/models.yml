@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 concurrency:
   group: models
@@ -27,6 +28,17 @@ jobs:
         run: node scripts/update-models.mjs --update
       - name: Check them
         run: node --test test/upscalemodels-files.test.mjs test/aiupscale.test.mjs
+      - name: Open an issue when converted weights changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          node scripts/update-models.mjs --converted
+          code=$?
+          if [ "$code" = "3" ] && [ -z "$(gh issue list --state open --search 'Upscaling model needs converting again in:title' --json number --jq '.[].number')" ]; then
+            gh issue create --title "Upscaling model needs converting again" --body "The weights of a model converted in this repository changed at their source (see the Upscaling models workflow log). Run scripts/convert-span.py on the new weights and update models/manifest.json (see models/README.md)."
+          fi
+          exit 0
       - name: Open a pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
