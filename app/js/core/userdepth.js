@@ -316,9 +316,13 @@ export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8,
   let e;
   if (exact) {
     // the engine's DmResampler itself (core/dmresampler.js), on the depth in lambda
-    const lam = Float32Array.from(map.data, (v) => map.min + v * (map.max - map.min));
+    // (plain loops: Float32Array.from with a callback is several times slower on millions of values)
+    const lam = new Float32Array(map.data.length);
+    for (let i = 0; i < lam.length; i++) lam[i] = map.min + map.data[i] * (map.max - map.min);
     const r = dmResample(lam, Wd, Hd, factor, { similarity: similar, blend: true });
-    e = { data: Float32Array.from(r.data, (x) => x * LAMBDA_TO_ALPHA), width: r.width, height: r.height, factor };
+    const scaled = new Float32Array(r.data.length);
+    for (let i = 0; i < scaled.length; i++) scaled[i] = r.data[i] * LAMBDA_TO_ALPHA;
+    e = { data: scaled, width: r.width, height: r.height, factor };
   } else {
     e = userDepthAlphaUpscaled({ ...map, identity: true }, raster, cam, 0, null, factor, similar, level);
   }
@@ -328,17 +332,17 @@ export function engineDepthInFrame(map, sampler, cam, factor = 5, similar = 0.8,
   const h5 = outH * factor;
   const up = new Float32Array(w5 * h5);
   const c = (factor - 1) / 2;
+  // The map texel of every column and row of the picture's fine grid (the same for every row, and every column).
+  const ci = new Int32Array(w5);
+  for (let I = 0; I < w5; I++) {
+    const sx = xMin + ((I - c) / factor) * unit + 0.5;
+    ci[I] = Math.min(e.width - 1, Math.max(0, Math.floor((sx / cam.width) * e.width)));
+  }
   for (let J = 0; J < h5; J++) {
-    const Y = yMin + ((J - c) / factor) * unit;
-    for (let I = 0; I < w5; I++) {
-      const X = xMin + ((I - c) / factor) * unit;
-      // the picture's frame is the sensor's
-      const sx = X + 0.5;
-      const sy = Y + 0.5;
-      const ei = Math.min(e.width - 1, Math.max(0, Math.floor((sx / cam.width) * e.width)));
-      const ej = Math.min(e.height - 1, Math.max(0, Math.floor((sy / cam.height) * e.height)));
-      up[J * w5 + I] = e.data[ej * e.width + ei];
-    }
+    const sy = yMin + ((J - c) / factor) * unit + 0.5;
+    const row = Math.min(e.height - 1, Math.max(0, Math.floor((sy / cam.height) * e.height))) * e.width;
+    const base = J * w5;
+    for (let I = 0; I < w5; I++) up[base + I] = e.data[row + ci[I]];
   }
   const plain = new Float32Array(outW * outH);
   const m = Math.floor(c);

@@ -32,12 +32,15 @@ export function fitAffine(a, r, ok) {
     p0 = (sw * sar - sa * sr) / det;
     p1 = (saa * sr - sa * sar) / det;
     const err = new Float32Array(a.length);
-    const kept = [];
+    let count = 0;
     for (let i = 0; i < a.length; i++) {
       if (!ok[i]) continue;
       err[i] = Math.abs(a[i] * p0 + p1 - r[i]);
-      kept.push(err[i]);
+      count++;
     }
+    // The median of the errors: sorted as numbers (a plain array's sort() orders them as text, and slowly).
+    const kept = new Float32Array(count);
+    for (let i = 0, k = 0; i < a.length; i++) if (ok[i]) kept[k++] = err[i];
     kept.sort();
     const s = kept[kept.length >> 1] * 1.5 + 1e-6;
     for (let i = 0; i < a.length; i++) if (ok[i]) weight[i] = 1 / Math.max(1, err[i] / s);
