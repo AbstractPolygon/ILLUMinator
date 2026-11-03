@@ -95,3 +95,44 @@ test('thumbnails of a first generation camera are asked for one at a time and fa
   assert.equal(b.mime, 'image/png');
   assert.equal(maxActive, 1);
 });
+
+// A smooth picture, as a thumbnail is: soft colour blobs.
+function scene() {
+  const rgb = Buffer.alloc(128 * 128 * 3);
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const i = (y * 128 + x) * 3;
+      rgb[i] = 128 + 100 * Math.sin(x / 19);
+      rgb[i + 1] = 128 + 100 * Math.cos(y / 23 + x / 41);
+      rgb[i + 2] = 128 + 100 * Math.sin((x + y) / 31);
+    }
+  }
+  return rgb;
+}
+const lumaOf = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+const toYuv = (r, g, b) => [lumaOf(r, g, b), 128 - 0.169 * r - 0.331 * g + 0.5 * b, 128 + 0.5 * r - 0.419 * g - 0.081 * b];
+
+test('a raw thumbnail in an unknown pixel format is read as the layout that looks like a picture', () => {
+  const { decodeRawThumbnail } = require('../electron/camera.cjs');
+  const rgb = scene();
+  const px = (i) => [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]];
+  const n = 128 * 128;
+  const encode = {
+    rgb: () => rgb,
+    rgba: () => { const o = Buffer.alloc(n * 4, 255); for (let i = 0; i < n; i++) px(i).forEach((v, c) => { o[i * 4 + c] = v; }); return o; },
+    'planar-rgb': () => { const o = Buffer.alloc(n * 3); for (let i = 0; i < n; i++) px(i).forEach((v, c) => { o[c * n + i] = v; }); return o; },
+    rgb565: () => { const o = Buffer.alloc(n * 2); for (let i = 0; i < n; i++) { const [r, g, b] = px(i); o.writeUInt16LE(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), i * 2); } return o; },
+    yuyv: () => { const o = Buffer.alloc(n * 2); for (let i = 0; i < n; i += 2) { const a = toYuv(...px(i)); const b = toYuv(...px(i + 1)); o.set([a[0], (a[1] + b[1]) / 2, b[0], (a[2] + b[2]) / 2], i * 2); } return o; },
+    uyvy: () => { const o = Buffer.alloc(n * 2); for (let i = 0; i < n; i += 2) { const a = toYuv(...px(i)); const b = toYuv(...px(i + 1)); o.set([(a[1] + b[1]) / 2, a[0], (a[2] + b[2]) / 2, b[0]], i * 2); } return o; },
+    i420: () => { const o = Buffer.alloc(n * 1.5); for (let i = 0; i < n; i++) o[i] = toYuv(...px(i))[0]; for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const c = toYuv(...px(y * 2 * 128 + x * 2)); o[n + y * 64 + x] = c[1]; o[n + 4096 + y * 64 + x] = c[2]; } return o; },
+  };
+  for (const [name, make] of Object.entries(encode)) {
+    const got = decodeRawThumbnail(make());
+    assert.equal(got.name, name, `${name}: read as ${got.name} ${JSON.stringify(got.scores)}`);
+    // The colours come out right (not only the layout name).
+    let err = 0;
+    for (let i = 0; i < rgb.length; i += 37) err += Math.abs(got.rgb[i] - rgb[i]);
+    assert.ok(err / (rgb.length / 37) < 12, `${name}: colour error ${err / (rgb.length / 37)}`);
+  }
+  assert.equal(decodeRawThumbnail(Buffer.alloc(1000)), null);
+});

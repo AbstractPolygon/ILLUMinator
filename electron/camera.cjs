@@ -334,58 +334,141 @@ function pngOfRgb(rgb, width, height) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', require('node:zlib').deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// A PNG of 8 bit RGB pixels from other raw layouts: RGBA/BGRA, RGB565, grey, YUV 4:2:2 (YUYV / UYVY) and 4:2:0 planar.
-function rgbOfRaw(data, side, layout) {
-  const n = side * side;
-  const out = Buffer.alloc(n * 3);
-  const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
-  const yuv = (i, y, u, v) => {
-    out[i * 3] = clamp(y + 1.402 * (v - 128));
-    out[i * 3 + 1] = clamp(y - 0.344 * (u - 128) - 0.714 * (v - 128));
-    out[i * 3 + 2] = clamp(y + 1.772 * (u - 128));
-  };
-  for (let i = 0; i < n; i++) {
-    if (layout === 'rgba') { out[i * 3] = data[i * 4]; out[i * 3 + 1] = data[i * 4 + 1]; out[i * 3 + 2] = data[i * 4 + 2]; }
-    else if (layout === 'bgra') { out[i * 3] = data[i * 4 + 2]; out[i * 3 + 1] = data[i * 4 + 1]; out[i * 3 + 2] = data[i * 4]; }
-    else if (layout === 'rgb565') {
-      const v = data[i * 2] | (data[i * 2 + 1] << 8);
-      out[i * 3] = ((v >> 11) & 31) * 255 / 31; out[i * 3 + 1] = ((v >> 5) & 63) * 255 / 63; out[i * 3 + 2] = (v & 31) * 255 / 31;
-    } else if (layout === 'grey') { out[i * 3] = out[i * 3 + 1] = out[i * 3 + 2] = data[i]; }
-    else if (layout === 'yuyv' || layout === 'uyvy') {
-      const o = (i >> 1) * 4;
-      const [y0, u, y1, v] = layout === 'yuyv' ? [data[o], data[o + 1], data[o + 2], data[o + 3]] : [data[o + 1], data[o], data[o + 3], data[o + 2]];
-      yuv(i, i & 1 ? y1 : y0, u, v);
-    } else if (layout === 'yuv420') {
-      const x = i % side;
-      const y = (i / side) | 0;
-      const c = n + (y >> 1) * (side >> 1) + (x >> 1);
-      yuv(i, data[i], data[c], data[c + (n >> 2)]);
+// The first generation camera's thumbnail file (.128) is a raw 128 x 128 picture whose pixel format is not documented. Every plausible layout for the file's
+// size is decoded and the one that reads as a picture (smooth, as a photo is; a wrong layout is colour noise) is used.
+const SIDE = 128;
+const NPIX = SIDE * SIDE;
+const u8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+
+function yuvToRgb(out, i, y, u, v) {
+  out[i * 3] = u8(y + 1.402 * (v - 128));
+  out[i * 3 + 1] = u8(y - 0.344 * (u - 128) - 0.714 * (v - 128));
+  out[i * 3 + 2] = u8(y + 1.772 * (u - 128));
+}
+
+const planar = (order) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  for (let i = 0; i < NPIX; i++) for (let c = 0; c < 3; c++) out[i * 3 + order[c]] = d[c * NPIX + i];
+  return out;
+};
+const packed = (bytes, map) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  for (let i = 0; i < NPIX; i++) for (let c = 0; c < 3; c++) out[i * 3 + c] = d[i * bytes + map[c]];
+  return out;
+};
+const rgb565 = (big) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  for (let i = 0; i < NPIX; i++) {
+    const v = big ? (d[i * 2] << 8) | d[i * 2 + 1] : d[i * 2] | (d[i * 2 + 1] << 8);
+    out[i * 3] = ((v >> 11) & 31) * 255 / 31;
+    out[i * 3 + 1] = ((v >> 5) & 63) * 255 / 63;
+    out[i * 3 + 2] = (v & 31) * 255 / 31;
+  }
+  return out;
+};
+const yuv422 = (order) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  for (let i = 0; i < NPIX; i++) {
+    const o = (i >> 1) * 4;
+    yuvToRgb(out, i, d[o + order[i & 1 ? 2 : 0]], d[o + order[1]], d[o + order[3]]);
+  }
+  return out;
+};
+const grey = (stride, at) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  for (let i = 0; i < NPIX; i++) out[i * 3] = out[i * 3 + 1] = out[i * 3 + 2] = d[i * stride + at];
+  return out;
+};
+// Planar 4:2:0: Y plane, then U and V (V first for YV12); NV12/NV21 have the chroma interleaved.
+const yuv420 = (kind) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  const q = NPIX >> 2;
+  for (let i = 0; i < NPIX; i++) {
+    const x = i % SIDE;
+    const y = (i / SIDE) | 0;
+    const c = (y >> 1) * (SIDE >> 1) + (x >> 1);
+    let u;
+    let v;
+    if (kind === 'i420') { u = d[NPIX + c]; v = d[NPIX + q + c]; }
+    else if (kind === 'yv12') { v = d[NPIX + c]; u = d[NPIX + q + c]; }
+    else if (kind === 'nv12') { u = d[NPIX + c * 2]; v = d[NPIX + c * 2 + 1]; }
+    else { v = d[NPIX + c * 2]; u = d[NPIX + c * 2 + 1]; }
+    yuvToRgb(out, i, d[i], u, v);
+  }
+  return out;
+};
+// A Bayer mosaic with 2 x 2 blocks taken as one colour (pattern: where red, green, green, blue sit in the block).
+const bayer = (pos) => (d) => {
+  const out = Buffer.alloc(NPIX * 3);
+  for (let y = 0; y < SIDE; y += 2) {
+    for (let x = 0; x < SIDE; x += 2) {
+      const at = [d[y * SIDE + x], d[y * SIDE + x + 1], d[(y + 1) * SIDE + x], d[(y + 1) * SIDE + x + 1]];
+      const rgb = [at[pos[0]], (at[pos[1]] + at[pos[2]]) / 2, at[pos[3]]];
+      for (const [dy, dx] of [[0, 0], [0, 1], [1, 0], [1, 1]]) for (let c = 0; c < 3; c++) out[((y + dy) * SIDE + x + dx) * 3 + c] = rgb[c];
     }
   }
   return out;
+};
+
+// [name, bytes per pixel, decoder], in the order preferred when two read equally well.
+const RAW_LAYOUTS = [
+  ['rgb', 3, packed(3, [0, 1, 2])], ['bgr', 3, packed(3, [2, 1, 0])], ['planar-rgb', 3, planar([0, 1, 2])], ['planar-bgr', 3, planar([2, 1, 0])],
+  ['rgba', 4, packed(4, [0, 1, 2])], ['bgra', 4, packed(4, [2, 1, 0])], ['argb', 4, packed(4, [1, 2, 3])], ['abgr', 4, packed(4, [3, 2, 1])],
+  ['yuyv', 2, yuv422([0, 1, 2, 3])], ['uyvy', 2, yuv422([1, 0, 3, 2])], ['rgb565', 2, rgb565(false)], ['rgb565-be', 2, rgb565(true)],
+  ['rgb48', 6, packed(6, [1, 3, 5])], ['rgb48-be', 6, packed(6, [0, 2, 4])], ['grey16', 2, grey(2, 1)], ['grey16-be', 2, grey(2, 0)],
+  ['i420', 1.5, yuv420('i420')], ['yv12', 1.5, yuv420('yv12')], ['nv12', 1.5, yuv420('nv12')], ['nv21', 1.5, yuv420('nv21')],
+  ['grey', 1, grey(1, 0)], ['bayer-rggb', 1, bayer([0, 1, 2, 3])], ['bayer-bggr', 1, bayer([3, 1, 2, 0])], ['bayer-grbg', 1, bayer([1, 0, 3, 2])], ['bayer-gbrg', 1, bayer([2, 0, 3, 1])],
+];
+
+// How noisy an RGB picture is: the mean difference between neighbouring pixels in each channel, against the spread of the channels. A photo is smooth; a wrongly read layout is not.
+function noise(rgb) {
+  let diff = 0;
+  let spread = 0;
+  for (let c = 0; c < 3; c++) {
+    let sum = 0;
+    let sq = 0;
+    for (let i = 0; i < NPIX; i++) {
+      const v = rgb[i * 3 + c];
+      sum += v;
+      sq += v * v;
+      const x = i % SIDE;
+      if (x < SIDE - 1) diff += Math.abs(v - rgb[(i + 1) * 3 + c]);
+      if (i + SIDE < NPIX) diff += Math.abs(v - rgb[(i + SIDE) * 3 + c]);
+    }
+    spread += Math.sqrt(Math.max(0, sq / NPIX - (sum / NPIX) ** 2));
+  }
+  return (diff / (NPIX * 6)) / (spread / 3 + 4);
 }
 
-// bytes per pixel of the raw layouts, tried after a JPEG and plain RGB.
-const RAW_LAYOUTS = [['rgba', 4], ['bgra', 4], ['rgb565', 2], ['yuyv', 2], ['uyvy', 2], ['yuv420', 1.5], ['grey', 1]];
+// { name, rgb, scores } of the layout of a 128 x 128 raw thumbnail, or null when the size fits none of them. Data after a header of up to 1 KB counts.
+function decodeRawThumbnail(data) {
+  let best = null;
+  const scores = {};
+  for (const [name, bpp, decode] of RAW_LAYOUTS) {
+    const head = data.length - NPIX * bpp;
+    if (head < 0 || head > 1024) continue;
+    const rgb = decode(data.subarray(head));
+    const score = noise(rgb);
+    scores[name] = Number(score.toFixed(4));
+    // A later layout has to read clearly better than the earlier one.
+    if (!best || score < best.score * 0.9) best = { name, rgb, score };
+  }
+  return best ? { name: best.name, rgb: best.rgb, scores } : null;
+}
 
-// The picture of a first generation camera's thumbnail file (.128): a JPEG (maybe after a header) as it is, raw squares as a PNG, anything else null.
+// The picture of a first generation camera's thumbnail file (.128): a JPEG or PNG (maybe after a header) as it is, a raw picture as a PNG, anything else null.
 function thumbnailPicture(data) {
   if (!data || data.length < 16) return null;
-  if (data[0] === 0xff && data[1] === 0xd8) return { mime: 'image/jpeg', bytes: data, width: 128, height: 128 };
+  if (data[0] === 0xff && data[1] === 0xd8) return { mime: 'image/jpeg', bytes: data, width: SIDE, height: SIDE };
   const jpeg = data.indexOf(Buffer.from([0xff, 0xd8, 0xff]));
-  if (jpeg > 0 && jpeg < 4096) return { mime: 'image/jpeg', bytes: data.subarray(jpeg), width: 128, height: 128 };
+  if (jpeg > 0 && jpeg < 4096) return { mime: 'image/jpeg', bytes: data.subarray(jpeg), width: SIDE, height: SIDE };
   const png = data.indexOf(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  if (png >= 0 && png < 4096) return { mime: 'image/png', bytes: data.subarray(png), width: 128, height: 128 };
-  // 8 bit RGB, a square (or 128 wide) after a header of up to 1 KB.
-  for (const side of [128, 0]) {
-    const s = side || Math.round(Math.sqrt(data.length / 3));
-    const head = data.length - s * s * 3;
-    if (s > 0 && head >= 0 && head <= 1024) return { mime: 'image/png', bytes: pngOfRgb(data.subarray(head), s, s), width: s, height: s };
-  }
-  for (const [layout, bpp] of RAW_LAYOUTS) {
-    const head = data.length - 128 * 128 * bpp;
-    if (head >= 0 && head <= 1024) return { mime: 'image/png', bytes: pngOfRgb(rgbOfRaw(data.subarray(head), 128, layout), 128, 128), width: 128, height: 128 };
-  }
+  if (png >= 0 && png < 4096) return { mime: 'image/png', bytes: data.subarray(png), width: SIDE, height: SIDE };
+  const raw = decodeRawThumbnail(data);
+  if (raw) return { mime: 'image/png', bytes: pngOfRgb(raw.rgb, SIDE, SIDE), width: SIDE, height: SIDE, layout: raw.name, scores: raw.scores };
+  // Some other square of 8 bit RGB.
+  const side = Math.round(Math.sqrt(data.length / 3));
+  if (side * side * 3 === data.length) return { mime: 'image/png', bytes: pngOfRgb(data, side, side), width: side, height: side, layout: 'rgb' };
   return null;
 }
 
@@ -449,7 +532,7 @@ async function lytroThumbnail(entry, fileId) {
         log(`thumbnail of ${pic.name} is in a form not understood: ${data.length} bytes, starting ${Buffer.from(data.subarray(0, 16)).toString('hex')}`);
         return null;
       }
-      log(`thumbnail of ${pic.name}: ${data.length} bytes, ${t.mime}`);
+      log(`thumbnail of ${pic.name}: ${data.length} bytes, ${t.mime}${t.layout ? `, read as ${t.layout} (${JSON.stringify(t.scores || {})}), starting ${Buffer.from(data.subarray(0, 16)).toString('hex')}` : ''}`);
       return { mime: t.mime, bytes: t.bytes };
     });
     thumbnailCache.set(key, result);
@@ -568,4 +651,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { lytroThumbnail, thumbnailPicture, pullUsbCalibration, pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { lytroThumbnail, thumbnailPicture, decodeRawThumbnail, pullUsbCalibration, pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
