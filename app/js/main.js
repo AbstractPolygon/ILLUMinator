@@ -1074,7 +1074,11 @@ async function renderCamera() {
         msg = await promise;
         if (!(msg && (msg.pixels || msg.bitmap))) msg = null;
       }
-      if (!msg) msg = await engine.request('view', { ...cameraParams(), draft }, { onProgress: showProgress });
+      if (!msg) msg = await engine.request('view', { ...cameraParams(), draft }, {
+        onProgress: showProgress,
+        // A picture before its noise reduction (a CPU step) is done: shown at once, replaced when the finished one arrives.
+        onFrame: (f) => { if (f.preview && f.bitmap && showsCamera()) draw(f.bitmap); },
+      });
       hideProgress();
       if (msg && (msg.pixels || msg.bitmap) && showsCamera()) {
         draw(toImageData(msg));

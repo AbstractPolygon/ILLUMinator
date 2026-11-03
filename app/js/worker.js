@@ -402,7 +402,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
-  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected, masks);
+  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected, masks, draft);
 }
 
 // Local adjustments resolved for a picture, packed for the GPU, or null.
@@ -412,21 +412,9 @@ function packedMasks(ctx) {
 }
 
 // The color pass: color, defringing, local adjustments and tone mapping.
-function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false, ctx = undefined) {
-  // The noise reduction is a CPU filter: read the picture back and finish it there.
-  if (engineNrOn(cs, w)) {
-    const planes = state.gpu.readChannels(tex, w, h, 3);
-    const rgb = new Float32Array(w * h * 3);
-    for (let i = 0; i < w * h; i++) {
-      rgb[3 * i] = planes[0][i];
-      rgb[3 * i + 1] = planes[1][i];
-      rgb[3 * i + 2] = planes[2][i];
-    }
-    const pixels = toPixels(rgb, w, h, ctx, cs, distortionCorrected, true);
-    post({ ...message, width: w, height: h, pixels: pixels.buffer }, [pixels.buffer]);
-    return;
-  }
-  const bitmap = state.gpu.present(tex, w, h, {
+function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false, ctx = undefined, draft = false) {
+  // The color pass on the GPU: an ImageBitmap.
+  const presentBitmap = () => state.gpu.present(tex, w, h, {
     matrix: cs.matrix,
     exposure: cs.baseExposure * Math.pow(2, cs.settings.ev),
     fringe: cs.settings.defringe,
@@ -439,6 +427,25 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
     sharpen: state.detail && state.detail.engine && !state.pp ? state.detail.engine : 0,
     usm: state.detail && state.detail.engine && !state.pp ? usmMap() : null,
   });
+  // The noise reduction is a CPU filter: read the picture back and finish it there. Not for a draft, shown while a slider or the picture is dragged (the full picture follows
+  // on release); and a picture without it is sent first as a preview frame, so the view does not wait for the filter.
+  if (engineNrOn(cs, w) && !draft) {
+    if (message.type === 'result' && message.id != null) {
+      const preview = presentBitmap();
+      post({ id: message.id, type: 'frame', index: -1, preview: true, width: w, height: h, bitmap: preview }, [preview]);
+    }
+    const planes = state.gpu.readChannels(tex, w, h, 3);
+    const rgb = new Float32Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) {
+      rgb[3 * i] = planes[0][i];
+      rgb[3 * i + 1] = planes[1][i];
+      rgb[3 * i + 2] = planes[2][i];
+    }
+    const pixels = toPixels(rgb, w, h, ctx, cs, distortionCorrected, true);
+    post({ ...message, width: w, height: h, pixels: pixels.buffer }, [pixels.buffer]);
+    return;
+  }
+  const bitmap = presentBitmap();
   post({ ...message, width: w, height: h, bitmap }, [bitmap]);
 }
 
@@ -1175,7 +1182,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     const message = { id, type: 'result', gpuMs: state.gpu.gpuMs() };
     state.gpu.beginTiming();
     if (state.kept && state.kept.key === key) {
-      finishGpu(state.kept.tex, outW, outH, packed, message);
+      finishGpu(state.kept.tex, outW, outH, packed, message, state, false, undefined, draft);
       state.gpu.endTiming();
       return undefined;
     }
