@@ -636,7 +636,7 @@ async function frames({ id, job, path, alpha = 0, aperture = 0, dof = 0, bokeh }
 // core/mvdenoise.js). A GPU texture on the GPU, linear RGB otherwise.
 async function singleView(id, u, v) {
   const mv = state.settings.mvDenoise;
-  if (mv && mv.on && mv.blend > 0 && (await ensureDepth(id))) {
+  if (mv && mv.on && mv.blend > 0 && (await ensureViewDepth(id))) {
     const m = state.centerMeans;
     const sigma = mergeSigma(0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]);
     if (state.gpu) return state.gpu.mergedViewTex(u, v, { sigma, blend: mv.blend });
@@ -1548,8 +1548,30 @@ async function findObjects(id) {
   }
 }
 
-async function ensureDepth(id) {
+// The camera view's multi-view merge only needs a depth to steer by. For raw photos the full depth is measured the engine's way (many views, minutes on a slow machine), so the picture
+// is not held up for it: a quick plain measurement stands in (`depthFast`) until something needs the real depth (depth of field, the depth map, a render), which measures it then.
+async function ensureViewDepth(id) {
   if (state.depth) return true;
+  const style = resolveDepthStyle(state.settings.depthStyle);
+  if (state.pp || state.userDepth || style === 'classic' || globalThis.__forceFullDepth) return ensureDepth(id);
+  if (!(await ensureRefocusViews(id))) return false;
+  if (state.depth) return true;
+  const { outW, outH } = state.sampler;
+  const quick = measureClassic(id, true, () => {});
+  if (!quick || state.sampler.outW !== outW) return false;
+  state.depthRaw = quick;
+  state.depthFast = true;
+  applyDepthSmoothing();
+  return !!state.depth;
+}
+
+async function ensureDepth(id) {
+  if (state.depth && !state.depthFast) return true;
+  if (state.depthFast) {
+    state.depthFast = false;
+    state.depth = null;
+    state.depthRaw = null;
+  }
   if (!(await ensureRefocusViews(id))) return false;
   if (!state.depth && state.userDepth && state.settings.lytroDepth !== false && state.settings.depthStyle !== 'guided') {
     const { outW, outH } = state.sampler;
