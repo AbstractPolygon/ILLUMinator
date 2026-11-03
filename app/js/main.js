@@ -1049,13 +1049,20 @@ for (const type of ['pointerup', 'pointercancel']) {
 
 // Live camera view. Requests are coalesced: while one renders, only the
 // latest settings are kept for the next.
-async function renderCamera() {
+// The engine's noise reduction takes long at the larger picture sizes: a camera view is shown without it first, and the finished picture (with it) is asked for
+// once the changes stop (the worker says so with nrDeferred). `final`: that request.
+let nrFinalTimer = 0;
+let recoveryRunning = false;
+async function renderCamera({ final = false } = {}) {
+  clearTimeout(nrFinalTimer);
   // Changes keep coming: wait for them to stop before auto rendering.
   if (autoRenderTimer) scheduleAutoRender();
   if (!canRender()) return;
   const v = state.view;
   if (v.busy) {
     v.pending = true;
+    // A Detail recovery in progress is for a picture that has changed: stop it.
+    if (recoveryRunning) engine.cancel('superres').catch(() => {});
     return;
   }
   v.busy = true;
@@ -1068,25 +1075,37 @@ async function renderCamera() {
       const draft = drag.on;
       // Detail recovery also rebuilds the picture itself (not just the full
       // sensor still): from every sensor pixel, at the picture's own size.
-      // While dragging, the quick draft is shown; the rebuilt picture follows.
+      // That takes long, so a change shows the quick view first and the
+      // rebuilt picture follows once the changes stop (`final`), as the
+      // noise reduction does.
       const passes = +$('still-passes').value;
+      const recovery = passes > 0 && !draft && state.info.hasRaw;
       let msg = null;
-      if (passes > 0 && !draft && state.info.hasRaw) {
-        const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: +$('detail').value, passes, label: 'Processing' }, { onProgress: showProgress });
-        msg = await promise;
+      if (recovery && final) {
+        recoveryRunning = true;
+        try {
+          const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: +$('detail').value, passes, label: 'Processing' }, { onProgress: showProgress });
+          msg = await promise;
+        } finally {
+          recoveryRunning = false;
+        }
         if (!(msg && (msg.pixels || msg.bitmap))) msg = null;
       }
-      if (!msg) msg = await engine.request('view', { ...cameraParams(), draft }, {
-        onProgress: showProgress,
-        // A picture before its noise reduction (a CPU step) is done: shown at once, replaced when the finished one arrives.
-        onFrame: (f) => { if (f.preview && f.bitmap && showsCamera()) draw(f.bitmap); },
-      });
+      // (a recovery stopped for a newer change: that change is rendered next)
+      if (!msg && !(recovery && final && v.pending)) {
+        msg = await engine.request('view', { ...cameraParams(), draft, deferNr: !draft && !final, final: final && !recovery }, {
+          onProgress: showProgress,
+          // A picture before its noise reduction (a CPU step) is done: shown at once, replaced when the finished one arrives.
+          onFrame: (f) => { if (f.preview && f.bitmap && showsCamera()) draw(f.bitmap); },
+        });
+      }
       hideProgress();
       if (msg && (msg.pixels || msg.bitmap) && showsCamera()) {
         draw(toImageData(msg));
         if (draft) drag.drafted = true;
       }
       if (msg && msg.gpuMs != null) showGpuTime(msg.gpuMs);
+      if (msg && !final && (msg.nrDeferred || recovery)) nrFinalTimer = setTimeout(() => { if (showsCamera()) renderCamera({ final: true }); }, 350);
     }
   } catch (err) {
     showError(err);

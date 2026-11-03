@@ -356,7 +356,7 @@ function engineNrOn(cs, w) {
   return !state.pp && !!(cs.lytro && cs.lytro.exact) && !!(state.detail && state.detail.engine) && cs.settings.engineNr !== false && w >= 1000 && !!(state.lf && state.lf.cam);
 }
 
-function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu = false) {
+function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu = false, skipNr = false) {
   // (from the GPU path the detail pass, the spatial effects and the depth of field are already in the picture)
   if (!onGpu) rgb = applyDetail(rgb, w, h, detailForSize(state.detail, w, lensColumns()));
   rgb = subtractVeil(rgb, w, h, cs.veil, cs.veilAmount);
@@ -369,7 +369,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
   const grade = state.lut ? { lut: state.lut, amount: cs.settings.lutAmount ?? 1 } : null;
   const sharp = (px) => (state.detail && state.detail.engine && !state.pp ? engineUnsharp(px, w, h, state.detail.engine, usmMap()) : px);
   // The engine's noise reduction (Neat Image) runs on the colour-matrixed picture, before the tone curve; at the engine's own picture size only, where its noise profiles hold.
-  if (engineNrOn(cs, w)) {
+  if (!skipNr && engineNrOn(cs, w)) {
     const m = cs.matrix.map((v) => v * exposure);
     const srgb = new Float32Array(rgb.length);
     for (let i = 0; i < rgb.length; i += 3) {
@@ -406,7 +406,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
 // unit of `dof`, for this image's size. `keep`: keep the picture as it is
 // before the color pass, so color changes can redraw it (see view()).
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, color = null, distortionCorrected = false }, message) {
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, mode = undefined, color = null, distortionCorrected = false }, message) {
   const gpu = state.gpu;
   if ((dof > 0 || bokeh.blur > 0) && (await ensureViewDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
@@ -431,7 +431,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
-  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected, masks, draft);
+  finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected, masks, mode || (draft ? 'draft' : undefined));
 }
 
 // Local adjustments resolved for a picture, packed for the GPU, or null.
@@ -441,7 +441,10 @@ function packedMasks(ctx) {
 }
 
 // The color pass: color, defringing, local adjustments and tone mapping.
-function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false, ctx = undefined, draft = false) {
+// `mode` (the noise reduction is a CPU filter that takes long at a large picture size): 'draft', shown while a slider or the picture is dragged, and 'defer', a view that is quick now with
+// the filter done by a later 'final' view (message.nrDeferred tells the page to ask for it), both leave it out; 'final' does it without the preview picture; otherwise a picture without it
+// is sent first as a preview frame, then the finished one.
+function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false, ctx = undefined, mode = undefined) {
   // The color pass on the GPU: an ImageBitmap.
   const presentBitmap = () => state.gpu.present(tex, w, h, {
     matrix: cs.matrix,
@@ -456,10 +459,11 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
     sharpen: state.detail && state.detail.engine && !state.pp ? state.detail.engine : 0,
     usm: state.detail && state.detail.engine && !state.pp ? usmMap() : null,
   });
-  // The noise reduction is a CPU filter: read the picture back and finish it there. Not for a draft, shown while a slider or the picture is dragged (the full picture follows
-  // on release); and a picture without it is sent first as a preview frame, so the view does not wait for the filter.
-  if (engineNrOn(cs, w) && !draft) {
-    if (message.type === 'result' && message.id != null) {
+  const nr = engineNrOn(cs, w);
+  if (nr && (mode === 'draft' || mode === 'defer')) {
+    if (mode === 'defer') message = { ...message, nrDeferred: true };
+  } else if (nr) {
+    if (mode !== 'final' && message.type === 'result' && message.id != null) {
       const preview = presentBitmap();
       post({ id: message.id, type: 'frame', index: -1, preview: true, width: w, height: h, bitmap: preview }, [preview]);
     }
@@ -1195,7 +1199,7 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
 // One picture for the interactive camera: a single view when the aperture
 // is closed, otherwise refocused at `alpha` through an aperture around (u, v).
 // `draft`: a quicker picture while the user drags (see main.js).
-async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft = false }) {
+async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft = false, deferNr = false, final = false }) {
   if (state.pp) return processedView({ id, u, v, alpha, aperture, dof, bokeh });
   requireRaw();
   if (state.gpu) {
@@ -1209,9 +1213,10 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     const key = JSON.stringify([state.gen, u, v, alpha, aperture, dof, dof > 0 && draft, bokeh || null, state.settings.mvDenoise, state.detail, packed && packed.spatial ? packed : null]);
     // The GPU time of each view, for the photo info (where available).
     const message = { id, type: 'result', gpuMs: state.gpu.gpuMs() };
+    const mode = draft ? 'draft' : final ? 'final' : deferNr ? 'defer' : undefined;
     state.gpu.beginTiming();
     if (state.kept && state.kept.key === key) {
-      finishGpu(state.kept.tex, outW, outH, packed, message, state, false, undefined, draft);
+      finishGpu(state.kept.tex, outW, outH, packed, message, state, false, undefined, mode);
       state.gpu.endTiming();
       return undefined;
     }
@@ -1222,7 +1227,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     } else {
       tex = await singleView(id, u, v);
     }
-    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key, draft }, message);
+    await presentGpu(id, tex, outW, outH, { alpha, dof, bokeh, pxPerUnit: viewPxPerUnit(), masks, keep: key, draft, mode }, message);
     state.gpu.endTiming();
     return undefined;
   }
@@ -1234,8 +1239,9 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     rgb = await singleView(id, u, v);
   }
   rgb = await withDepthOfField(id, rgb, state.sampler.outW, state.sampler.outH, alpha, dof, 1, bokeh);
-  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, { focus: alpha, view: viewOf(u, v) });
-  post({ id, type: 'result', width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer }, [pixels.buffer]);
+  const skipNr = draft || deferNr;
+  const pixels = toPixels(rgb, state.sampler.outW, state.sampler.outH, { focus: alpha, view: viewOf(u, v) }, state, false, false, skipNr);
+  post({ id, type: 'result', width: state.sampler.outW, height: state.sampler.outH, pixels: pixels.buffer, nrDeferred: deferNr && !draft && engineNrOn(state, state.sampler.outW) }, [pixels.buffer]);
   return undefined;
 }
 
