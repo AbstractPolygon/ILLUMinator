@@ -21,7 +21,9 @@ const camera = require('./camera.cjs');
 // The memory limits chosen in Settings (the app's own settings.json, read now because Chromium's switches are set before the app is ready): the JavaScript heap of the
 // page and its workers, and the video memory Chromium plans for. They take effect when the app starts. null: no limit beyond the 4 GB left for the system.
 const GB = 1024 ** 3;
-const MEMORY_RESERVE = 4 * GB;
+// What is left for the system: 4 GB of RAM, 512 MB of video memory.
+const RAM_RESERVE = 4 * GB;
+const VRAM_RESERVE = 512 * 1024 ** 2;
 function savedMemoryLimits() {
   try {
     const j = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8'));
@@ -386,7 +388,7 @@ function registerIpc() {
   });
 
   // What the computer has, for Settings > Memory: its RAM and its video memory (found the way each system tells it; null where it cannot be told), and the limits kept.
-  ipcMain.handle('system-memory', async () => ({ ramBytes: os.totalmem(), ...(await videoMemory()), reserveBytes: MEMORY_RESERVE, limits: settings.memory || { ramGb: null, vramGb: null } }));
+  ipcMain.handle('system-memory', async () => ({ ramBytes: os.totalmem(), ...(await videoMemory()), ramReserveBytes: RAM_RESERVE, vramReserveBytes: VRAM_RESERVE, limits: settings.memory || { ramGb: null, vramGb: null } }));
   ipcMain.handle('set-memory-limits', async (e, limits) => {
     const clean = (v) => (Number.isFinite(v) && v > 0 ? Math.round(v * 2) / 2 : null);
     settings.memory = { ramGb: clean(limits && limits.ramGb), vramGb: clean(limits && limits.vramGb) };

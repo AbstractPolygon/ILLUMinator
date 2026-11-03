@@ -2451,17 +2451,17 @@ async function refreshUpscaleModels() {
 }
 refreshUpscaleModels().catch(() => {});
 
-// Settings > Memory (the desktop app): the most RAM and video memory the app may plan to use, from 1 GB up to what the computer has less the 4 GB the system keeps. At the top
+// Settings > Memory (the desktop app): the most RAM and video memory the app may plan to use, from 1 GB up to what the computer has less what the system keeps (4 GB of RAM, 512 MB of video memory). At the top
 // of the range (the start) there is no limit of the app's own. The limits size the heavy steps (a full sensor render, a 16-bit export, an upscaling model; core/memorybudget.js)
 // and, when the app starts, cap its JavaScript heap and the video memory Chromium plans for (electron/main.cjs).
 const GIB = 1024 ** 3;
 async function setupMemorySettings() {
   if (!native || !native.systemMemory) return;
   const sys = await native.systemMemory();
-  const top = (bytes) => Math.max(1, Math.floor(((bytes - sys.reserveBytes) / GIB) * 2) / 2);
+  const top = (bytes, reserve) => Math.max(1, Math.floor(((bytes - reserve) / GIB) * 2) / 2);
   const rows = [
-    { key: 'ramGb', input: $('mem-ram'), out: $('mem-ram-out'), max: top(sys.ramBytes), title: `This computer has ${(sys.ramBytes / GIB).toFixed(1)} GB of RAM; 4 GB are left for the system. Applies when the app starts.` },
-    { key: 'vramGb', input: $('mem-vram'), out: $('mem-vram-out'), max: top(sys.vramBytes), title: `Video memory found: ${(sys.vramBytes / GIB).toFixed(1)} GB (${sys.vramSource}); 4 GB are left for the system. Applies when the app starts.` },
+    { key: 'ramGb', input: $('mem-ram'), out: $('mem-ram-out'), max: top(sys.ramBytes, sys.ramReserveBytes), title: `This computer has ${(sys.ramBytes / GIB).toFixed(1)} GB of RAM; 4 GB are left for the system. Applies when the app starts.` },
+    { key: 'vramGb', input: $('mem-vram'), out: $('mem-vram-out'), max: top(sys.vramBytes, sys.vramReserveBytes), title: `Video memory found: ${(sys.vramBytes / GIB).toFixed(1)} GB (${sys.vramSource}); 512 MB are left for the system. Applies when the app starts.` },
   ];
   const apply = (save) => {
     const gb = Object.fromEntries(rows.map((r) => [r.key, +r.input.value]));
