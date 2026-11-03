@@ -36,6 +36,7 @@ import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
 import { parseRayWarp, FOCUS_FIELD } from './core/raywarp.js';
 import { parseGeometryTable, geometryAt } from './core/geometrytable.js';
+import { isFirstGeneration, firstGenLevel } from './core/firstgen.js';
 import { lytroSplat, engineColorScale, engineAperture, engineGrid, buildEngineBank, fillHoles, applyBank, bankKernels, buildBank, decodePngRgb, SPLAT as LYTRO_SPLAT, BANK as LYTRO_BANK } from './core/lytroedof.js';
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
 import { fixHotPixels, blendedCcm } from './core/raw.js';
@@ -164,6 +165,18 @@ function centerView() {
   return state.center;
 }
 
+// First generation cameras: Lytro Desktop's own auto level (core/firstgen.js), kept for the centre view.
+let firstGenCache = null;
+function firstGenExposure(center) {
+  if (firstGenCache && firstGenCache.center === center) return firstGenCache.value;
+  const { outW, outH } = state.sampler;
+  const level = firstGenLevel(center, outW, outH, state.lf.cam.capture && state.lf.cam.capture.iso);
+  if (level && globalThis.__lytro && globalThis.__lytro.printColor) console.error('FIRSTGEN_LEVEL', JSON.stringify(level));
+  const value = level ? level.exposure : LYTRO_EXPOSURE;
+  firstGenCache = { center, value };
+  return value;
+}
+
 function asShotKelvin() {
   if (globalThis.__lytro && globalThis.__lytro.cct) return globalThis.__lytro.cct;
   const c = state.lf && state.lf.cam && state.lf.cam.capture;
@@ -213,7 +226,7 @@ function updateColor() {
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
   if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('COLOR', JSON.stringify({ swb: s.wb, autoWb: s.autoWb, exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
-  state.baseExposure = state.lytro ? (exactColor ? 1 : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
+  state.baseExposure = state.lytro ? (exactColor ? 1 : isFirstGeneration(lf.cam) ? firstGenExposure(center) : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
 
@@ -297,7 +310,7 @@ function colorState(color) {
   const veilAmount = veil ? s.flare.amount : 0;
   const center = centerView();
   const { outW, outH } = state.sampler;
-  const baseExposure = lytro ? (exact ? 1 : LYTRO_EXPOSURE) : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
+  const baseExposure = lytro ? (exact ? 1 : isFirstGeneration(state.lf.cam) ? firstGenExposure(center) : LYTRO_EXPOSURE) : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
   return { settings: s, look, lens: lensParams(s.lens, state.lf.cam), matrix, baseExposure, veil, veilAmount, lytro };
 }
 
