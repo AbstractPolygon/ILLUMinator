@@ -795,7 +795,8 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
 // (each lens uses the depth under it); otherwise the picture is refocused at
 // `alpha` with detail where it is in focus and smooth blur elsewhere.
 // `masks`: an animation frame's local adjustment settings (see resolveMasks).
-async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null, color = null }) {
+// `label`: the progress text (the picture's own Detail recovery is not a Full sensor render).
+async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null, color = null, label = 'Rendering from the full sensor' }) {
   requireRaw();
   // Setting lytroEngine (on unless set to false): the all in focus picture the way Lytro's engine builds it (lytroEdof), for photos that carry its ray table and white image (raw camera files).
   if (aperture <= 0 && state.settings.lytroEngine !== false && state.lf.rayWarpBytes && state.lf.readModulation && !alpha) return lytroEdof({ id, job, scale, color, masks });
@@ -841,7 +842,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   const base = allInFocus ? await allInFocusBase(id, u, v) : refocusRGB(alpha, opts);
   if (state.gpu) {
     // The whole render on the GPU: the picture stays there for the color pass.
-    progress('Rendering from the full sensor', 0);
+    progress(label, 0);
     const params = superResParams(sampler, { scale, apertureSigma: allInFocus ? Infinity : opts.sigma });
     const cs = colorState(color);
     const tex = state.gpu.superRes({
@@ -858,7 +859,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   }
   // The lens distortion is corrected as the rays are combined.
   const cs = colorState(color);
-  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma, lens: cs.lens }, (p) => progress('Rendering from the full sensor', p));
+  const sr = await renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, sigma: allInFocus ? Infinity : opts.sigma, lens: cs.lens }, (p) => progress(label, p));
   if (state.jobs.superres !== job) return { cancelled: true };
   if (state.gpu) {
     const tex = state.gpu.uploadRGB(sr.rgb, sr.width, sr.height);

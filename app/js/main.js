@@ -1070,7 +1070,7 @@ async function renderCamera() {
       const passes = +$('still-passes').value;
       let msg = null;
       if (passes > 0 && !draft && state.info.hasRaw) {
-        const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: +$('detail').value, passes }, { onProgress: showProgress });
+        const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: +$('detail').value, passes, label: 'Processing' }, { onProgress: showProgress });
         msg = await promise;
         if (!(msg && (msg.pixels || msg.bitmap))) msg = null;
       }
