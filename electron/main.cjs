@@ -375,6 +375,13 @@ function registerIpc() {
   });
 
   // Removed photos go to the system trash where there is one.
+  // Opens a folder of the library in the system's file manager (Explorer, Finder).
+  ipcMain.handle('lib-open', async (_e, rel) => {
+    const p = inLibrary(rel);
+    const err = await shell.openPath(p);
+    if (err) throw new Error(err);
+  });
+
   ipcMain.handle('lib-remove', async (_e, rel) => {
     const p = inLibrary(rel);
     if (p === path.resolve(libraryDir())) throw new Error('Will not remove the library itself');

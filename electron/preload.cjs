@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('lytroNative', {
     stat: (rel) => ipcRenderer.invoke('lib-stat', rel),
     move: (from, to) => ipcRenderer.invoke('lib-move', from, to),
     remove: (rel) => ipcRenderer.invoke('lib-remove', rel),
+    open: (rel) => ipcRenderer.invoke('lib-open', rel),
   },
   cameraUsbConnected: () => ipcRenderer.send('camera-usb-connected'),
   onCamerasChanged: (callback) => subscribe('cameras-changed', callback),

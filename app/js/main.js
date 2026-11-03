@@ -525,6 +525,11 @@ function photoMenu(photo, button, at = null) {
     label: 'Reset settings…',
     action: () => confirmInMenu(`Reset every setting of ${photo.name}? Its adjustments, keyframes and local adjustments go back to how a newly opened photo starts.`, 'Reset', () => resetPhotoSettings(photo)),
   });
+  // Desktop only: the photo's folder in the library, in the system's file manager.
+  if (native && native.library && native.library.open) {
+    const fileManager = /Mac/i.test(navigator.platform) ? 'Finder' : /Win/i.test(navigator.platform) ? 'Explorer' : 'file manager';
+    items.push({ label: `Open in ${fileManager}`, action: () => native.library.open(`Photos/${photo.id}`).catch((err) => console.warn('Could not open the photo folder', err)) });
+  }
   items.push('-');
   items.push({ heading: 'Albums' });
   for (const a of lib.albums) {
