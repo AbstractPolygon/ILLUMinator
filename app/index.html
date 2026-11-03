@@ -818,7 +818,7 @@
         <details class="subpanel">
           <summary><h3>Upscaling</h3></summary>
           <label title="How saved photos, 3D images and video frames are enlarged to their Size: Lanczos keeps edges crisp; Smooth is softer; FSR 1 follows edges and sharpens with the Sharpen setting">Method
-            <select id="upscale-method">
+            <select id="upscale-method" title="Upscaling models (Settings) appear here once downloaded; they enlarge saved photos, and the picture on show, videos and 3D images use Lanczos">
               <option value="lanczos" selected>Lanczos (sharp)</option>
               <option value="smooth">Smooth</option>
               <option value="fsr">FSR 1 (AMD, crisp edges)</option>
@@ -915,6 +915,10 @@
         <div class="row">
           <button type="button" id="import-folder">Import Lytro Desktop library…</button>
         </div>
+      </section>
+      <section class="setting" id="models-setting">
+        <h3>Upscaling models</h3>
+        <div id="models-list" class="models-list"></div>
       </section>
       <section class="setting">
         <h3>Camera calibration</h3>

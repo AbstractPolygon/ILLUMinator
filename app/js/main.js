@@ -12,6 +12,8 @@ import { connectWebUsb, downloadPicture } from './camera/webusb.js';
 import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
 import { hashKey, stillKeyText } from './core/still-cache.js';
 import { encodePng16 } from './core/png16.js';
+import { UPSCALE_MODELS, modelMethod, methodModel, modelDownloaded, downloadModel, removeModel, readModel } from './core/upscalemodels.js';
+import { aiUpscale, aiUpscaleAvailable } from './core/aiupscale.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -2365,6 +2367,70 @@ $('cal-folder').onclick = async () => {
   const picked = await pickFolder('Choose the camera’s calibration folder', { calibration: true }).catch(() => null);
   if (picked && picked.files.length) addCalibration(picked.files.map((f) => ({ path: f.path, file: f.file })));
 };
+
+// Settings > Upscaling models: a checkbox per optional model (core/upscalemodels.js). Ticking downloads it, unticking deletes it; a downloaded model appears in Render Settings >
+// Upscaling > Method. They need a graphics card with WebGPU.
+let modelBusy = false;
+async function refreshUpscaleModels() {
+  const select = $('upscale-method');
+  const before = select.value;
+  const gpuOk = await aiUpscaleAvailable();
+  const list = $('models-list');
+  if (!list.children.length) {
+    for (const m of UPSCALE_MODELS) {
+      const row = document.createElement('label');
+      row.className = 'check model-row';
+      const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
+      box.dataset.model = m.id;
+      const text = document.createElement('span');
+      text.textContent = `${m.name}, ${m.note} (${Math.round(m.size / 1e6)} MB)`;
+      const status = Object.assign(document.createElement('span'), { className: 'hint model-state' });
+      row.append(box, text, status);
+      list.append(row);
+      box.onchange = async () => {
+        if (modelBusy) {
+          box.checked = !box.checked;
+          return;
+        }
+        modelBusy = true;
+        box.disabled = true;
+        try {
+          if (box.checked) {
+            status.textContent = 'Downloading… 0%';
+            await downloadModel(m, (p) => { status.textContent = `Downloading… ${Math.round(p * 100)}%`; });
+          } else {
+            await removeModel(m);
+          }
+          status.textContent = '';
+        } catch (err) {
+          box.checked = false;
+          status.textContent = err && err.message ? err.message : String(err);
+        }
+        modelBusy = false;
+        await refreshUpscaleModels();
+      };
+    }
+  }
+  for (const m of UPSCALE_MODELS) {
+    const have = await modelDownloaded(m);
+    const box = list.querySelector(`input[data-model="${m.id}"]`);
+    box.checked = have;
+    box.disabled = !gpuOk && !have;
+    box.title = gpuOk ? '' : 'Needs a graphics card with WebGPU';
+    const value = modelMethod(m.id);
+    const option = [...select.options].find((o) => o.value === value);
+    if (have && !option) select.append(new Option(`${m.name} (${m.note})`, value));
+    else if (!have && option) option.remove();
+  }
+  // a model that was the method and is gone: back to Lanczos
+  if (before && ![...select.options].some((o) => o.value === before)) {
+    select.value = 'lanczos';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (before) {
+    select.value = before;
+  }
+}
+refreshUpscaleModels().catch(() => {});
 
 // Settings > Check for updates on startup (the desktop app; Help > Check for Updates works whatever it says).
 $('updates-setting').hidden = !native;
@@ -5146,7 +5212,9 @@ function baseName() {
 // Saved photos and 3D images are enlarged by Render Settings > Photo >
 // Size, and video frames to Video > Size, both with Upscaling.
 function upscaleSettings() {
-  return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
+  // (an upscaling model works when a photo is saved; the picture on show, videos and 3D images use Lanczos)
+  const method = $('upscale-method').value;
+  return { method: !method || methodModel(method) ? 'lanczos' : method, sharpen: +$('upscale-sharpen').value / 100 };
 }
 
 // The scale a picture of w x h is shown at: the Photo Size for a picture, the Video Size (when it is a height, as 1080p) for an animation frame. At most 4096 px wide.
@@ -5183,23 +5251,31 @@ function enlargeForSave(source) {
 
 // Photo > File format: PNG, or JPEG at its quality.
 function savePhoto(source, name) {
-  if ($('photo-format').value === 'png16' && source === canvas && showsCamera() && !stereoShown() && state.info) {
-    savePhoto16(name);
+  const model = methodModel($('upscale-method').value);
+  const k = +$('photo-size').value || 1;
+  // 16-bit PNG, and enlarging with an upscaling model, start from the picture made again at 16 bits (below).
+  if ((($('photo-format').value === 'png16') || (model && k > 1)) && source === canvas && showsCamera() && !stereoShown() && state.info) {
+    savePhotoRendered(name, model, k);
     return;
   }
+  saveAs8Bit(source, name);
+}
+
+function saveAs8Bit(source, name) {
   const jpeg = $('photo-format').value === 'jpeg';
   const type = jpeg ? 'image/jpeg' : 'image/png';
   enlargeForSave(source).toBlob((blob) => download(blob, `${name}.${jpeg ? 'jpg' : 'png'}`), type, jpeg ? +$('photo-quality').value / 100 : undefined);
 }
 
-// PNG at 16 bits per channel: the picture on show made again by the graphics card with the high and low byte of every value kept (worker finishGpu, bits16), so the fine
-// tonal steps the 8-bit canvas drops are in the file. Enlarged by the Photo Size at 16 bits too. Without the graphics card, or for
-// a view that is not the picture (stereo, depth, lenslets), the usual 8-bit PNG is saved and the notice says so.
-async function savePhoto16(name) {
+// The picture on show made again by the graphics card with the high and low byte of every value kept (worker finishGpu, bits16): the source of a 16-bit PNG, which then has the
+// fine tonal steps the 8-bit canvas drops, and of an enlargement by an upscaling model, which takes the full precision in. Enlarged by the Photo Size at 16 bits too
+// (the model, then the graphics card's Lanczos to the exact size; or the Upscaling method). Without the graphics card, or for a view that is not the picture (stereo, depth,
+// lenslets), the usual 8-bit picture is saved and a notice says so.
+async function savePhotoRendered(name, model, k) {
+  const format = $('photo-format').value;
   const eightBit = (why) => {
-    showNotice('Saved at 8 bits per channel', why);
-    const type = 'image/png';
-    enlargeForSave(canvas).toBlob((blob) => download(blob, `${name}.png`), type);
+    showNotice(format === 'png16' ? 'Saved at 8 bits per channel' : 'Saved without the upscaling model', why);
+    saveAs8Bit(canvas, name);
   };
   try {
     const passes = +$('still-passes').value;
@@ -5215,28 +5291,56 @@ async function savePhoto16(name) {
     }
     hideProgress();
     if (!msg || !msg.pixels16) {
-      eightBit('A 16-bit picture needs the graphics card (and its noise reduction); this one was made without it.');
+      eightBit('The picture needs the graphics card (and its noise reduction) to be made at 16 bits; this one was made without it.');
       return;
     }
     let rgb = new Uint16Array(msg.pixels16);
     let width = msg.width;
     let height = msg.height;
-    // Enlarged by the Photo Size with the Upscaling settings, at 16 bits as well (gpu/upscale.js upscaleBits16).
-    const k = +$('photo-size').value || 1;
+    const W = Math.round(width * k);
+    const H = Math.round(height * k);
     if (k !== 1) {
-      const W = Math.round(width * k);
-      const H = Math.round(height * k);
-      const big = upscaleBits16(rgb, width, height, W, H, upscaleSettings());
-      if (big) {
-        rgb = big;
-        width = W;
-        height = H;
-      } else {
-        showNotice('Saved at the picture\'s own size', `The graphics card cannot enlarge a 16-bit picture to ${W}×${H}; it is saved at ${width}×${height}.`);
+      let big = null;
+      if (model) {
+        try {
+          const grown = await aiUpscale(model, () => readModel(model), rgb, width, height, showProgress);
+          hideProgress();
+          big = grown;
+          // to the exact Photo Size (the model makes 4 times; fewer needs a reduction)
+          if (grown.width !== W) {
+            const sized = upscaleBits16(grown.rgb, grown.width, grown.height, W, H, { method: 'lanczos', sharpen: 0 });
+            big = sized ? { rgb: sized, width: W, height: H } : grown;
+          }
+        } catch (err) {
+          hideProgress();
+          showNotice('Could not enlarge with the model', `${err && err.message ? err.message : err} The picture is enlarged with Lanczos instead.`);
+        }
       }
+      if (!big) {
+        const plain = upscaleBits16(rgb, width, height, W, H, upscaleSettings());
+        if (plain) big = { rgb: plain, width: W, height: H };
+        else showNotice('Saved at the picture\'s own size', `The graphics card cannot enlarge a 16-bit picture to ${W}×${H}; it is saved at ${width}×${height}.`);
+      }
+      if (big) ({ rgb, width, height } = big);
     }
-    const png = await encodePng16(rgb, width, height);
-    await download(new Blob([png], { type: 'image/png' }), `${name}.png`);
+    if (format === 'png16') {
+      const png = await encodePng16(rgb, width, height);
+      await download(new Blob([png], { type: 'image/png' }), `${name}.png`);
+      return;
+    }
+    // 8-bit file from the 16-bit values
+    const jpeg = format === 'jpeg';
+    const data = new ImageData(width, height);
+    for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+      data.data[j] = (rgb[i] + 128) >> 8;
+      data.data[j + 1] = (rgb[i + 1] + 128) >> 8;
+      data.data[j + 2] = (rgb[i + 2] + 128) >> 8;
+      data.data[j + 3] = 255;
+    }
+    const c = new OffscreenCanvas(width, height);
+    c.getContext('2d').putImageData(data, 0, 0);
+    const blob = await c.convertToBlob(jpeg ? { type: 'image/jpeg', quality: +$('photo-quality').value / 100 } : { type: 'image/png' });
+    await download(blob, `${name}.${jpeg ? 'jpg' : 'png'}`);
   } catch (err) {
     hideProgress();
     showError(err);

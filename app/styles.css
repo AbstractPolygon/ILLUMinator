@@ -730,3 +730,6 @@ label.lut-amount { margin-top: 14px; }
 #desktop-only-dialog { max-width: 480px; }
 
 #camera-dialog-source { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 40vh; overflow: auto; }
+
+.models-list { display: flex; flex-direction: column; gap: 6px; }
+.model-row .model-state { margin-left: auto; }
