@@ -429,8 +429,8 @@ function registerIpc() {
 }
 
 // A Linux AppImage is one file that does not put itself in the applications
-// menu. The first time it runs the user is asked whether to add it (and a
-// desktop shortcut); .deb installs get their menu entry from the package.
+// menu. The first time it runs the user is asked whether to add it (and, ticked
+// by default, a desktop shortcut); .deb installs get their menu entry from the package.
 async function offerLinuxMenuEntry() {
   const appImage = process.env.APPIMAGE;
   if (process.platform !== 'linux' || !appImage || settings.menuEntry) return;
@@ -442,8 +442,8 @@ async function offerLinuxMenuEntry() {
     buttons: ['Add to menu', 'Not now', 'Don\'t ask again'],
     defaultId: 0,
     cancelId: 1,
-    checkboxLabel: 'Also put a shortcut on the desktop',
-    checkboxChecked: false,
+    checkboxLabel: 'Add to desktop',
+    checkboxChecked: true,
   });
   if (res.response === 2) {
     settings.menuEntry = 'never';

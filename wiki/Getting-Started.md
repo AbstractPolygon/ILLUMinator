@@ -4,9 +4,9 @@
 
 **Desktop app.** Download an installer from [Releases](https://github.com/AbstractPolygon/Illuminator/releases/latest):
 
-- **Windows:** the `-x64.exe` for most PCs (Intel and AMD), the `-arm64.exe` for ARM PCs (such as Snapdragon). It installs into Program Files, adds Illuminator to the Start menu, and the last page of the installer has a checkbox to put a shortcut on the desktop.
+- **Windows:** the `-x64.exe` for most PCs (Intel and AMD), the `-arm64.exe` for ARM PCs (such as Snapdragon). It installs into Program Files, adds Illuminator to the Start menu, and a page of the installer after the folder choice has an **Add to desktop** checkbox (ticked by default). The `.msi` always adds the desktop shortcut.
 - **macOS:** the `-arm64.dmg` for Apple Silicon, the `-x64.dmg` for Intel. The app is not code signed: right-click it and choose *Open* the first time.
-- **Linux:** the `.deb` for Debian and Ubuntu (`sudo apt install ./Illuminator-*.deb`), or the `.AppImage` for other distributions (`chmod +x` it, then run it). The `.deb` adds Illuminator to the applications menu. The first time an AppImage runs it asks whether to add itself to the applications menu, with a checkbox for a desktop shortcut; it only writes into your home folder.
+- **Linux:** the `.deb` for Debian and Ubuntu (`sudo apt install ./Illuminator-*.deb`), or the `.AppImage` for other distributions (`chmod +x` it, then run it). The `.deb` adds Illuminator to the applications menu. The first time an AppImage runs it asks whether to add itself to the applications menu, with an **Add to desktop** checkbox (ticked by default); it only writes into your home folder.
 
 Or run it from source (Node.js 20 or newer):
 
