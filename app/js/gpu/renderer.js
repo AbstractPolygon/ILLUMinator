@@ -18,7 +18,7 @@ import { ENGINE_USM, engineUsmMap, rangeSigma, chromaSigma, sharpenWindow, HALO_
 import { MAX_MASKS } from '../core/local.js';
 import { bokehKernel } from '../core/dof.js';
 import { CHROMA_EDGE } from '../core/render.js';
-import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP, ENGINE_SPLINE, PROPHOTO, PROPHOTO_INV } from '../core/base.js';
+import { LYTRO_CURVE, LYTRO_HUE, CURVE_START, CURVE_STEP, ENGINE_SPLINE, FIRST_SPLINE, PROPHOTO, PROPHOTO_INV } from '../core/base.js';
 import { PHASE_BINS, latticeTiles, latticeTables, RAY_DEPTH_TOLERANCE, SR_SHARPEN, LENS_CAL, lensCandidates, lensTable, chooseLensOffsets, EDGE_SNAP, SNAP_CANDIDATES, snapCandidates, DEPTH_STEP_TOLERANCE, DITHER_FIX, BACK_PROJECTION_EDGE, depthEdgeMask, RAY_MATCH, depthFilter } from '../core/superres.js';
 import { LAMBDA_TO_ALPHA } from '../core/recipe.js';
 
@@ -884,6 +884,9 @@ precision highp int;
 uniform sampler2D uSrc;
 uniform mat3 uMatrix;
 uniform float uExposure;
+uniform int uFirst;        // first generation: clamp to 0..1 (after gain and black offset) before the matrix, Lab contrast spline after
+uniform vec3 uFirstGain;
+uniform float uFirstOff;
 uniform vec2 uFringe[4];   // amount, hue (degrees): purple, green, red, blue
 uniform sampler2D uVeil;   // flare veil per tile (core/flare.js), linear
 uniform float uVeilAmount;
@@ -964,6 +967,7 @@ vec3 colorAt(ivec2 q) {
     float t = smoothstep(0.0, 1.0, clamp((r - uLens.w) / (1.0 - uLens.w), 0.0, 1.0));
     c *= max(0.0, 1.0 + 1.5 * uLens.z * t);
   }
+  if (uFirst == 1) c = clamp(c * uFirstGain - vec3(uFirstOff), 0.0, 1.0);
   return uMatrix * c;
 }
 
@@ -1080,10 +1084,39 @@ const vec3 PP2 = vec3(${PROPHOTO.slice(6, 9).map((v) => v.toFixed(10)).join(', '
 const vec3 PI0 = vec3(${PROPHOTO_INV.slice(0, 3).map((v) => v.toFixed(10)).join(', ')});
 const vec3 PI1 = vec3(${PROPHOTO_INV.slice(3, 6).map((v) => v.toFixed(10)).join(', ')});
 const vec3 PI2 = vec3(${PROPHOTO_INV.slice(6, 9).map((v) => v.toFixed(10)).join(', ')});
+// First generation cameras: the contrast spline of the Firefly configuration (core/base.js FIRST_SPLINE) on Lab L / 100.
+const float FK[5] = float[5](${FIRST_SPLINE.x.map((v) => v.toFixed(9)).join(', ')});
+const float FA[5] = float[5](${FIRST_SPLINE.a.map((v) => v.toFixed(9)).join(', ')});
+const float FB[5] = float[5](${FIRST_SPLINE.b.map((v) => v.toFixed(9)).join(', ')});
+const float FC[5] = float[5](${FIRST_SPLINE.c.map((v) => v.toFixed(9)).join(', ')});
+const float FD[5] = float[5](${FIRST_SPLINE.d.map((v) => v.toFixed(9)).join(', ')});
+float firstTone(float x) {
+  float v = clamp(x, 0.0, 1.0);
+  int i = 0;
+  for (int k = 1; k < 5; k++) if (v >= FK[k]) i = k;
+  float t = v - FK[i];
+  return ((FD[i] * t + FC[i]) * t + FB[i]) * t + FA[i];
+}
+const vec3 D65W = vec3(0.95047, 1.0, 1.08883);
+float labF(float t) { return t > 216.0 / 24389.0 ? pow(t, 1.0 / 3.0) : (24389.0 / 27.0 * t + 16.0) / 116.0; }
+float labInv(float f) { float c = f * f * f; return c > 216.0 / 24389.0 ? c : (116.0 * f - 16.0) / (24389.0 / 27.0); }
+vec3 firstToneColor(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  vec3 xyz = vec3(dot(vec3(0.4124564, 0.3575761, 0.1804375), c), dot(vec3(0.2126729, 0.7151522, 0.072175), c), dot(vec3(0.0193339, 0.119192, 0.9503041), c)) / D65W;
+  float fx = labF(xyz.x);
+  float fy = labF(xyz.y);
+  float fz = labF(xyz.z);
+  float fy2 = (firstTone((116.0 * fy - 16.0) / 100.0) * 100.0 + 16.0) / 116.0;
+  vec3 o = vec3(labInv(fy2 + (fx - fy)), labInv(fy2), labInv(fy2 - (fy - fz))) * D65W;
+  return vec3(dot(vec3(3.2404542, -1.5371385, -0.4985314), o), dot(vec3(-0.969266, 1.8760108, 0.041556), o), dot(vec3(0.0556434, -0.2040259, 1.0572252), o));
+}
 vec3 encodeOut(vec3 c) {
   if (uLytro == 0) return vec3(srgb(c.r), srgb(c.g), srgb(c.b));
   vec3 s;
-  if (uLytroExact == 1) {
+  if (uFirst == 1) {
+    vec3 lin = firstToneColor(c);
+    s = vec3(srgb(clamp(lin.r, 0.0, 1.0)), srgb(clamp(lin.g, 0.0, 1.0)), srgb(clamp(lin.b, 0.0, 1.0)));
+  } else if (uLytroExact == 1) {
     // the spline acts in ProPhoto primaries (core/base.js PROPHOTO)
     vec3 pp = vec3(dot(PP0, c), dot(PP1, c), dot(PP2, c));
     vec3 tt = vec3(engineTone(pp.r), engineTone(pp.g), engineTone(pp.b));
@@ -1099,7 +1132,7 @@ vec3 encodeOut(vec3 c) {
   float t = atan(v, u) / 6.28318531 * 12.0;
   if (t < 0.0) t += 12.0;
   int i = int(floor(t)) % 12;
-  vec2 k = uLytroSat * (uLytroExact == 1 ? vec2(1.0, 0.0) : mix(uLytroHue[i], uLytroHue[(i + 1) % 12], fract(t)));
+  vec2 k = uLytroSat * (uLytroExact == 1 || uFirst == 1 ? vec2(1.0, 0.0) : mix(uLytroHue[i], uLytroHue[(i + 1) % 12], fract(t)));
   float du = u * k.x - v * k.y - u;
   float dv = u * k.y + v * k.x - v;
   vec3 q = s + vec3(0.70710678 * du + 0.40824829 * dv, -0.70710678 * du + 0.40824829 * dv, -0.81649658 * dv);
@@ -3959,6 +3992,10 @@ export class GpuRenderer {
     gl.uniform3fv(P.u.uLutMax, this.lut ? this.lut.max : [1, 1, 1]);
     gl.uniform1i(P.u.uLytro, lytro ? 1 : 0);
     gl.uniform1i(P.u.uLytroExact, lytro && lytro.exact ? 1 : 0);
+    gl.uniform1i(P.u.uFirst, lytro && lytro.first ? 1 : 0);
+    const pre = lytro && lytro.first && lytro.pre ? lytro.pre : null;
+    gl.uniform3fv(P.u.uFirstGain, pre ? pre.gain : [1, 1, 1]);
+    gl.uniform1f(P.u.uFirstOff, pre ? pre.offset : 0);
     if (lytro) {
       gl.uniform1fv(P.u.uLytroCurve, LYTRO_CURVE);
       gl.uniform1f(P.u.uLytroSat, lytro.saturation ?? 1);

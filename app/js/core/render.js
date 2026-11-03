@@ -6,7 +6,7 @@
 // (perspective shift). Shifting views in proportion to (u, v) and averaging
 // them focuses on a different depth (synthetic refocus).
 
-import { lytroTable, lytroColor, engineTable, engineToneColor, srgbEncode, CURVE_MAX } from './base.js';
+import { lytroTable, lytroColor, engineTable, engineToneColor, firstToneColor, srgbEncode, CURVE_MAX } from './base.js';
 import { applyLocal } from './local.js';
 import { lensCenters, toLocal } from './lenslet.js';
 import { applyLook } from './color.js';
@@ -545,8 +545,12 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
   // Linear values become table indexes: 0..1 for sRGB, 0..CURVE_MAX for
   // the Lytro curve.
   const exact = !!(lytro && lytro.exact);
-  const steps = exact ? 1 : lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
-  const top = exact ? Infinity : lytro ? LYTRO_STEPS : 4096;
+  // First generation cameras: the colour is clamped to 0..1 before the matrix and toned in Lab (core/base.js firstToneColor).
+  const first = !!(lytro && lytro.first);
+  const pre = first && lytro.pre ? lytro.pre : null;
+  const direct = exact || first;
+  const steps = direct ? 1 : lytro ? LYTRO_STEPS / CURVE_MAX : 4096;
+  const top = direct ? Infinity : lytro ? LYTRO_STEPS : 4096;
   const table = lytro ? (lytro.exact ? ENGINE_TABLE : LYTRO_TABLE) : SRGB;
   // In the Lytro look the sliders come after the curve.
   const linearLook = lytro ? null : look;
@@ -560,9 +564,17 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
   const k = graded ? Math.min(1, grade.amount) : 0;
   const q = [0, 0, 0];
   for (let i = 0, o = 0; i < rgb.length; i += 3, o += 4) {
-    const r = rgb[i];
-    const g = rgb[i + 1];
-    const b = rgb[i + 2];
+    let r = rgb[i];
+    let g = rgb[i + 1];
+    let b = rgb[i + 2];
+    if (pre) {
+      r = r * pre.gain[0] - pre.offset;
+      g = g * pre.gain[1] - pre.offset;
+      b = b * pre.gain[2] - pre.offset;
+      r = r < 0 ? 0 : r > 1 ? 1 : r;
+      g = g < 0 ? 0 : g > 1 ? 1 : g;
+      b = b < 0 ? 0 : b > 1 ? 1 : b;
+    }
     let R = m[0] * r + m[1] * g + m[2] * b;
     let G = m[3] * r + m[4] * g + m[5] * b;
     let B = m[6] * r + m[7] * g + m[8] * b;
@@ -585,7 +597,13 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
       G = p[1] * steps;
       B = p[2] * steps;
     }
-    if (exact) {
+    if (first) {
+      firstToneColor(R, G, B, q);
+      p[0] = srgbEncode(q[0] < 0 ? 0 : q[0] > 1 ? 1 : q[0]);
+      p[1] = srgbEncode(q[1] < 0 ? 0 : q[1] > 1 ? 1 : q[1]);
+      p[2] = srgbEncode(q[2] < 0 ? 0 : q[2] > 1 ? 1 : q[2]);
+      lytroColor(p, sat, true);
+    } else if (exact) {
       // the engine's tone spline in ProPhoto primaries, then sRGB encoding
       engineToneColor(R, G, B, q);
       p[0] = srgbEncode(q[0] < 0 ? 0 : q[0] > 1 ? 1 : q[0]);
@@ -598,7 +616,7 @@ export function toneMap(rgb, matrix, exposure, out, look = null, local = null, g
       B = B < 0 ? 0 : B > top ? top : B;
     }
     if (lytro) {
-      if (!exact) {
+      if (!direct) {
         p[0] = table[R | 0] / 255;
         p[1] = table[G | 0] / 255;
         p[2] = table[B | 0] / 255;

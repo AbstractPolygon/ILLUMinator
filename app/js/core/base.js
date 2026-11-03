@@ -159,6 +159,42 @@ export function engineToneColor(r, g, b, out) {
   out[2] = N[6] * a + N[7] * c + N[8] * d;
   return out;
 }
+// First generation cameras: the contrast spline of Lytro Desktop's Firefly configuration (InitializeContrastSplineControlPointsFirefly, 6 knots), applied to the Lab lightness L / 100
+// of the colour-matrixed picture, a and b kept; then sRGB. (Read from the engine's code; not checked against a render.)
+export const FIRST_KNOTS = [[0, 0], [0.02404, 0.01912], [0.05304, 0.05649], [0.12556, 0.17232], [0.42601, 0.55869], [1, 1]];
+export const FIRST_SPLINE = naturalSpline(FIRST_KNOTS);
+export function firstTone(x) {
+  const v = Math.min(1, Math.max(0, x));
+  const S = FIRST_SPLINE;
+  let i = 0;
+  for (let k = 1; k < S.x.length; k++) if (v >= S.x[k]) i = k;
+  const t = v - S.x[i];
+  return ((S.d[i] * t + S.c[i]) * t + S.b[i]) * t + S.a[i];
+}
+const D65 = [0.95047, 1, 1.08883];
+const labF = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+const labInv = (f) => (f * f * f > 216 / 24389 ? f * f * f : (116 * f - 16) / (24389 / 27));
+// Linear sRGB (clamped to 0..1 here) -> linear sRGB after the first generation contrast spline on Lab L, into `out`.
+export function firstToneColor(r, g, b, out) {
+  r = Math.min(1, Math.max(0, r));
+  g = Math.min(1, Math.max(0, g));
+  b = Math.min(1, Math.max(0, b));
+  const X = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / D65[0];
+  const Y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+  const Z = (0.0193339 * r + 0.119192 * g + 0.9503041 * b) / D65[2];
+  const fx = labF(X);
+  const fy = labF(Y);
+  const fz = labF(Z);
+  const L = 116 * fy - 16;
+  const fy2 = (firstTone(L / 100) * 100 + 16) / 116;
+  const X2 = labInv(fy2 + (fx - fy)) * D65[0];
+  const Y2 = labInv(fy2);
+  const Z2 = labInv(fy2 - (fy - fz)) * D65[2];
+  out[0] = 3.2404542 * X2 - 1.5371385 * Y2 - 0.4985314 * Z2;
+  out[1] = -0.969266 * X2 + 1.8760108 * Y2 + 0.041556 * Z2;
+  out[2] = 0.0556434 * X2 - 0.2040259 * Y2 + 1.0572252 * Z2;
+  return out;
+}
 export const srgbEncode = (x) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055);
 // Byte lookup for linear input 0..CURVE_MAX in `size` steps (the engine's colour pipeline).
 export function engineTable(size) {

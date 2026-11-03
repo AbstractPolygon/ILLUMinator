@@ -165,16 +165,21 @@ function centerView() {
   return state.center;
 }
 
-// First generation cameras: Lytro Desktop's own auto level (core/firstgen.js), kept for the centre view.
-let firstGenCache = null;
-function firstGenExposure(center) {
-  if (firstGenCache && firstGenCache.center === center) return firstGenCache.value;
+// First generation photos (no engine units: core/firstgen.js): the engine's pipeline is x = clamp((u - black) * gain, 0, 1) with u the white balanced camera colour times the ISO gain,
+// then the colour matrix as the file has it, then the Lab contrast spline and sRGB. Returns { matrix, lytro } for the given white balance gains and settings, or null.
+function firstGenColor(s, gains, center) {
+  const cam = state.lf && state.lf.cam;
+  if (!isFirstGeneration(cam) || s.lytroLook === false || state.engineScale) return null;
   const { outW, outH } = state.sampler;
-  const level = firstGenLevel(center, outW, outH, state.lf.cam.capture && state.lf.cam.capture.iso);
-  if (level && globalThis.__lytro && globalThis.__lytro.printColor) console.error('FIRSTGEN_LEVEL', JSON.stringify(level));
-  const value = level ? level.exposure : LYTRO_EXPOSURE;
-  firstGenCache = { center, value };
-  return value;
+  // (kept for the centre view: the percentiles are not cheap)
+  if (!state.firstLevel || state.firstLevel.center !== center) state.firstLevel = { center, level: firstGenLevel(center, outW, outH, cam.capture && cam.capture.iso) };
+  const level = state.firstLevel.level;
+  if (!level) return null;
+  const k = level.isoGain * level.gain;
+  return {
+    matrix: colorMatrix(cam, { ...s, saturation: 1 }),
+    lytro: { saturation: s.saturation ?? 1, exact: false, first: true, pre: { gain: gains.map((g) => g * k), offset: level.black * level.gain } },
+  };
 }
 
 function asShotKelvin() {
@@ -226,7 +231,14 @@ function updateColor() {
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
   if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('COLOR', JSON.stringify({ swb: s.wb, autoWb: s.autoWb, exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
-  state.baseExposure = state.lytro ? (exactColor ? 1 : isFirstGeneration(lf.cam) ? firstGenExposure(center) : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
+  state.baseExposure = state.lytro ? (exactColor ? 1 : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
+  // First generation photos have the engine's own pipeline (clamp before the matrix, Lab contrast spline), with its auto level.
+  const first = state.lytro ? firstGenColor(s, state.wbGains, center) : null;
+  if (first) {
+    state.matrix = first.matrix;
+    state.lytro = first.lytro;
+    state.baseExposure = 1;
+  }
   applyAutoDefringe(center, state.sampler.outW, state.sampler.outH);
 }
 
@@ -310,7 +322,9 @@ function colorState(color) {
   const veilAmount = veil ? s.flare.amount : 0;
   const center = centerView();
   const { outW, outH } = state.sampler;
-  const baseExposure = lytro ? (exact ? 1 : isFirstGeneration(state.lf.cam) ? firstGenExposure(center) : LYTRO_EXPOSURE) : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
+  const baseExposure = lytro ? (exact ? 1 : LYTRO_EXPOSURE) : autoExposure(veil ? subtractVeil(center, outW, outH, veil, veilAmount) : center, matrix);
+  const first = lytro ? firstGenColor(s, gains, center) : null;
+  if (first) return { settings: s, look, lens: lensParams(s.lens, state.lf.cam), matrix: first.matrix, baseExposure: 1, veil, veilAmount, lytro: first.lytro };
   return { settings: s, look, lens: lensParams(s.lens, state.lf.cam), matrix, baseExposure, veil, veilAmount, lytro };
 }
 
@@ -373,16 +387,18 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
   if (!f || !f.on || !f.colors.some(([amount]) => amount > 0)) return sharp(toneMap(rgb, cs.matrix, exposure, undefined, cs.look, local, grade, cs.lytro));
   // Defringing judges hue in output colors, so apply the color matrix first.
   const m = cs.matrix;
+  const pre = cs.lytro && cs.lytro.pre;
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
   const srgb = new Float32Array(rgb.length);
   for (let i = 0; i < rgb.length; i += 3) {
-    const r = rgb[i];
-    const g = rgb[i + 1];
-    const b = rgb[i + 2];
+    const r = pre ? clamp01(rgb[i] * pre.gain[0] - pre.offset) : rgb[i];
+    const g = pre ? clamp01(rgb[i + 1] * pre.gain[1] - pre.offset) : rgb[i + 1];
+    const b = pre ? clamp01(rgb[i + 2] * pre.gain[2] - pre.offset) : rgb[i + 2];
     srgb[i] = m[0] * r + m[1] * g + m[2] * b;
     srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
     srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
   }
-  return sharp(toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro));
+  return sharp(toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro && cs.lytro.pre ? { ...cs.lytro, pre: null } : cs.lytro));
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
