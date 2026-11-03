@@ -1462,10 +1462,6 @@ async function renderDepth() {
   }
 }
 
-function showDepthLegend() {
-  $('depth-legend').textContent = $('depth-grey').checked ? 'Light is near, dark is far.' : 'Warm colors are near, cool colors are far.';
-}
-
 // Depth map contrast: only the preview's colors change, so it redraws at once.
 let depthContrastTimer = 0;
 $('depth-contrast').oninput = () => {
@@ -1475,7 +1471,6 @@ $('depth-contrast').oninput = () => {
   depthContrastTimer = setTimeout(renderDepth, 60);
 };
 $('depth-grey').addEventListener('change', () => {
-  showDepthLegend();
   if (state.depthShown) renderDepth();
 });
 
@@ -1488,8 +1483,6 @@ function setDepthShown(on, { restore = true } = {}) {
   state.depthShown = on;
   updateSpreadOverlay();
   $('depth-btn').checked = on;
-  $('depth-legend').hidden = !on;
-  showDepthLegend();
   if (on) {
     setPlaying(false);
     state.showingFrames = false;
@@ -1724,7 +1717,8 @@ function setMode(mode) {
   $('stereo-on').disabled = !(state.info && state.info.hasRaw) || !camera;
   if (!state.info) return;
   setFullRes(false, { restore: false });
-  setDepthShown(false, { restore: false });
+  // The depth map stays on through camera-mode changes (a new photo or leaving the camera view turns it off elsewhere).
+  if (mode !== 'camera') setDepthShown(false, { restore: false });
   layoutCanvas();
   if (camera) {
     state.showingFrames = false;
@@ -2057,8 +2051,8 @@ canvas.addEventListener('pointerdown', (event) => {
     if (!moved) {
       moved = true;
       setFullRes(false, { restore: false });
-      setDepthShown(false, { restore: false });
-      backToCamera();
+      // Moving the viewpoint keeps the depth map on screen (it does not change with the viewpoint).
+      if (!state.depthShown) backToCamera();
     }
     let u = start.u - (dx / (rect.width / 2)) * r;
     let v = start.v - (dy / (rect.height / 2)) * r;
@@ -2069,7 +2063,7 @@ canvas.addEventListener('pointerdown', (event) => {
     }
     state.camera.u = u;
     state.camera.v = v;
-    renderCamera();
+    if (!state.depthShown) renderCamera();
   };
   canvas.onpointerup = () => {
     canvas.onpointermove = null;

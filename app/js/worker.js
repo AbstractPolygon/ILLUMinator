@@ -1058,7 +1058,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
         if (acc) state.lytroGpu = true;
         return acc;
       } catch (e) {
-        console.warn('GPU engine failed, using the CPU:', e);
+        gpuFellBack('Rendering the sensor rays', e);
         return null;
       }
     } : null,
@@ -1613,6 +1613,9 @@ async function ensureDepth(id) {
     if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     state.depthParts = null;
+    state.cpuFallbacks = new Map();
+    const tDepth = Date.now();
+    const lap = {};
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
     if (style === 'combined' || style === 'match') {
@@ -1621,9 +1624,11 @@ async function ensureDepth(id) {
       if (kept) state.engineViews = Object.assign([], { raster: { w: kept.w, h: kept.h } });
       else await prepareEngineViews(id);
     }
+    lap.views = Date.now() - tDepth;
     try {
       if (style === 'combined') {
         const classic = measureClassic(id, fast, report(0, 0.4));
+        lap.classic = Date.now() - tDepth - lap.views;
         const match = measureLytro(report(0.4, 0.95));
         if (match && classic) {
           state.depthParts = { classic: classic.alpha, match: match.alpha, outW, outH };
@@ -1648,9 +1653,22 @@ async function ensureDepth(id) {
     // filter and an MRF in its engine): the same here, on the depth as finally
     // measured, so every style gets it.
     settleDepth(outW, outH);
+    // Where the time went, and a warning when a GPU step fell back to the CPU.
+    console.info(`Depth measured in ${((Date.now() - tDepth) / 1000).toFixed(1)} s (${style}; ${state.gpu ? `GPU ${state.gpu.name || ''}${hardwareGpu() ? '' : ' (software)'}` : 'no GPU'}): ${JSON.stringify(lap)}`);
+    if (state.cpuFallbacks && state.cpuFallbacks.size) {
+      post({ id, type: 'notice', message: `The depth was measured partly on the CPU, which is slow: ${[...state.cpuFallbacks].map(([k, v]) => `${k} (${v})`).join('; ')}.` });
+    } else if (state.gpu && !hardwareGpu()) {
+      post({ id, type: 'notice', message: 'This computer has no graphics card the app can use (a software renderer was found), so depth is measured on the CPU, which is slow.' });
+    }
   }
   if (globalThis.__depthOverride && state.depth) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
   return true;
+}
+
+// A GPU step that failed and was done on the CPU instead (much slower): remembered, and told to the user once the depth is measured.
+function gpuFellBack(what, e) {
+  (state.cpuFallbacks ||= new Map()).set(what, (e && e.message) || String(e));
+  console.warn(`${what}: the GPU failed, using the CPU:`, e);
 }
 
 // True when the GPU is a real graphics card; software renderers (SwiftShader,
@@ -1761,7 +1779,7 @@ async function prepareEngineViews(id) {
         if (acc) state.lytroGpu = true;
         return acc;
       } catch (e) {
-        console.warn('GPU depth views failed, using the CPU:', e);
+        gpuFellBack('Rendering the depth views', e);
         return null;
       }
     } : null, views, sensorRaster: raster, sharpen: { ...LYTRO_SPLAT.sharpen, amount: VIEW_SHARPEN }, ...(dbg.splat || {}) });
@@ -1898,7 +1916,7 @@ function measureLytro(progress) {
     // The engine's own estimator on its views (core/enginedepth.js): in the engine's order, the centre last.
     const colors = viewColors(depthViews(), outW * outH, outW, outH);
     const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
-    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuCost) ? (v, w, h, labels) => engineCostVolumeGpu(state.gpu, v, w, h, labels) : null, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuSolve) ? (cost, guide, w, h, labels, prog) => engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog) : null);
+    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuCost) ? (v, w, h, labels) => { try { return engineCostVolumeGpu(state.gpu, v, w, h, labels); } catch (e) { gpuFellBack('The depth cost volume', e); throw e; } } : null, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuSolve) ? (cost, guide, w, h, labels, prog) => { try { return engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog); } catch (e) { gpuFellBack('The depth solver', e); throw e; } } : null);
     measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
   }
   if (engineMeasured && measured) {
@@ -1909,7 +1927,7 @@ function measureLytro(progress) {
     try {
       measured = measureMatchGpu(state.gpu, depthViews(), outW, outH, { onProgress: progress });
     } catch (e) {
-      console.warn('GPU depth match failed; using the CPU', e);
+      gpuFellBack('Matching the depth views', e);
     }
   }
   if (!measured) measured = measureMatch(depthViews(), outW, outH, { onProgress: progress });
