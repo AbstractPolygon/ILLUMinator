@@ -10,6 +10,7 @@ import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, 
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
 import { connectWebUsb, downloadPicture } from './camera/webusb.js';
 import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
+import { hashKey, stillKeyText } from './core/still-cache.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -1312,10 +1313,56 @@ function backToCamera() {
 
 // ---------------------------------------------------------------- full resolution, depth
 
+// The saved render (desktop app, a library photo) of these settings: the hash naming it, or null where renders are not kept.
+function stillHash(scale, passes) {
+  if (!native || !lib || !state.current || !state.current.photo) return null;
+  return hashKey(stillKeyText({
+    edits: currentEdits(), camera: cameraParams(), scale, passes, frame: state.stillFrame, photoId: state.current.photo.photoId || state.current.photo.id, version: VERSION,
+  }));
+}
+
+// PNG of a render (an ImageData, or an ImageBitmap from the GPU).
+async function stillPng(img) {
+  const c = new OffscreenCanvas(img.width, img.height);
+  const g = c.getContext('2d');
+  if (img instanceof ImageData) g.putImageData(img, 0, 0);
+  else g.drawImage(img, 0, 0);
+  return c.convertToBlob({ type: 'image/png' });
+}
+
+// ImageData of a saved render, or null.
+async function stillFromFile(file) {
+  try {
+    const bmp = await createImageBitmap(file, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    bmp.close();
+    return g.getImageData(0, 0, c.width, c.height);
+  } catch {
+    return null;
+  }
+}
+
 async function renderStill() {
   const scale = +$('still-scale').value;
   try {
     const passes = +$('still-passes').value;
+    const hash = stillHash(scale, passes);
+    const photo = state.current && state.current.photo;
+    // The same render was made before: show it.
+    if (hash) {
+      const file = await lib.still(photo, hash);
+      const img = file && (await stillFromFile(file));
+      if (img && state.fullRes && state.current && state.current.photo === photo) {
+        state.still = img;
+        state.lensStill = { img, scale };
+        draw(img);
+        showAtPhotoSize();
+        $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+        return;
+      }
+    }
     // The animation frame on show renders as it is (its camera and local
     // adjustment settings), not the live camera's.
     const { promise } = engine.job('superRes', 'superres', { ...(state.stillFrame || cameraParams()), scale, passes }, { onProgress: showProgress });
@@ -1327,6 +1374,11 @@ async function renderStill() {
       draw(state.still);
       showAtPhotoSize();
       $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+      // Kept next to the photo for next time (not waited for).
+      if (hash) {
+        const shown = state.still;
+        stillPng(shown).then((blob) => lib.saveStill(photo, hash, blob)).catch((err) => console.warn('Could not keep the full sensor render', err));
+      }
     }
   } catch (err) {
     showError(err);

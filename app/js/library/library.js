@@ -28,6 +28,7 @@ export const EDITS_FILE = 'edits.illuminator.json';
 const INDEX = 'library.json';
 const PHOTOS = 'Photos';
 import { PROCESSED_FILE } from '../core/processed-cache.js';
+import { STILL_INDEX_FILE, stillFileName, touchIndex } from '../core/still-cache.js';
 
 const LIGHT_FIELD = /\.(lfr|lfp|raw)$/i;
 
@@ -263,6 +264,26 @@ export class Library {
 
   saveProcessed(photo, bytes) {
     return this.store.writeBlob(`${PHOTOS}/${photo.id}/${PROCESSED_FILE}`, new Blob([bytes]));
+  }
+
+  // A full sensor render kept next to the photo (core/still-cache.js): its PNG file, or null.
+  still(photo, hash) {
+    return this.store.file(`${PHOTOS}/${photo.id}/${stillFileName(hash)}`).catch(() => null);
+  }
+
+  // Keeps a render; the oldest beyond the few kept are removed.
+  async saveStill(photo, hash, blob) {
+    const dir = `${PHOTOS}/${photo.id}`;
+    let index = [];
+    try {
+      index = JSON.parse((await this.store.readText(`${dir}/${STILL_INDEX_FILE}`)) || '[]');
+    } catch {
+      index = [];
+    }
+    await this.store.writeBlob(`${dir}/${stillFileName(hash)}`, blob);
+    const next = touchIndex(index, hash);
+    await this.store.writeText(`${dir}/${STILL_INDEX_FILE}`, JSON.stringify(next.index));
+    for (const old of next.dropped) await this.store.remove(`${dir}/${stillFileName(old)}`);
   }
 
   // The photo's Lytro Desktop stack.lfp (holding the depth Lytro computed), or null.
