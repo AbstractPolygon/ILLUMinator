@@ -6948,7 +6948,7 @@ showLut();
 // this version; when it is newer, a popup lists that release's files with
 // direct download links, this computer's first. "Don't remind me" skips
 // that version.
-const RELEASES_API = 'https://api.github.com/repos/AbstractPolygon/ILLUMinator/releases/latest';
+const RELEASES_API = 'https://api.github.com/repos/AbstractPolygon/Illuminator/releases/latest';
 const BUILDS = [
   { re: /-win-x64\.exe$/, os: 'win', arch: 'x64', name: 'Windows', detail: 'Intel and AMD' },
   { re: /-win-arm64\.exe$/, os: 'win', arch: 'arm64', name: 'Windows', detail: 'ARM, such as Snapdragon' },

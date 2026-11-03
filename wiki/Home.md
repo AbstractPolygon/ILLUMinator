@@ -31,4 +31,4 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 
 ## License
 
-Illuminator is licensed under [PolyForm Shield 1.0.0](https://github.com/AbstractPolygon/ILLUMinator/blob/main/LICENSE.md): free to use for any purpose, including commercial work, but not to sell the software or build a competing product from it. Copyright © AbstractPolygon, LLC.
+Illuminator is licensed under [PolyForm Shield 1.0.0](https://github.com/AbstractPolygon/Illuminator/blob/main/LICENSE.md): free to use for any purpose, including commercial work, but not to sell the software or build a competing product from it. Copyright © AbstractPolygon, LLC.

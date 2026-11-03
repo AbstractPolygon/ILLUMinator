@@ -8,7 +8,7 @@
 
 **Lytro Desktop edits were not applied.** They are used only for photos that have no Illuminator edits yet. Open the picture's `raw.lfp` together with its `stack.view.lfp` (importing a Lytro Desktop library does this for you). The note over the picture lists edits that are not supported yet.
 
-**Report a problem:** [GitHub issues](https://github.com/AbstractPolygon/ILLUMinator/issues).
+**Report a problem:** [GitHub issues](https://github.com/AbstractPolygon/Illuminator/issues).
 
 **The first generation camera does not show (Windows).** It is read through its disk, which needs the camera switched on and its USB cable connected; the *Import from camera…* dialog's diagnostics list the disks it saw. If its thumbnails look like colour noise, send the camera log, which says how the thumbnail files are stored.
 

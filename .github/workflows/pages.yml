@@ -1,4 +1,4 @@
-# Publishes the website (site/) at https://abstractpolygon.github.io/ILLUMinator/
+# Publishes the website (site/) at https://abstractpolygon.github.io/Illuminator/
 # and the browser version under /app/, the site's "Try online": after every
 # successful desktop build, and on demand (Actions → Run workflow). Pages must be set to deploy from GitHub Actions once:
 # Settings → Pages → Source: GitHub Actions.

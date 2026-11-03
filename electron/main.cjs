@@ -149,7 +149,7 @@ function buildMenu() {
     { role: 'windowMenu' },
     { role: 'help', submenu: [
       { label: 'About', click: send('about') },
-      { label: 'Wiki', click: () => shell.openExternal('https://github.com/AbstractPolygon/ILLUMinator/wiki') },
+      { label: 'Wiki', click: () => shell.openExternal('https://github.com/AbstractPolygon/Illuminator/wiki') },
     ] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

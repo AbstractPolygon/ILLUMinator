@@ -2,7 +2,7 @@
 
 ## Install
 
-**Desktop app.** Download an installer from [Releases](https://github.com/AbstractPolygon/ILLUMinator/releases/latest):
+**Desktop app.** Download an installer from [Releases](https://github.com/AbstractPolygon/Illuminator/releases/latest):
 
 - **Windows:** the `-x64.exe` for most PCs (Intel and AMD), the `-arm64.exe` for ARM PCs (such as Snapdragon). It installs into Program Files, adds Illuminator to the Start menu, and the last page of the installer has a checkbox to put a shortcut on the desktop.
 - **macOS:** the `-arm64.dmg` for Apple Silicon, the `-x64.dmg` for Intel. The app is not code signed: right-click it and choose *Open* the first time.
@@ -11,7 +11,7 @@
 Or run it from source (Node.js 20 or newer):
 
 ```
-git clone https://github.com/AbstractPolygon/ILLUMinator.git
+git clone https://github.com/AbstractPolygon/Illuminator.git
 cd Illuminator
 npm install
 npm start

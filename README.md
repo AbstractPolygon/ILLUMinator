@@ -2,7 +2,7 @@
 
 Open, refocus and animate Lytro ILLUM light field photos.
 
-**Website:** [abstractpolygon.github.io/ILLUMinator](https://abstractpolygon.github.io/ILLUMinator/)
+**Website:** [abstractpolygon.github.io/Illuminator](https://abstractpolygon.github.io/Illuminator/)
 
 ```
 npm install
