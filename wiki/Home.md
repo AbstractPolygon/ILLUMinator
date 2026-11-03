@@ -35,7 +35,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 | --- | --- | --- |
 | `.LFR` | Lytro ILLUM | Full light field: refocus, aperture, viewpoint, depth, full sensor |
 | `.LFP` (raw) | First generation Lytro, Lytro Desktop libraries (`raw.lfp`) | Full light field |
-| `.LFP` (processed) | Exported from Lytro Desktop, shared online | The pictures stored in it: focus stack, viewpoints or depth based |
+| `.LFP` (processed) | Exported from Lytro Desktop | The pictures stored in it: focus stack, viewpoints or depth based |
 | `stack.view.lfp` | Lytro Desktop | The edits Lytro Desktop saved for a picture |
 
 ## License
