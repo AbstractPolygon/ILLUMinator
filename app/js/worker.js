@@ -1168,7 +1168,7 @@ async function view({ id, u, v, alpha = 0, aperture = 0, dof = 0, bokeh, draft =
     // Everything that decides the picture before the color pass. When only
     // color settings changed since the last view, redraw from the kept
     // picture instead of rendering it again.
-    if (dof > 0 && !(await ensureDepth(id))) return { cancelled: true };
+    if (dof > 0 && !(await ensureViewDepth(id))) return { cancelled: true };
     const packed = packedMasks(masks);
     const key = JSON.stringify([state.gen, u, v, alpha, aperture, dof, dof > 0 && draft, bokeh || null, state.settings.mvDenoise, state.detail, packed && packed.spatial ? packed : null]);
     // The GPU time of each view, for the photo info (where available).
