@@ -83,7 +83,9 @@ function queryIdentity(api, handle) {
   return { vendor: text(out, out.readUInt32LE(12)), product: text(out, out.readUInt32LE(16)), revision: text(out, out.readUInt32LE(20)) };
 }
 
-const isFirstGeneration = (id) => !!id && IDENTITIES.some(([v, p]) => id.vendor === v && id.product === p);
+// The camera also reports its memory size as the product ("Lytro" / "8GB Camera", seen on a first generation camera).
+const SIZED_NAME = /^\d+\s*GB Camera$/i;
+const isFirstGeneration = (id) => !!id && (IDENTITIES.some(([v, p]) => id.vendor === v && id.product === p) || (/^lytro$/i.test(id.vendor) && SIZED_NAME.test(id.product)));
 
 // First generation cameras on this computer: [{ key, path, identity }].
 function listDevices(api = windowsApi()) {
