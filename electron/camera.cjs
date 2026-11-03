@@ -228,8 +228,10 @@ async function openUsbCamera(found) {
     };
     return { entry, close };
   } catch (err) {
-    log(`failed: ${err.message}`);
-    return { failed: err.message, at: Date.now() };
+    // A first generation camera on Windows should have been reached through its disk: say why that did not work.
+    const why = !found.scsi && process.platform === 'win32' && found.product === lytroUsb.FIRST_GENERATION_PRODUCT ? ` Reaching it through its disk did not work: ${lytroScsi.scanStatus()}` : '';
+    log(`failed: ${err.message}${why}`);
+    return { failed: err.message + why, at: Date.now() };
   }
 }
 

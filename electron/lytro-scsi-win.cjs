@@ -32,12 +32,18 @@ const FIRST_GENERATION_PRODUCT = 0x00a1;
 // [vendor, product] of the first generation camera as its disk reports it.
 const IDENTITIES = [['ZORAN', 'COACH6 (I62)'], ['Lytro', 'F01']];
 
+// Why the Windows call library could not be loaded, for the diagnostics.
+let loadError = null;
+// What the last scan of the disks saw, for the diagnostics: [{ path, vendor, product }].
+let lastScan = { seen: [], opened: 0 };
+
 function windowsApi() {
   if (process.platform !== 'win32') return null;
   let koffi;
   try {
     koffi = require('koffi');
-  } catch {
+  } catch (err) {
+    loadError = err.message;
     return null;
   }
   const kernel32 = koffi.load('kernel32.dll');
@@ -81,22 +87,38 @@ const isFirstGeneration = (id) => !!id && IDENTITIES.some(([v, p]) => id.vendor 
 
 // First generation cameras on this computer: [{ key, path, identity }].
 function listDevices(api = windowsApi()) {
-  if (!api) return [];
+  if (!api) {
+    lastScan = { seen: [], opened: 0 };
+    return [];
+  }
   const found = [];
+  const seen = [];
+  let opened = 0;
   for (const prefix of ['\\\\.\\PhysicalDrive', '\\\\.\\CdRom']) {
     for (let n = 0; n < 32; n++) {
       const path = `${prefix}${n}`;
       const handle = api.open(path, 0);
       if (!handle) continue;
+      opened++;
       try {
         const identity = queryIdentity(api, handle);
+        seen.push({ path, vendor: identity ? identity.vendor : '?', product: identity ? identity.product : '?' });
         if (isFirstGeneration(identity)) found.push({ key: `scsi:${path}`, path, identity });
       } finally {
         api.close(handle);
       }
     }
   }
+  lastScan = { seen, opened };
   return found;
+}
+
+// A sentence on why the disk route found no camera (for the error shown with a camera that is on USB but could not be used).
+function scanStatus() {
+  if (process.platform !== 'win32') return '';
+  if (loadError) return `The Windows call library (koffi) could not be loaded in this build: ${loadError}`;
+  if (!lastScan.opened) return 'No disk device could be opened to look for the camera.';
+  return `${lastScan.opened} disk devices were looked at and none identified itself as the camera (${lastScan.seen.map((d) => `${d.path.replace('\\\\.\\', '')}: ${d.vendor} ${d.product}`).join('; ') || 'none readable'}).`;
 }
 
 // A command as a SCSI_PASS_THROUGH buffer.
@@ -187,4 +209,4 @@ function wakeStorage(log = () => {}, api = windowsApi(), letters = 'DEFGHIJKLMNO
   return woken;
 }
 
-module.exports = { wakeStorage, listDevices, connect, passThrough, queryIdentity, isFirstGeneration, ScsiTransport, DATA_OFFSET, IDENTITIES };
+module.exports = { scanStatus, wakeStorage, listDevices, connect, passThrough, queryIdentity, isFirstGeneration, ScsiTransport, DATA_OFFSET, IDENTITIES };
