@@ -884,6 +884,7 @@ precision highp int;
 uniform sampler2D uSrc;
 uniform mat3 uMatrix;
 uniform float uExposure;
+uniform int uStage;        // 1: stop after the colour matrix (and lens, flare): the linear picture, for the noise reduction
 uniform int uFirst;        // first generation: clamp to 0..1 (after gain and black offset) before the matrix, Lab contrast spline after
 uniform vec3 uFirstGain;
 uniform float uFirstOff;
@@ -1142,8 +1143,13 @@ vec3 encodeOut(vec3 c) {
 
 void main() {
   ivec2 size = textureSize(uSrc, 0);
-  ivec2 p = ivec2(int(gl_FragCoord.x), size.y - 1 - int(gl_FragCoord.y));
+  // (the canvas has its first row at the top; a texture target keeps the rows as they are)
+  ivec2 p = ivec2(int(gl_FragCoord.x), uStage == 1 ? int(gl_FragCoord.y) : size.y - 1 - int(gl_FragCoord.y));
   vec3 c = colorAt(p);
+  if (uStage == 1) {
+    outColor = vec4(c * uExposure, 1.0);
+    return;
+  }
   if (uFringeOn == 1) {
     float mx = 0.0;
     float mn = 1e9;
@@ -3940,14 +3946,16 @@ export class GpuRenderer {
     return out;
   }
 
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0, usm = null }) {
+  // `toTexture`: only the colour matrix, lens and flare, as linear colour into that RGBA32F texture (for the noise reduction, which runs between this and the finishing present).
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0, usm = null, toTexture = null }) {
     const gl = this.gl;
     const P = this.programs.present;
     // Resizing reallocates the canvas: only when the size changes.
-    if (this.canvas.width !== w) this.canvas.width = w;
-    if (this.canvas.height !== h) this.canvas.height = h;
-    const shot = sharpen > 0 ? this.scratch(w, h, 'usmPicture') : null;
-    if (shot) this.target(shot, w, h);
+    if (!toTexture && this.canvas.width !== w) this.canvas.width = w;
+    if (!toTexture && this.canvas.height !== h) this.canvas.height = h;
+    const shot = !toTexture && sharpen > 0 ? this.scratch(w, h, 'usmPicture') : null;
+    if (toTexture) this.target(toTexture, w, h);
+    else if (shot) this.target(shot, w, h);
     else {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
@@ -4001,6 +4009,7 @@ export class GpuRenderer {
       gl.uniform1f(P.u.uLytroSat, lytro.saturation ?? 1);
       gl.uniform2fv(P.u.uLytroHue, LYTRO_HUE.flat());
     }
+    gl.uniform1i(P.u.uStage, toTexture ? 1 : 0);
     gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
     if (look) {
       gl.uniform4f(P.u.uTone, look.contrast, look.highlights, look.shadows, look.whites);
@@ -4010,6 +4019,7 @@ export class GpuRenderer {
       if (look.curve) gl.uniform1fv(P.u.uCurve, look.curve);
     }
     this.draw();
+    if (toTexture) return null;
     if (shot) this.engineUnsharp(shot, w, h, sharpen, usm);
     return this.canvas.transferToImageBitmap();
   }

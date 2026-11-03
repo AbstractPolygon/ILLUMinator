@@ -581,6 +581,155 @@ export function nrFilterGpu(gpu, planes, w, h, tables, onProgress) {
   return out;
 }
 
+// ---- the same filter between two textures: the picture is packed into the tile atlases on the GPU and the result written back to a picture texture (no readback) ----
+
+// One tile of one plane into an atlas: linear sRGB -> ProPhoto, clamped, gamma 2.2, x 255 (core/enginenr.js engineDenoise), through the 65536 step quantisation of its lookup.
+const PACK = `${HEAD}
+uniform sampler2D uSrc;
+uniform ivec2 uOrigin;
+uniform ivec2 uDst;
+uniform vec3 uTo0;
+uniform vec3 uTo1;
+uniform vec3 uTo2;
+uniform int uPlane;
+uniform float uE1;
+out vec4 outColor;
+void main() {
+  ivec2 f = ivec2(gl_FragCoord.xy) - uDst;
+  vec3 c = texelFetch(uSrc, uOrigin + f, 0).rgb;
+  vec3 pp = clamp(vec3(dot(uTo0, c), dot(uTo1, c), dot(uTo2, c)), 0.0, 1.0);
+  float v = uPlane == 0 ? pp.r : uPlane == 1 ? pp.g : pp.b;
+  float q = floor(v * 65535.0 + 0.5) / 65535.0;
+  outColor = vec4(pow(q, uE1) * 255.0);
+}`;
+
+// One tile's centre back into the picture: /255, clamped, gamma 2.2 out, ProPhoto -> linear sRGB.
+const UNPACK = `${HEAD}
+uniform sampler2D uR;
+uniform sampler2D uG;
+uniform sampler2D uB;
+uniform ivec2 uSrcAt;
+uniform ivec2 uDst;
+uniform vec3 uFrom0;
+uniform vec3 uFrom1;
+uniform vec3 uFrom2;
+uniform float uE2;
+out vec4 outColor;
+float lin(float v) {
+  float x = clamp(v / 255.0, 0.0, 1.0);
+  return pow(floor(x * 65535.0 + 0.5) / 65535.0, uE2);
+}
+void main() {
+  ivec2 f = ivec2(gl_FragCoord.xy) - uDst;
+  ivec2 a = uSrcAt + f;
+  vec3 q = vec3(lin(texelFetch(uR, a, 0).r), lin(texelFetch(uG, a, 0).r), lin(texelFetch(uB, a, 0).r));
+  outColor = vec4(dot(uFrom0, q), dot(uFrom1, q), dot(uFrom2, q), 1.0);
+}`;
+
+// The filter on a picture texture (linear sRGB after the colour matrix, w x h, rows as the texture stores them): returns a new RGBA32F texture of the filtered picture, which the
+// caller deletes. Pictures under 40 pixels are returned as they are (a copy). `space`: core/enginenr.js NR_SPACE.
+export function nrFilterTex(gpu, srcTex, w, h, tables, space, onProgress) {
+  const gl = gpu.gl;
+  const outTex = gpu.texture(w, h, gl.RGBA32F);
+  const programs = (gpu.nrTexPrograms ||= { pack: program(gl, PACK), unpack: program(gl, UNPACK) });
+  const xs = CPU.tileLayout(w);
+  const ys = CPU.tileLayout(h);
+  const groups = new Map();
+  for (const [y0, ch, pt, pb] of ys) {
+    for (const [x0, cw, pl, pr] of xs) {
+      const key = `${pt}|${ch}|${pb}|${pl}|${cw}|${pr}`;
+      if (!groups.has(key)) groups.set(key, { pt, ch, pb, pl, cw, pr, tiles: [] });
+      groups.get(key).tiles.push([x0, y0]);
+    }
+  }
+  const nr = new NrGpu(gpu);
+  const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const lutData = new Float32Array(257 * 12);
+  for (let c = 0; c < 3; c++) for (let l = 0; l < 4; l++) lutData.set(tables.lut[c][l], 257 * (c * 4 + l));
+  const lutTex = gpu.texture(257, 12, gl.R32F);
+  gl.activeTexture(gl.TEXTURE0 + 15);
+  gl.bindTexture(gl.TEXTURE_2D, lutTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 257, 12, gl.RED, gl.FLOAT, lutData);
+  const total = xs.length * ys.length;
+  let done = 0;
+  const mat = (P, name, rows) => rows.forEach((r, i) => gl.uniform3f(P.u[`${name}${i}`], r[0], r[1], r[2]));
+  try {
+    for (const g of groups.values()) {
+      const tw = g.pl + g.cw + g.pr;
+      const th = g.pt + g.ch + g.pb;
+      const perBatch = Math.max(1, Math.min(48, Math.floor(maxTex / tw) * Math.floor(maxTex / th)));
+      for (let b0 = 0; b0 < g.tiles.length; b0 += perBatch) {
+        const batch = g.tiles.slice(b0, b0 + perBatch);
+        const cols = Math.min(batch.length, Math.max(1, Math.min(Math.floor(maxTex / tw), Math.ceil(Math.sqrt((batch.length * th) / tw)))));
+        const rows = Math.ceil(batch.length / cols);
+        const atlas = () => nr.get(cols, rows, tw, th);
+        const R = atlas();
+        const G = atlas();
+        const B = atlas();
+        // pack: one draw per tile and plane, into that tile's place in the atlas
+        const P = programs.pack;
+        gl.useProgram(P.p);
+        gl.uniform1i(P.u.uSrc, 1);
+        gpu.bindTex(1, srcTex);
+        mat(P, 'uTo', space.to);
+        gl.uniform1f(P.u.uE1, space.e1);
+        [R, G, B].forEach((a, c) => {
+          gpu.target(a.tex, a.width, a.height);
+          gl.uniform1i(P.u.uPlane, c);
+          batch.forEach(([x0, y0], t) => {
+            const ox = (t % cols) * tw;
+            const oy = Math.floor(t / cols) * th;
+            gl.viewport(ox, oy, tw, th);
+            gl.uniform2i(P.u.uOrigin, x0 - g.pl, y0 - g.pt);
+            gl.uniform2i(P.u.uDst, ox, oy);
+            gpu.draw();
+          });
+        });
+        const S = noisePyramidsGpu(nr, R, G, B, tables, tables.nlev, lutTex);
+        const Y = atlas();
+        const C1 = atlas();
+        const C2 = atlas();
+        nr.ew(Y, '0.298900008 * v0 + v1 * 0.586600006 + 0.114500001 * v2', [R, G, B]);
+        nr.ew(C1, '(v0 - v1) * 0.713165045 + 127.5', [R, Y]);
+        nr.ew(C2, '(v0 - v1) * 0.564652741 + 127.5', [B, Y]);
+        const rect = [g.pt, g.pl, g.cw, g.ch];
+        const o = [Y, C1, C2].map((chn, ci) => chanPassGpu(nr, chn, S[ci], rect, tables.A[ci], tables.B[ci]));
+        const Ro = atlas();
+        const Go = atlas();
+        const Bo = atlas();
+        nr.ew(Ro, '1.40219998 * (v0 - 127.5) + v1', [o[1], o[0]]);
+        nr.ew(Go, '(v0 - (v1 - 127.5) * 0.71450001) - 0.345600009 * (v2 - 127.5)', [o[0], o[1], o[2]]);
+        nr.ew(Bo, 'v0 + (v1 - 127.5) * 1.77100003', [o[0], o[2]]);
+        // unpack: each tile's centre into its place in the picture
+        const U = programs.unpack;
+        gl.useProgram(U.p);
+        [Ro, Go, Bo].forEach((a, c) => {
+          gl.uniform1i(U.u[['uR', 'uG', 'uB'][c]], 1 + c);
+          gpu.bindTex(1 + c, a.tex);
+        });
+        mat(U, 'uFrom', space.from);
+        gl.uniform1f(U.u.uE2, space.e2);
+        gpu.target(outTex, w, h);
+        batch.forEach(([x0, y0], t) => {
+          const ox = (t % cols) * tw;
+          const oy = Math.floor(t / cols) * th;
+          gl.viewport(x0, y0, g.cw, g.ch);
+          gl.uniform2i(U.u.uSrcAt, ox + g.pl, oy + g.pt);
+          gl.uniform2i(U.u.uDst, x0, y0);
+          gpu.draw();
+        });
+        nr.release(R, G, B, Y, C1, C2, Ro, Go, Bo, ...o, ...S.flat());
+        done += batch.length;
+        if (onProgress) onProgress(done / total);
+      }
+    }
+  } finally {
+    gl.deleteTexture(lutTex);
+    nr.dispose();
+  }
+  return outTex;
+}
+
 export class NrGpu {
   constructor(gpu) {
     this.gpu = gpu;

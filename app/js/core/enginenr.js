@@ -634,6 +634,13 @@ function gammaTables() {
   }
 }
 // rgb: interleaved linear sRGB (w x h x 3, nominal 0..1, after the colour matrix). Returns the filtered picture the same way.
+// The filter's tables for a picture's total gain and the two sliders (shared with the GPU path, gpu/enginenr.js nrFilterTex).
+export function engineNrTables({ gain = 1, luminance = 50, color = 50 } = {}) {
+  const st = nrStrengths(luminance, color, gain);
+  return nrTables(nrProfileIndex(gain), st.luma, st.lum, st.col, st.col);
+}
+// The colour space the filter works in, for the GPU path: linear sRGB -> `to` -> clamp -> ^e1 x 255 ... ^e2 -> `from` -> linear sRGB.
+export const NR_SPACE = { to: TO_PP, from: FROM_PP, e1: f32(1 / 2.2), e2: f32(2.2) };
 export function engineDenoise(rgb, w, h, { gain = 1, luminance = 50, color = 50 } = {}, onProgress, filterFn = null) {
   gammaTables();
   const n = w * h;

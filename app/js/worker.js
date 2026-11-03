@@ -25,10 +25,10 @@ import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
-import { engineDenoise } from './core/enginenr.js';
+import { engineDenoise, engineNrTables, NR_SPACE } from './core/enginenr.js';
 import { engineModulation } from './core/enginemod.js';
 import { guideDepthEdges } from './core/depthguide.js';
-import { nrFilterGpu } from './gpu/enginenr.js';
+import { nrFilterGpu, nrFilterTex } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
 import { engineCostVolumeGpu } from './gpu/enginecost.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
@@ -441,6 +441,41 @@ function packedMasks(ctx) {
 }
 
 // The color pass: color, defringing, local adjustments and tone mapping.
+// The engine's noise reduction wholly on the GPU: the colour matrix (lens and flare before it), the filter between two textures, then the tone, defringe, local adjustments and
+// sharpening of the usual present. Returns the picture as an ImageBitmap; throws where a step is not possible (the CPU path follows).
+function nrOnGpu(tex, w, h, packed, cs, distortionCorrected) {
+  const gpu = state.gpu;
+  const gl = gpu.gl;
+  if (w < 40 || h < 40) throw new Error('picture too small');
+  const lin = gpu.texture(w, h, gl.RGBA32F);
+  let clean = null;
+  try {
+    gpu.present(tex, w, h, {
+      matrix: cs.matrix,
+      exposure: cs.baseExposure * Math.pow(2, cs.settings.ev),
+      veilAmount: cs.veil ? cs.veilAmount : 0,
+      lens: distortionCorrected ? withoutDistortion(cs.lens) : cs.lens,
+      toTexture: lin,
+    });
+    const tables = engineNrTables({ gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 });
+    clean = nrFilterTex(gpu, lin, w, h, tables, NR_SPACE);
+    return gpu.present(clean, w, h, {
+      matrix: IDENTITY,
+      exposure: 1,
+      fringe: cs.settings.defringe,
+      look: cs.look,
+      lutAmount: state.lut ? cs.settings.lutAmount ?? 1 : 0,
+      local: packed,
+      lytro: cs.lytro,
+      sharpen: state.detail && state.detail.engine && !state.pp ? state.detail.engine : 0,
+      usm: state.detail && state.detail.engine && !state.pp ? usmMap() : null,
+    });
+  } finally {
+    gl.deleteTexture(lin);
+    if (clean) gl.deleteTexture(clean);
+  }
+}
+
 // `mode` (the noise reduction is a CPU filter that takes long at a large picture size): 'draft', shown while a slider or the picture is dragged, and 'defer', a view that is quick now with
 // the filter done by a later 'final' view (message.nrDeferred tells the page to ask for it), both leave it out; 'final' does it without the preview picture; otherwise a picture without it
 // is sent first as a preview frame, then the finished one.
@@ -460,9 +495,22 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
     usm: state.detail && state.detail.engine && !state.pp ? usmMap() : null,
   });
   const nr = engineNrOn(cs, w);
+  // (where the filter is quick on the GPU, it is not put off)
+  if (nr && mode === 'defer' && state.gpuNr) mode = undefined;
   if (nr && (mode === 'draft' || mode === 'defer')) {
     if (mode === 'defer') message = { ...message, nrDeferred: true };
   } else if (nr) {
+    if (!(globalThis.__lytro && globalThis.__lytro.noGpuNr)) {
+      try {
+        const bitmap = nrOnGpu(tex, w, h, packed, cs, distortionCorrected);
+        state.gpuNr = true;
+        post({ ...message, width: w, height: h, bitmap }, [bitmap]);
+        return;
+      } catch (e) {
+        state.gpuNr = false;
+        gpuFellBack('The noise reduction', e);
+      }
+    }
     if (mode !== 'final' && message.type === 'result' && message.id != null) {
       const preview = presentBitmap();
       post({ id: message.id, type: 'frame', index: -1, preview: true, width: w, height: h, bitmap: preview }, [preview]);
