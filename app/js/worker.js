@@ -379,7 +379,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
 // before the color pass, so color changes can redraw it (see view()).
 async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, color = null, distortionCorrected = false }, message) {
   const gpu = state.gpu;
-  if ((dof > 0 || bokeh.blur > 0) && (await ensureDepth(id))) {
+  if ((dof > 0 || bokeh.blur > 0) && (await ensureViewDepth(id))) {
     tex = gpu.depthOfField(tex, w, h, {
       focus: alpha,
       strength: dof * pxPerUnit,
@@ -760,7 +760,7 @@ function apertureOptions({ u = 0, v = 0, aperture = 1 }) {
 // onion, highlights: 0..1 } (see core/dof.js).
 async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}) {
   if (!(dof > 0 || bokeh.blur > 0)) return rgb;
-  if (!(await ensureDepth(id))) return rgb;
+  if (!(await ensureViewDepth(id))) return rgb;
   const { outW, outH } = state.sampler;
   return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail, {
     shape: bokeh.shape, blades: bokeh.blades, oval: bokeh.oval, rotation: bokeh.rotation, onion: bokeh.onion, highlights: bokeh.highlights, clip: state.dev.clip, tilt: bokeh.tilt, point: bokeh.point, spread: bokeh.spread,
