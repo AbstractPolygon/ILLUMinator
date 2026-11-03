@@ -1,0 +1,45 @@
+# Keeps the optional upscaling models in models/ up to date with their source (see models/README.md): every week (and on demand) it checks the source
+# repository, and when a model changed it downloads and verifies it and opens a pull request, so new weights are looked at before they ship.
+name: Upscaling models
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: models
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Update the models
+        run: node scripts/update-models.mjs --update
+      - name: Check them
+        run: node --test test/upscalemodels-files.test.mjs test/aiupscale.test.mjs
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$(git status --porcelain models app)" ]; then
+            echo "The models are up to date."
+            exit 0
+          fi
+          branch="models/update-$(date +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add models app/js/core/upscalemodels-data.js
+          git commit -m "Update the upscaling models from their source"
+          git push origin "$branch"
+          gh pr create --title "Update the upscaling models" --body "The source of the upscaling models changed (see the commit and models/manifest.json). The files were downloaded and checked against the source's own SHA-256. Try a model on a photo before merging: a replaced model changes what saved photos look like."

@@ -1,0 +1,33 @@
+{
+  "note": "The source of truth for the optional upscaling models. scripts/update-models.mjs rewrites this file, app/js/core/upscalemodels-data.js and the .onnx files together.",
+  "source": {
+    "repo": "relax123666/clearpic-models",
+    "revision": "f96b35c2b7ad0eb74db505f89eab5ea24a94ba08",
+    "card": "https://huggingface.co/relax123666/clearpic-models",
+    "license": "BSD-3-Clause",
+    "upstream": "https://github.com/xinntao/Real-ESRGAN",
+    "checked": "2026-11-03"
+  },
+  "models": [
+    {
+      "id": "realesr-general-x4v3",
+      "name": "Real-ESRGAN general",
+      "note": "fast",
+      "file": "realesr-general-x4v3.onnx",
+      "size": 4866396,
+      "sha256": "f788518cc66e302bc9b6946016e989dd9374f1012d5b6c0c7e753904ef3f99e4",
+      "scale": 4,
+      "weights": "realesr-general-x4v3.pth (Real-ESRGAN v0.2.5.0)"
+    },
+    {
+      "id": "RealESRGAN_x4plus",
+      "name": "Real-ESRGAN x4plus",
+      "note": "best quality",
+      "file": "RealESRGAN_x4plus.onnx",
+      "size": 67051618,
+      "sha256": "c6a0cc3b0535ea566f30f20b8dd42f0462502b9e22cf45ea6e0b3ccf55d03d98",
+      "scale": 4,
+      "weights": "RealESRGAN_x4plus.pth (Real-ESRGAN v0.1.0)"
+    }
+  ]
+}

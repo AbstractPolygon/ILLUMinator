@@ -12,8 +12,9 @@ import { connectWebUsb, downloadPicture } from './camera/webusb.js';
 import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
 import { hashKey, stillKeyText } from './core/still-cache.js';
 import { encodePng16 } from './core/png16.js';
-import { UPSCALE_MODELS, modelMethod, methodModel, modelDownloaded, downloadModel, removeModel, readModel } from './core/upscalemodels.js';
+import { UPSCALE_MODELS, modelMethod, methodModel, modelState, downloadModel, removeModel, readModel } from './core/upscalemodels.js';
 import { aiUpscale, aiUpscaleAvailable } from './core/aiupscale.js';
+import { setMemoryLimits, fitsMemory, memoryProblem, superResVram, exportRam } from './core/memorybudget.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -1393,6 +1394,13 @@ async function stillFromFile(file) {
 
 async function renderStill() {
   const scale = +$('still-scale').value;
+  // The card's memory (Settings > Memory): a full sensor render of this size needs about this much.
+  const size = state.info && state.info.stillSizes && state.info.stillSizes[scale];
+  if (size && !fitsMemory('vram', superResVram(size[0], size[1]))) {
+    showNotice('Not rendered', memoryProblem('vram', superResVram(size[0], size[1]), `A ${size[0]}×${size[1]} full sensor render`, 'Lower the Scale (Render Settings > Quality) or raise the limit.'));
+    setFullRes(false);
+    return;
+  }
   try {
     const passes = +$('still-passes').value;
     const hash = stillHash(scale, passes);
@@ -2371,6 +2379,7 @@ $('cal-folder').onclick = async () => {
 // Settings > Upscaling models: a checkbox per optional model (core/upscalemodels.js). Ticking downloads it, unticking deletes it; a downloaded model appears in Render Settings >
 // Upscaling > Method. They need a graphics card with WebGPU.
 let modelBusy = false;
+const updatingModels = new Set();
 async function refreshUpscaleModels() {
   const select = $('upscale-method');
   const before = select.value;
@@ -2412,9 +2421,19 @@ async function refreshUpscaleModels() {
     }
   }
   for (const m of UPSCALE_MODELS) {
-    const have = await modelDownloaded(m);
+    const state = await modelState(m);
+    const have = state === 'ready';
     const box = list.querySelector(`input[data-model="${m.id}"]`);
-    box.checked = have;
+    // a model replaced in the repository since it was downloaded: the new one is fetched again by itself (it was chosen once already)
+    if (state === 'stale' && !modelBusy && !updatingModels.has(m.id)) {
+      updatingModels.add(m.id);
+      const status = box.parentElement.querySelector('.model-state');
+      status.textContent = 'Updating…';
+      downloadModel(m, (p) => { status.textContent = `Updating… ${Math.round(p * 100)}%`; })
+        .then(() => { status.textContent = ''; }, (err) => { status.textContent = err && err.message ? err.message : String(err); })
+        .finally(() => { updatingModels.delete(m.id); refreshUpscaleModels().catch(() => {}); });
+    }
+    box.checked = have || state === 'stale';
     box.disabled = !gpuOk && !have;
     box.title = gpuOk ? '' : 'Needs a graphics card with WebGPU';
     const value = modelMethod(m.id);
@@ -2431,6 +2450,44 @@ async function refreshUpscaleModels() {
   }
 }
 refreshUpscaleModels().catch(() => {});
+
+// Settings > Memory (the desktop app): the most RAM and video memory the app may plan to use, from 1 GB up to what the computer has less the 4 GB the system keeps. At the top
+// of the range (the start) there is no limit of the app's own. The limits size the heavy steps (a full sensor render, a 16-bit export, an upscaling model; core/memorybudget.js)
+// and, when the app starts, cap its JavaScript heap and the video memory Chromium plans for (electron/main.cjs).
+const GIB = 1024 ** 3;
+async function setupMemorySettings() {
+  if (!native || !native.systemMemory) return;
+  const sys = await native.systemMemory();
+  const top = (bytes) => Math.max(1, Math.floor(((bytes - sys.reserveBytes) / GIB) * 2) / 2);
+  const rows = [
+    { key: 'ramGb', input: $('mem-ram'), out: $('mem-ram-out'), max: top(sys.ramBytes), title: `This computer has ${(sys.ramBytes / GIB).toFixed(1)} GB of RAM; 4 GB are left for the system. Applies when the app starts.` },
+    { key: 'vramGb', input: $('mem-vram'), out: $('mem-vram-out'), max: top(sys.vramBytes), title: `Video memory found: ${(sys.vramBytes / GIB).toFixed(1)} GB (${sys.vramSource}); 4 GB are left for the system. Applies when the app starts.` },
+  ];
+  const apply = (save) => {
+    const gb = Object.fromEntries(rows.map((r) => [r.key, +r.input.value]));
+    setMemoryLimits({ ramBytes: gb.ramGb * GIB, vramBytes: gb.vramGb * GIB });
+    engine.request('memoryLimits', { ramBytes: gb.ramGb * GIB, vramBytes: gb.vramGb * GIB }).catch(() => {});
+    // at the top of a range: no limit kept, so more memory in the computer later raises it by itself
+    if (save) native.setMemoryLimits(Object.fromEntries(rows.map((r) => [r.key, gb[r.key] >= r.max ? null : gb[r.key]]))).catch(() => {});
+  };
+  for (const r of rows) {
+    const saved = sys.limits && sys.limits[r.key];
+    r.input.max = r.max;
+    r.input.min = Math.min(1, r.max);
+    r.input.value = saved ? Math.min(saved, r.max) : r.max;
+    r.input.disabled = r.max <= 1;
+    r.input.title = r.title;
+    r.out.textContent = `${r.input.value} GB`;
+    r.input.oninput = () => {
+      r.out.textContent = `${r.input.value} GB`;
+      apply(false);
+    };
+    r.input.onchange = () => apply(true);
+  }
+  $('memory-setting').hidden = false;
+  apply(false);
+}
+setupMemorySettings().catch((err) => console.warn('Could not read the computer\'s memory', err));
 
 // Settings > Check for updates on startup (the desktop app; Help > Check for Updates works whatever it says).
 $('updates-setting').hidden = !native;
@@ -5299,6 +5356,11 @@ async function savePhotoRendered(name, model, k) {
     let height = msg.height;
     const W = Math.round(width * k);
     const H = Math.round(height * k);
+    // the memory limit (Settings > Memory): the 16-bit picture, its enlarged copy and the PNG's rows
+    if (!fitsMemory('ram', exportRam(width, height, k))) {
+      showNotice('Not saved', memoryProblem('ram', exportRam(width, height, k), `Saving ${W}×${H} at 16 bits`, 'Lower the Photo Size or raise the limit.'));
+      return;
+    }
     if (k !== 1) {
       let big = null;
       if (model) {

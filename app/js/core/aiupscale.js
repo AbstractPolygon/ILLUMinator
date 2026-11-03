@@ -2,10 +2,15 @@
 // (the model compiles once): a window of `tile` pixels whose outer `pad` pixels are context only, taken with the picture's edge pixels repeated where the window leaves
 // the picture, and only the middle is kept. `run(chw)` takes one window as a float32 [3, tile, tile] array (RGB 0..1) and returns [3, tile * scale, tile * scale].
 
+import { fitsMemory, memoryProblem, modelRam } from './memorybudget.js';
+
 export const AI_TILE = 256;
 export const AI_PAD = 16;
-// Larger pictures are refused (the result is scale squared times as many pixels).
-export const AI_MAX_INPUT_PIXELS = 6e6;
+// A smaller tile where the video memory limit is low (Settings > Memory).
+const SMALL_TILE = 128;
+const LOW_VRAM = 1.5 * 1024 ** 3;
+// The result (scale squared times as many pixels) is one array: never more than this, and never more than the RAM limit.
+const MAX_RESULT_BYTES = 1.5 * 1024 ** 3;
 
 // rgb: Uint16Array (w * h * 3, interleaved, 0..65535). Returns the enlarged picture the same way (w*scale by h*scale).
 export async function tiledUpscale(rgb, w, h, scale, run, { tile = AI_TILE, pad = AI_PAD, onProgress = () => {} } = {}) {
@@ -92,14 +97,18 @@ export async function loadUpscaleSession(model, readModel) {
 
 // Enlarges `rgb` (see tiledUpscale) with `model`. Returns { rgb, width, height }.
 export async function aiUpscale(model, readModel, rgb, w, h, onProgress = () => {}) {
-  if (w * h > AI_MAX_INPUT_PIXELS) throw new Error(`The picture is too large for an upscaling model (${w}×${h}); lower the render size.`);
+  const need = modelRam(w, h, model.scale);
+  if (need > MAX_RESULT_BYTES * 2 || !fitsMemory('ram', need)) {
+    throw new Error(memoryProblem('ram', need, `Enlarging ${w}×${h} with a model`, 'Lower the render size or the Photo Size, or raise the limit.'));
+  }
   onProgress('Loading the upscaling model', 0);
   const { ort, session } = await loadUpscaleSession(model, readModel);
+  const tile = fitsMemory('vram', LOW_VRAM) ? AI_TILE : SMALL_TILE;
   const run = async (chw) => {
-    const out = await session.run({ input: new ort.Tensor('float32', chw, [1, 3, AI_TILE, AI_TILE]) });
-    const data = out.output.data;
-    return data;
+    const out = await session.run({ input: new ort.Tensor('float32', chw, [1, 3, tile, tile]) });
+    return out.output.data;
   };
-  const big = await tiledUpscale(rgb, w, h, model.scale, run, { onProgress: (p) => onProgress(`Enlarging with ${model.name}`, p) });
+  const big = await tiledUpscale(rgb, w, h, model.scale, run, { tile, onProgress: (p) => onProgress(`Enlarging with ${model.name}`, p) });
   return { rgb: big, width: w * model.scale, height: h * model.scale };
 }
+

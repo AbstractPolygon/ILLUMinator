@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('lytroNative', {
   cameraProblems: () => ipcRenderer.invoke('camera-problems'),
   cameraThumbnail: (cameraId, fileId) => ipcRenderer.invoke('camera-thumbnail', cameraId, fileId),
   libraryDir: () => ipcRenderer.invoke('library-dir'),
+  systemMemory: () => ipcRenderer.invoke('system-memory'),
+  setMemoryLimits: (limits) => ipcRenderer.invoke('set-memory-limits', limits),
   chooseLibraryDir: () => ipcRenderer.invoke('choose-library-dir'),
   importFromCamera: (cameraId, fileIds) => ipcRenderer.invoke('import-from-camera', cameraId, fileIds),
   saveFile: (name, bytes) => ipcRenderer.invoke('save-file', name, bytes),

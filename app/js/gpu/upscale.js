@@ -9,6 +9,7 @@
 
 import { upscale as upscaleCpu } from '../core/upscale.js';
 import { rcasStrength } from '../core/fsr.js';
+import { fitsMemory, enlargeVram } from '../core/memorybudget.js';
 
 const VERTEX = `#version 300 es
 in vec2 aPos;
@@ -359,7 +360,9 @@ export function upscaleBits16(rgb, w, h, W, H, { method = 'lanczos', sharpen = 0
   };
   const floats = (tw, th, f32) => make(tw, th, f32, f32 ? gl.RGBA32F : gl.RGBA16F, gl.RGBA, f32 ? gl.FLOAT : gl.HALF_FLOAT);
   try {
-    const big32 = W * H <= 24e6;
+    // 32-bit floats between the passes where they fit (the video memory limit in Settings, and no more than about 24 million pixels); 16-bit floats where only those fit
+    const big32 = W * H <= 24e6 && fitsMemory('vram', enlargeVram(W, H, true));
+    if (!fitsMemory('vram', enlargeVram(W, H, big32))) return null;
     const rgba = new Uint16Array(w * h * 4);
     for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
       rgba[j] = rgb[i];

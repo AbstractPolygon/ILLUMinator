@@ -733,3 +733,7 @@ label.lut-amount { margin-top: 14px; }
 
 .models-list { display: flex; flex-direction: column; gap: 6px; }
 .model-row .model-state { margin-left: auto; }
+
+.mem-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; margin: 0 0 10px; }
+.mem-row input { grid-column: 1 / -1; width: 100%; }
+.mem-row output { font-variant-numeric: tabular-nums; color: var(--muted); }

@@ -28,6 +28,7 @@ import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, to
 import { engineDenoise, engineNrTables, NR_SPACE } from './core/enginenr.js';
 import { engineModulation } from './core/enginemod.js';
 import { engineModulationGpu, engineModulationGpuAvailable } from './gpu/enginemod.js';
+import { setMemoryLimits } from './core/memorybudget.js';
 import { guideDepthEdges } from './core/depthguide.js';
 import { nrFilterGpu, nrFilterTex } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
@@ -2611,7 +2612,7 @@ async function setLut({ lut }) {
   return null;
 }
 
-const handlers = { setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, lytroEdof, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { memoryLimits: (limits) => { setMemoryLimits(limits); return {}; }, setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, lytroEdof, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

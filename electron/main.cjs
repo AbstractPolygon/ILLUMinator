@@ -6,6 +6,8 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, session, shell } = require('electron');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
+const os = require('node:os');
+const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const camera = require('./camera.cjs');
@@ -14,6 +16,25 @@ const camera = require('./camera.cjs');
 {
   const legacy = path.join(app.getPath('appData'), 'ILLUMinator');
   if (fs.existsSync(legacy) && !fs.existsSync(path.join(app.getPath('appData'), 'Illuminator'))) app.setPath('userData', legacy);
+}
+
+// The memory limits chosen in Settings (the app's own settings.json, read now because Chromium's switches are set before the app is ready): the JavaScript heap of the
+// page and its workers, and the video memory Chromium plans for. They take effect when the app starts. null: no limit beyond the 4 GB left for the system.
+const GB = 1024 ** 3;
+const MEMORY_RESERVE = 4 * GB;
+function savedMemoryLimits() {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8'));
+    const m = j && j.memory;
+    return { ramGb: m && m.ramGb > 0 ? m.ramGb : null, vramGb: m && m.vramGb > 0 ? m.vramGb : null };
+  } catch {
+    return { ramGb: null, vramGb: null };
+  }
+}
+{
+  const m = savedMemoryLimits();
+  if (m.ramGb) app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${Math.round(m.ramGb * 1024)}`);
+  if (m.vramGb) app.commandLine.appendSwitch('force-gpu-mem-available-mb', String(Math.round(m.vramGb * 1024)));
 }
 
 // Render on the faster GPU of computers that have two (laptops).
@@ -68,6 +89,63 @@ async function loadSettings() {
 async function saveSettings() {
   await fsp.mkdir(path.dirname(settingsFile()), { recursive: true });
   await fsp.writeFile(settingsFile(), JSON.stringify(settings, null, 2));
+}
+
+// The video memory of the best graphics card, in bytes (and where it came from). Windows keeps the real 64-bit size in the registry (the WMI figure stops at 4 GB); macOS
+// and Linux have their own tools. A card that shares the computer's memory (integrated, Apple silicon) counts as half of it (all of it on Apple silicon). Found once.
+let videoMemoryFound = null;
+function run(file, args) {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: 8000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? '' : String(stdout)));
+  });
+}
+async function videoMemory() {
+  if (videoMemoryFound) return videoMemoryFound;
+  const total = os.totalmem();
+  let bytes = 0;
+  let source = 'estimated';
+  try {
+    if (process.platform === 'win32') {
+      const out = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' -ErrorAction SilentlyContinue).'HardwareInformation.qwMemorySize' | Where-Object { $_ } | ForEach-Object { [string][uint64]$_ }"]);
+      for (const line of out.split(/\r?\n/)) {
+        const v = Number(line.trim());
+        if (v > bytes) bytes = v;
+      }
+      if (bytes) source = 'registry';
+    } else if (process.platform === 'darwin') {
+      if (process.arch === 'arm64') {
+        bytes = total;
+        source = 'unified memory';
+      } else {
+        const out = await run('system_profiler', ['SPDisplaysDataType', '-json']);
+        for (const gpu of JSON.parse(out || '{}').SPDisplaysDataType || []) {
+          const m = /([\d.]+)\s*(MB|GB)/i.exec(String(gpu.spdisplays_vram || gpu.spdisplays_vram_shared || ''));
+          if (m) bytes = Math.max(bytes, Number(m[1]) * (/gb/i.test(m[2]) ? GB : 1024 ** 2));
+        }
+        if (bytes) source = 'system_profiler';
+      }
+    } else {
+      const smi = await run('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits']);
+      for (const line of smi.split(/\r?\n/)) bytes = Math.max(bytes, Number(line.trim()) * 1024 ** 2 || 0);
+      if (bytes) source = 'nvidia-smi';
+      else {
+        for (const card of await fsp.readdir('/sys/class/drm').catch(() => [])) {
+          const v = Number(await fsp.readFile(`/sys/class/drm/${card}/device/mem_info_vram_total`, 'utf8').catch(() => '0'));
+          if (v > bytes) bytes = v;
+        }
+        if (bytes) source = 'amdgpu';
+      }
+    }
+  } catch {
+    bytes = 0;
+  }
+  // an integrated card has little of its own and uses the computer's memory
+  if (bytes < GB) {
+    bytes = Math.round(total / 2);
+    source = 'half of the computer\'s memory (shared)';
+  }
+  videoMemoryFound = { vramBytes: bytes, vramSource: source };
+  return videoMemoryFound;
 }
 
 // Where the library lives (the user can choose it in Settings).
@@ -305,6 +383,15 @@ function registerIpc() {
     } finally {
       await reader.close();
     }
+  });
+
+  // What the computer has, for Settings > Memory: its RAM and its video memory (found the way each system tells it; null where it cannot be told), and the limits kept.
+  ipcMain.handle('system-memory', async () => ({ ramBytes: os.totalmem(), ...(await videoMemory()), reserveBytes: MEMORY_RESERVE, limits: settings.memory || { ramGb: null, vramGb: null } }));
+  ipcMain.handle('set-memory-limits', async (e, limits) => {
+    const clean = (v) => (Number.isFinite(v) && v > 0 ? Math.round(v * 2) / 2 : null);
+    settings.memory = { ramGb: clean(limits && limits.ramGb), vramGb: clean(limits && limits.vramGb) };
+    await saveSettings();
+    return settings.memory;
   });
 
   ipcMain.handle('library-dir', async () => libraryDir());

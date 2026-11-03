@@ -920,6 +920,15 @@
         <h3>Upscaling models</h3>
         <div id="models-list" class="models-list"></div>
       </section>
+      <section class="setting" id="memory-setting" hidden>
+        <h3>Memory</h3>
+        <label class="mem-row" id="mem-ram-row">Max RAM <output id="mem-ram-out"></output>
+          <input id="mem-ram" type="range" min="1" max="8" step="0.5" value="8">
+        </label>
+        <label class="mem-row" id="mem-vram-row">Max video memory (VRAM) <output id="mem-vram-out"></output>
+          <input id="mem-vram" type="range" min="1" max="8" step="0.5" value="8">
+        </label>
+      </section>
       <section class="setting">
         <h3>Camera calibration</h3>
         <ul id="cal-list" class="cal-list"></ul>
