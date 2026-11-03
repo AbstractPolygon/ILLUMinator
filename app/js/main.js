@@ -5690,9 +5690,10 @@ async function importFromCamera() {
 }
 
 $('camera-select-all').onclick = () => {
-  const boxes = [...$('camera-grid').querySelectorAll('input')];
-  const all = boxes.every((b) => b.checked);
-  boxes.forEach((b) => { b.checked = !all; });
+  $('camera-grid').querySelectorAll('input').forEach((b) => { b.checked = true; });
+};
+$('camera-select-none').onclick = () => {
+  $('camera-grid').querySelectorAll('input').forEach((b) => { b.checked = false; });
 };
 
 // ---------------------------------------------------------------- wiring
