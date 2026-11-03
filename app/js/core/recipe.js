@@ -1,11 +1,11 @@
-// Lytro Desktop edits ("recipes") -> ILLUMinator edits.
+// Lytro Desktop edits ("recipes") -> Illuminator edits.
 //
 // Lytro Desktop keeps a picture's edits in its views[].recipe..recipe5 (in a
 // stack.view.lfp next to raw.lfp, or inside exported .lfp files). Its tone
 // and color fields follow Adobe Camera Raw (crs:*), so most map one to one;
 // focus, spread and tilt are in lambda, converted with LAMBDA_TO_ALPHA.
 
-// ILLUMinator focus value per Lytro lambda, measured by fitting our depth
+// Illuminator focus value per Lytro lambda, measured by fitting our depth
 // map of an ILLUM photo against Lytro Desktop's for the same shot
 // (alpha = 0.0814 lambda + 0.001, r = 0.998).
 export const LAMBDA_TO_ALPHA = 0.0814;
@@ -306,7 +306,7 @@ export function recipeAnimation(r, { nativeF = 2, radius = 4.5, unsupported = []
   for (const h of HUES) set(`hue-${h}`, `viewSaturation${h[0].toUpperCase()}${h.slice(1)}`);
   set('fringe-threshold', 'viewDefringeThreshold', (v) => roundTo(clamp(0.05 + (0.75 * v) / 100, 0.05, 0.8), 0.05));
 
-  // Not keyframed in ILLUMinator: these keep their value at the start.
+  // Not keyframed in Illuminator: these keep their value at the start.
   const still = { sharpening: ['viewSharpness2', 'viewSharpness', 'viewSharpenRadius', 'viewSharpenDetail', 'viewSharpenEdgeMasking'], 'noise reduction': ['viewLuminanceNoiseReduction', 'viewColorNoiseReduction'], 'defringe radius': ['viewDefringeRadius'], '3D': ['viewStereoBaseline', 'viewStereoPivot'] };
   for (const [name, fields] of Object.entries(still)) if (fields.some((f) => raw(f))) unsupported.push(`${name} animation`);
 

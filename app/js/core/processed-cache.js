@@ -1,6 +1,6 @@
 // The processed version of a photo, kept next to the original in the desktop app's library (processed.illuminator.bin), so reopening it does not
 // measure everything again: the depth the engine's way (rendering its depth views and solving them is the slowest step of opening a raw photo)
-// and the focus offset found for the photo. Like Lytro Desktop's stack.lfp next to its raw.lfp, but in ILLUMinator's own format.
+// and the focus offset found for the photo. Like Lytro Desktop's stack.lfp next to its raw.lfp, but in Illuminator's own format.
 //
 // Layout: 'ILPC', uint32 format version, uint32 header length, the header (JSON, UTF-8, padded to 4 bytes), then the depth as float32.
 // The header's `key` says what the depth was measured with (this app's version, the photo, the settings that change it); a cache whose key

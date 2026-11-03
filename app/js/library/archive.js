@@ -212,7 +212,7 @@ export async function readZip(src) {
     }
     at += 46 + nameLen + extraLen + commentLen;
     if (name.endsWith('/')) continue;
-    if (method !== 0) throw new Error(`${name} is compressed; only ILLUMinator album archives can be imported`);
+    if (method !== 0) throw new Error(`${name} is compressed; only Illuminator album archives can be imported`);
     const local = await read(offset, 30);
     const start = offset + 30 + local.getUint16(26, true) + local.getUint16(28, true);
     out.set(name, entryFile(src, start, size, name.split('/').pop()));

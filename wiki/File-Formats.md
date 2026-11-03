@@ -49,4 +49,4 @@ Photos/<folder>/edits.illuminator.json
 
 ## Lytro files
 
-`.LFR` and `.LFP` files are containers of sections: a table of contents (JSON), metadata, the raw sensor image, thumbnails and, in processed files, pictures and depth maps. ILLUMinator reads first generation (`picture.frameArray`) and second generation (ILLUM, `frames` and `views`) layouts. Lytro Desktop's edits are the `recipe` in a picture's views (`stack.view.lfp`).
+`.LFR` and `.LFP` files are containers of sections: a table of contents (JSON), metadata, the raw sensor image, thumbnails and, in processed files, pictures and depth maps. Illuminator reads first generation (`picture.frameArray`) and second generation (ILLUM, `frames` and `views`) layouts. Lytro Desktop's edits are the `recipe` in a picture's views (`stack.view.lfp`).

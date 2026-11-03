@@ -4,7 +4,7 @@
 
 A color lookup table applied as the last step of the look, after every other adjustment.
 
-*Film look* chooses one of 296 film emulation LUTs that come with ILLUMinator, grouped as color negative, color slide, black and white, print film, instant film and Fujifilm X-Trans III looks. They are from the [G'MIC Film LUTs Collection](https://github.com/YahiaAngelo/Film-Luts) (MIT License). *Import LUT…* reads a 3D LUT in `.cube` format, as made by DaVinci Resolve, Premiere and most LUT packs (up to 65 × 65 × 65). The LUT is saved with the photo's edits, so it travels with the photo. *Amount* blends between the picture without the LUT (0%) and with it (100%); the trash button <img src="images/delete.png" width="20" height="20" alt="Remove LUT"> removes it.
+*Film look* chooses one of 296 film emulation LUTs that come with Illuminator, grouped as color negative, color slide, black and white, print film, instant film and Fujifilm X-Trans III looks. They are from the [G'MIC Film LUTs Collection](https://github.com/YahiaAngelo/Film-Luts) (MIT License). *Import LUT…* reads a 3D LUT in `.cube` format, as made by DaVinci Resolve, Premiere and most LUT packs (up to 65 × 65 × 65). The LUT is saved with the photo's edits, so it travels with the photo. *Amount* blends between the picture without the LUT (0%) and with it (100%); the trash button <img src="images/delete.png" width="20" height="20" alt="Remove LUT"> removes it.
 
 ## White Balance
 

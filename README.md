@@ -1,4 +1,4 @@
-# ILLUMinator
+# Illuminator
 
 Open, refocus and animate Lytro ILLUM light field photos.
 

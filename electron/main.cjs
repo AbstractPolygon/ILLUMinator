@@ -43,7 +43,7 @@ function checkAllowed(file) {
   const p = path.resolve(file);
   if (allowed.has(p)) return p;
   if (p.startsWith(path.resolve(libraryDir()) + path.sep)) return p;
-  throw new Error('This file was not opened in ILLUMinator.');
+  throw new Error('This file was not opened in Illuminator.');
 }
 
 // App settings, kept in the user data folder.
@@ -114,7 +114,7 @@ function buildMenu() {
   const send = (id) => () => { if (win) win.webContents.send('menu', id); };
   const template = [
     ...(mac ? [{ role: 'appMenu', submenu: [
-      { label: 'About ILLUMinator', click: send('about') }, { type: 'separator' },
+      { label: 'About Illuminator', click: send('about') }, { type: 'separator' },
       { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' }, { role: 'quit' },
@@ -151,7 +151,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     backgroundColor: '#121417',
-    title: 'ILLUMinator',
+    title: 'Illuminator',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -427,8 +427,8 @@ async function offerLinuxMenuEntry() {
   if (process.platform !== 'linux' || !appImage || settings.menuEntry) return;
   const res = await dialog.showMessageBox(win, {
     type: 'question',
-    title: 'ILLUMinator',
-    message: 'Add ILLUMinator to your applications menu?',
+    title: 'Illuminator',
+    message: 'Add Illuminator to your applications menu?',
     detail: 'This copies a launcher and an icon into your home folder; nothing outside it is changed. You can remove them by deleting illuminator.desktop from ~/.local/share/applications.',
     buttons: ['Add to menu', 'Not now', 'Don\'t ask again'],
     defaultId: 0,
@@ -451,14 +451,14 @@ async function offerLinuxMenuEntry() {
     const entry = [
       '[Desktop Entry]',
       'Type=Application',
-      'Name=ILLUMinator',
+      'Name=Illuminator',
       'Comment=Lytro light field photo editor',
       `Exec="${appImage}" %F`,
       'Icon=illuminator',
       'Terminal=false',
       'Categories=Graphics;Photography;',
       'MimeType=image/x-lytro-lfr;image/x-lytro-lfp;',
-      'StartupWMClass=ILLUMinator',
+      'StartupWMClass=Illuminator',
       '',
     ].join('\n');
     const appsDir = path.join(dataHome, 'applications');
@@ -472,7 +472,7 @@ async function offerLinuxMenuEntry() {
     settings.menuEntry = 'added';
     await saveSettings();
   } catch (err) {
-    dialog.showErrorBox('ILLUMinator', `The menu entry could not be added: ${err.message}`);
+    dialog.showErrorBox('Illuminator', `The menu entry could not be added: ${err.message}`);
   }
 }
 

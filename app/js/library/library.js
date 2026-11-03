@@ -1,5 +1,5 @@
 // The photo library: one folder holding every photo in its own folder, with
-// its Lytro Desktop edits, its ILLUMinator edits and a thumbnail beside it,
+// its Lytro Desktop edits, its Illuminator edits and a thumbnail beside it,
 // plus library.json listing the photos and the user's albums.
 //
 //   library.json
@@ -256,7 +256,7 @@ export class Library {
     return image && range ? { image, range } : null;
   }
 
-  // The processed version ILLUMinator keeps next to the photo (core/processed-cache.js), as an ArrayBuffer, or null.
+  // The processed version Illuminator keeps next to the photo (core/processed-cache.js), as an ArrayBuffer, or null.
   async processed(photo) {
     const f = await this.store.file(`${PHOTOS}/${photo.id}/${PROCESSED_FILE}`).catch(() => null);
     return f ? f.arrayBuffer() : null;
@@ -403,9 +403,9 @@ export class Library {
   async importAlbum(src, { onProgress = () => {} } = {}) {
     const entries = await readZip(src);
     const indexFile = entries.get('album.json');
-    if (!indexFile) throw new Error('Not an ILLUMinator album (album.json is missing)');
+    if (!indexFile) throw new Error('Not an Illuminator album (album.json is missing)');
     const index = JSON.parse(new TextDecoder().decode(await indexFile.arrayBuffer()));
-    if (index.format !== ARCHIVE_FORMAT) throw new Error('Not an ILLUMinator album');
+    if (index.format !== ARCHIVE_FORMAT) throw new Error('Not an Illuminator album');
     const at = (folder, name) => (name ? entries.get(`${PHOTOS}/${folder}/${name}`) || null : null);
     const items = (index.photos || [])
       .map((p) => ({ meta: p, entry: { name: p.name, label: p.folder, file: at(p.folder, p.file), sidecar: at(p.folder, p.sidecar), thumb: at(p.folder, p.thumb), depthMap: at(p.folder, p.depthMap), depthRange: at(p.folder, p.depthRange), stack: at(p.folder, p.stack) } }))

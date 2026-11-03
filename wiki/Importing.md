@@ -9,7 +9,7 @@
 
 Every picture in it (and in all its subfolders) is added to the library, in a new album named after the folder. The same works for any folder of Lytro photos, such as a copy of a camera card.
 
-The edits you made in Lytro Desktop come along: when a picture is first opened, ILLUMinator applies them and says so in a note over the picture. Edits it does not support yet are listed in that note. Once you change something, ILLUMinator saves the edits in its format and uses them from then on.
+The edits you made in Lytro Desktop come along: when a picture is first opened, Illuminator applies them and says so in a note over the picture. Edits it does not support yet are listed in that note. Once you change something, Illuminator saves the edits in its format and uses them from then on.
 
 What carries over from Lytro Desktop:
 
@@ -18,17 +18,17 @@ What carries over from Lytro Desktop:
 - *Details and Optics:* sharpening (amount, radius, detail, edge masking), noise reduction, defringe and reduce flare.
 - *Crop:* crop, straighten and orientation.
 - *Animation:* every animated setting becomes keyframes, curves included, with Keyframe animation turned on: focus, focus point, aperture, focus spread, tilt, viewpoint, pivot, zoom, pan, exposure, white balance, the tone sliders, saturation and defringe threshold. Zoom and pan carry over when they are not animated too.
-- *Effects:* each of Lytro Desktop's effect layers becomes a local adjustment, named *Lytro effect 1*, *2* and so on: its ellipse or depth range as the mask, and its exposure, contrast, brightness, saturation and black and white as the effects. Lytro's living filters Film Noir, Carnival, Mosaic, Crayon, Blur+ and Pop become ILLUMinator's filters of the same kind.
+- *Effects:* each of Lytro Desktop's effect layers becomes a local adjustment, named *Lytro effect 1*, *2* and so on: its ellipse or depth range as the mask, and its exposure, contrast, brightness, saturation and black and white as the effects. Lytro's living filters Film Noir, Carnival, Mosaic, Crayon, Blur+ and Pop become Illuminator's filters of the same kind.
 - *3D:* the stereo baseline.
 - *Depth map:* the depth map Lytro Desktop computed (in `stack.lfp`) is kept with the photo and used for blur and depth masks; one edited in Lytro Desktop (`stack.userdepthmap.png`) is kept too and used first. *Lytro Desktop depth map* under [[Camera]] → Depth turns it off.
 
 Some things have no equivalent yet and are listed in the note: animated sharpening, noise reduction, defringe radius and 3D (they keep their starting value), the 3D pivot, the Glass, Line Art and 8-Track filters, and effects that shift hues, fill with a color, insert an image or combine a place and a depth mask (these keep the place). Depth ranges of effects are matched to a typical picture's depth, so check them on photos with a very deep or very shallow scene.
 
-Importing the same library again replaces the photos already imported from it (matched by name) with the new files: their Lytro Desktop edits apply again and changes made in ILLUMinator start over. They keep their place in albums.
+Importing the same library again replaces the photos already imported from it (matched by name) with the new files: their Lytro Desktop edits apply again and changes made in Illuminator start over. They keep their place in albums.
 
-Lytro Desktop keeps its albums in a database ILLUMinator does not read, so they are not imported; the album named after the folder holds everything instead.
+Lytro Desktop keeps its albums in a database Illuminator does not read, so they are not imported; the album named after the folder holds everything instead.
 
-## From another ILLUMinator library
+## From another Illuminator library
 
 An album exported with *Export album…* (see [[Library and Albums]]) is a `.zip`. Drop it on the window: its photos join the library with their edits, and the album is made again (or joined, if one has its name). A photo already in the library is not copied twice, and its edits there are kept. This is how to move photos from the browser version to the desktop app.
 

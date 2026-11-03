@@ -2315,7 +2315,7 @@ async function addCalibration(source) {
   }
 }
 
-const CALIBRATION_ONLY = ['Add camera calibration', 'Adding camera calibration data needs the ILLUMinator desktop app, for Windows, macOS and Linux. Backups are over a gigabyte, so the desktop app reads them on your computer and keeps the calibration in your library.'];
+const CALIBRATION_ONLY = ['Add camera calibration', 'Adding camera calibration data needs the Illuminator desktop app, for Windows, macOS and Linux. Backups are over a gigabyte, so the desktop app reads them on your computer and keeps the calibration in your library.'];
 $('cal-lens-source').value = lensSource();
 $('cal-lens-source').onchange = () => {
   try {
@@ -6268,8 +6268,8 @@ async function applyEdits(info, saved) {
 }
 
 // The edits Lytro Desktop saved for a photo (in its stack.view.lfp, or in
-// the file itself), as ILLUMinator edits, or null. Used for photos that have
-// no ILLUMinator edits yet; they are saved as ours once changed.
+// the file itself), as Illuminator edits, or null. Used for photos that have
+// no Illuminator edits yet; they are saved as ours once changed.
 async function lytroEdits(info, item) {
   let recipe = null;
   try {
@@ -6774,13 +6774,13 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
         arrived();
       }
       showUsbStatus();
-      showNotice(webUsbReport ? `The camera was found but could not be read over USB. ${cameraSection.note || ''} ${webUsbReport.replace(/\n/g, ' · ')}` : 'ILLUMinator will now notice when this camera is plugged in.');
+      showNotice(webUsbReport ? `The camera was found but could not be read over USB. ${cameraSection.note || ''} ${webUsbReport.replace(/\n/g, ' · ')}` : 'Illuminator will now notice when this camera is plugged in.');
       startNoticeTimer();
       return true;
     } catch (err) {
       if (err.name === 'SecurityError') {
         // A page embedded in another (a preview frame) is not allowed to use USB.
-        showNotice('This page is not allowed to use USB because it is shown inside another page (a preview or an artifact viewer, even in its own tab). Open ILLUMinator from its own web address, such as the website\'s Try online link, in Chrome or Edge.');
+        showNotice('This page is not allowed to use USB because it is shown inside another page (a preview or an artifact viewer, even in its own tab). Open Illuminator from its own web address, such as the website\'s Try online link, in Chrome or Edge.');
         startNoticeTimer();
       } else if (err.name === 'NotFoundError') {
         // Also what a closed chooser gives. A first generation camera shows
@@ -7002,7 +7002,7 @@ async function checkForUpdate() {
     // when they cannot be told: an app built before the architecture was passed on).
     .filter((x) => x.b && (!os || x.b.os === os) && (!arch || x.b.arch === arch));
   if (!files.length) return;
-  $('update-title').textContent = `ILLUMinator ${latest} is available`;
+  $('update-title').textContent = `Illuminator ${latest} is available`;
   $('update-note').replaceChildren(
     `A new release is available (current: ${VERSION} | available: ${latest}).`,
     document.createElement('br'),
