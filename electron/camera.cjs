@@ -334,12 +334,58 @@ function pngOfRgb(rgb, width, height) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', require('node:zlib').deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// The picture of a first generation camera's thumbnail file (.128): a JPEG as it is, raw 8 bit RGB squares as a PNG, anything else null.
+// A PNG of 8 bit RGB pixels from other raw layouts: RGBA/BGRA, RGB565, grey, YUV 4:2:2 (YUYV / UYVY) and 4:2:0 planar.
+function rgbOfRaw(data, side, layout) {
+  const n = side * side;
+  const out = Buffer.alloc(n * 3);
+  const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
+  const yuv = (i, y, u, v) => {
+    out[i * 3] = clamp(y + 1.402 * (v - 128));
+    out[i * 3 + 1] = clamp(y - 0.344 * (u - 128) - 0.714 * (v - 128));
+    out[i * 3 + 2] = clamp(y + 1.772 * (u - 128));
+  };
+  for (let i = 0; i < n; i++) {
+    if (layout === 'rgba') { out[i * 3] = data[i * 4]; out[i * 3 + 1] = data[i * 4 + 1]; out[i * 3 + 2] = data[i * 4 + 2]; }
+    else if (layout === 'bgra') { out[i * 3] = data[i * 4 + 2]; out[i * 3 + 1] = data[i * 4 + 1]; out[i * 3 + 2] = data[i * 4]; }
+    else if (layout === 'rgb565') {
+      const v = data[i * 2] | (data[i * 2 + 1] << 8);
+      out[i * 3] = ((v >> 11) & 31) * 255 / 31; out[i * 3 + 1] = ((v >> 5) & 63) * 255 / 63; out[i * 3 + 2] = (v & 31) * 255 / 31;
+    } else if (layout === 'grey') { out[i * 3] = out[i * 3 + 1] = out[i * 3 + 2] = data[i]; }
+    else if (layout === 'yuyv' || layout === 'uyvy') {
+      const o = (i >> 1) * 4;
+      const [y0, u, y1, v] = layout === 'yuyv' ? [data[o], data[o + 1], data[o + 2], data[o + 3]] : [data[o + 1], data[o], data[o + 3], data[o + 2]];
+      yuv(i, i & 1 ? y1 : y0, u, v);
+    } else if (layout === 'yuv420') {
+      const x = i % side;
+      const y = (i / side) | 0;
+      const c = n + (y >> 1) * (side >> 1) + (x >> 1);
+      yuv(i, data[i], data[c], data[c + (n >> 2)]);
+    }
+  }
+  return out;
+}
+
+// bytes per pixel of the raw layouts, tried after a JPEG and plain RGB.
+const RAW_LAYOUTS = [['rgba', 4], ['bgra', 4], ['rgb565', 2], ['yuyv', 2], ['uyvy', 2], ['yuv420', 1.5], ['grey', 1]];
+
+// The picture of a first generation camera's thumbnail file (.128): a JPEG (maybe after a header) as it is, raw squares as a PNG, anything else null.
 function thumbnailPicture(data) {
   if (!data || data.length < 16) return null;
   if (data[0] === 0xff && data[1] === 0xd8) return { mime: 'image/jpeg', bytes: data, width: 128, height: 128 };
-  const side = Math.round(Math.sqrt(data.length / 3));
-  if (side * side * 3 === data.length) return { mime: 'image/png', bytes: pngOfRgb(data, side, side), width: side, height: side };
+  const jpeg = data.indexOf(Buffer.from([0xff, 0xd8, 0xff]));
+  if (jpeg > 0 && jpeg < 4096) return { mime: 'image/jpeg', bytes: data.subarray(jpeg), width: 128, height: 128 };
+  const png = data.indexOf(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  if (png >= 0 && png < 4096) return { mime: 'image/png', bytes: data.subarray(png), width: 128, height: 128 };
+  // 8 bit RGB, a square (or 128 wide) after a header of up to 1 KB.
+  for (const side of [128, 0]) {
+    const s = side || Math.round(Math.sqrt(data.length / 3));
+    const head = data.length - s * s * 3;
+    if (s > 0 && head >= 0 && head <= 1024) return { mime: 'image/png', bytes: pngOfRgb(data.subarray(head), s, s), width: s, height: s };
+  }
+  for (const [layout, bpp] of RAW_LAYOUTS) {
+    const head = data.length - 128 * 128 * bpp;
+    if (head >= 0 && head <= 1024) return { mime: 'image/png', bytes: pngOfRgb(rgbOfRaw(data.subarray(head), 128, layout), 128, 128), width: 128, height: 128 };
+  }
   return null;
 }
 
@@ -381,23 +427,38 @@ async function assembleLfp({ raw, txt, thumb = null }) {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
 }
 
+// The camera answers one request at a time: thumbnails (the grid asks for many at once) and downloads queue here.
+function withCamera(entry, fn) {
+  const run = (entry.busy || Promise.resolve()).then(fn, fn);
+  entry.busy = run.catch(() => {});
+  return run;
+}
+
 // The thumbnail of a picture on a first generation camera reached over USB or its disk: { mime, bytes } or null. Kept, as asking the camera is slow.
 const thumbnailCache = new Map();
 async function lytroThumbnail(entry, fileId) {
   const key = `${entry.id}/${fileId}`;
   if (thumbnailCache.has(key)) return thumbnailCache.get(key);
   const pic = entry.pictures.find((p) => p.id === fileId);
-  let result = null;
-  if (pic && entry.product === lytroUsb.FIRST_GENERATION_PRODUCT) {
-    try {
-      const t = thumbnailPicture(await entry.camera.download('file', LytroCamera.pathOf(pic, '128')));
-      result = t ? { mime: t.mime, bytes: t.bytes } : null;
-    } catch (err) {
-      log(`no thumbnail for ${pic.name}: ${err.message}`);
-    }
+  if (!pic || entry.product !== lytroUsb.FIRST_GENERATION_PRODUCT) return null;
+  try {
+    const result = await withCamera(entry, async () => {
+      const data = await entry.camera.download('file', LytroCamera.pathOf(pic, '128'));
+      const t = thumbnailPicture(data);
+      if (!t) {
+        log(`thumbnail of ${pic.name} is in a form not understood: ${data.length} bytes, starting ${Buffer.from(data.subarray(0, 16)).toString('hex')}`);
+        return null;
+      }
+      log(`thumbnail of ${pic.name}: ${data.length} bytes, ${t.mime}`);
+      return { mime: t.mime, bytes: t.bytes };
+    });
+    thumbnailCache.set(key, result);
+    return result;
+  } catch (err) {
+    // Not kept: the camera may only have been busy.
+    log(`no thumbnail for ${pic.name}: ${err.message}`);
+    return null;
   }
-  thumbnailCache.set(key, result);
-  return result;
 }
 
 // A picture off a camera on its own USB protocol: the ILLUM's single
@@ -407,6 +468,10 @@ async function downloadLytroPicture(entry, file) {
   const pic = entry.pictures.find((p) => p.id === file.id);
   if (!pic) throw new Error('That picture is no longer on the camera.');
   const cam = entry.camera;
+  return withCamera(entry, () => downloadLytroPictureNow(entry, file, pic, cam));
+}
+
+async function downloadLytroPictureNow(entry, file, pic, cam) {
   const firstGeneration = entry.product === lytroUsb.FIRST_GENERATION_PRODUCT;
   if (!firstGeneration) {
     try {

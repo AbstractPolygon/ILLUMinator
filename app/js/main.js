@@ -3061,8 +3061,7 @@ function setupKeyButtons() {
     prev.onclick = () => stepKey(id, -1);
     next.onclick = () => stepKey(id, 1);
     b.onclick = () => {
-      // The diamonds are always there: one clicked while the animation is
-      // off turns keyframe animation on.
+      // (The diamonds show only while animation is enabled; the mode is switched here if needed.)
       const mode = keyButtonMode(id);
       if (!$('anim-on').checked || $('anim').value !== mode) {
         $('anim-on').checked = true;
@@ -3138,7 +3137,8 @@ function stepKey(id, dir) {
 }
 
 function updateKeyButtons() {
-  const on = canRender() && state.mode === 'camera';
+  // Keyframe controls show only while Animation > Enabled is on.
+  const on = canRender() && state.mode === 'camera' && $('anim-on').checked;
   const navs = document.querySelectorAll('.key-nav');
   if (!on) {
     for (const nav of navs) nav.hidden = true;
@@ -5480,7 +5480,7 @@ function importedAs(f) {
 
 function cameraThumb(cam, f) {
   if (cam.kind === 'web') return readThumbnail(blobReader(f.file));
-  if (cam.kind === 'drive') return native.cameraThumbnail(cam.id, f.id);
+  if (cam.kind === 'drive' || cam.kind === 'lytro') return native.cameraThumbnail(cam.id, f.id);
   return Promise.resolve(null);
 }
 
@@ -5984,6 +5984,7 @@ $('anim-on').onchange = () => {
     }
   }
   showAnimationEnabled();
+  updateKeyButtons();
   renderTimeline();
   if (state.lastImage) draw(state.lastImage);
 };
