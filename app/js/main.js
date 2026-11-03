@@ -5889,6 +5889,7 @@ async function openPicked(files) {
 $('open-btn').onclick = async () => openPicked(await openFiles());
 $('library-import').onclick = () => importFolder();
 // Commands from the desktop app's menu bar.
+let checkForUpdateNow = () => {};
 if (native && native.onMenu) {
   native.onMenu((id) => {
     if (id === 'undo' || id === 'redo') {
@@ -5900,6 +5901,7 @@ if (native && native.onMenu) {
     } else if (id === 'open') $('open-btn').click();
     else if (id === 'import-library') importFolder();
     else if (id === 'about') $('about-btn').click();
+    else if (id === 'check-update') checkForUpdateNow();
   });
 }
 $('camera-btn').onclick = importFromCamera;
@@ -7010,18 +7012,23 @@ function thisOs() {
   return p.includes('win') ? 'win' : p.includes('mac') ? 'mac' : p.includes('linux') ? 'linux' : '';
 }
 
-async function checkForUpdate() {
+// manual: from Help > Check for Updates, which says what it found; the automatic checks (at start, then every few hours) stay silent unless there is a new release.
+async function checkForUpdate(manual = false) {
   if (!window.lytroNative) return;
   let release;
   try {
     const r = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });
-    if (!r.ok) return;
+    if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
     release = await r.json();
-  } catch {
+  } catch (e) {
+    if (manual) showNotice('Could not check for a new release', `${e && e.message ? e.message : e}. Check the internet connection and try again.`);
     return;
   }
   const latest = String(release.tag_name || '').replace(/^v/, '');
-  if (!newerVersion(latest, VERSION)) return;
+  if (!newerVersion(latest, VERSION)) {
+    if (manual) showNotice('Illuminator is up to date', `Version ${VERSION} is the latest release.`);
+    return;
+  }
   // "Don't remind me" only stops the pop-up at start: the Update available!
   // message in the toolbar stays, and opens the same pop-up.
   let skipped = false;
@@ -7037,7 +7044,10 @@ async function checkForUpdate() {
     // Only this computer's platform and this app's architecture (all of them
     // when they cannot be told: an app built before the architecture was passed on).
     .filter((x) => x.b && (!os || x.b.os === os) && (!arch || x.b.arch === arch));
-  if (!files.length) return;
+  if (!files.length) {
+    if (manual) showNotice(`Illuminator ${latest} is available`, 'No download for this computer is attached to the release yet. Try again later.');
+    return;
+  }
   $('update-title').textContent = `Illuminator ${latest} is available`;
   $('update-note').replaceChildren(
     `A new release is available (current: ${VERSION} | available: ${latest}).`,
@@ -7070,6 +7080,9 @@ async function checkForUpdate() {
   $('update-btn').textContent = `Update available! ${latest}`;
   $('update-btn').onclick = open;
   $('update-btn').hidden = false;
-  if (!skipped) open();
+  if (!skipped || manual) open();
 }
 setTimeout(checkForUpdate, 3000);
+// A long session hears about a release too.
+setInterval(checkForUpdate, 6 * 3600 * 1000);
+checkForUpdateNow = () => checkForUpdate(true);

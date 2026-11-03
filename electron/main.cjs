@@ -123,7 +123,8 @@ function buildMenu() {
   const send = (id) => () => { if (win) win.webContents.send('menu', id); };
   const template = [
     ...(mac ? [{ role: 'appMenu', submenu: [
-      { label: 'About Illuminator', click: send('about') }, { type: 'separator' },
+      { label: 'About Illuminator', click: send('about') },
+      { label: 'Check for Updates…', click: send('check-update') }, { type: 'separator' },
       { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' }, { role: 'quit' },
@@ -148,6 +149,7 @@ function buildMenu() {
     ] },
     { role: 'windowMenu' },
     { role: 'help', submenu: [
+      { label: 'Check for Updates…', click: send('check-update') },
       { label: 'About', click: send('about') },
       { label: 'Wiki', click: () => shell.openExternal('https://github.com/AbstractPolygon/Illuminator/wiki') },
     ] },
