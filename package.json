@@ -1,7 +1,7 @@
 {
   "name": "illuminator",
-  "productName": "ILLUMinator",
-  "version": "0.5.52",
+  "productName": "Illuminator",
+  "version": "0.5.53",
   "description": "Open, refocus and animate Lytro ILLUM and first generation light field photographs",
   "license": "PolyForm-Shield-1.0.0",
   "author": "AbstractPolygon, LLC",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.illuminator.app",
-    "productName": "ILLUMinator",
+    "productName": "Illuminator",
     "copyright": "Copyright © AbstractPolygon, LLC",
     "files": [
       "app/**/*",
@@ -91,7 +91,7 @@
       "vendor": "AbstractPolygon, LLC",
       "desktop": {
         "entry": {
-          "Name": "ILLUMinator",
+          "Name": "Illuminator",
           "Comment": "Lytro light field photo editor",
           "Categories": "Graphics;Photography;"
         }
@@ -102,7 +102,7 @@
       "buildResources": "build"
     },
     "dmg": {
-      "title": "ILLUMinator ${version}"
+      "title": "Illuminator ${version}"
     },
     "nsis": {
       "oneClick": false,
@@ -112,7 +112,7 @@
       "createStartMenuShortcut": true,
       "createDesktopShortcut": false,
       "include": "build/installer.nsh",
-      "shortcutName": "ILLUMinator",
+      "shortcutName": "Illuminator",
       "menuCategory": false
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
@@ -122,7 +122,7 @@
       "perMachine": true,
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
-      "shortcutName": "ILLUMinator"
+      "shortcutName": "Illuminator"
     }
   },
   "devDependencies": {

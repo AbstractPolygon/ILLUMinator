@@ -58,9 +58,13 @@ jobs:
           # No signing certificate: build unsigned.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: Version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v6
         with:
-          name: ILLUMinator-${{ matrix.name }}
+          name: Illuminator-${{ steps.version.outputs.version }}-${{ matrix.name }}
           path: |
             dist/*.exe
             dist/*.msi
@@ -80,13 +84,17 @@ jobs:
 
       - name: Build
         run: |
-          name="ILLUMinator-$(node -p "require('./package.json').version")-web"
+          name="Illuminator-$(node -p "require('./package.json').version")-web"
           npm run build:web -- --out "dist/$name"
           cd dist && zip -qr "$name.zip" "$name"
 
+      - name: Version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v6
         with:
-          name: ILLUMinator-web
+          name: Illuminator-${{ steps.version.outputs.version }}-web
           path: dist/*.zip
           if-no-files-found: error
 
@@ -111,12 +119,12 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME"; else tag="v$(node -p "require('./package.json').version")"; fi
           version="${tag#v}"
           cat > notes.md <<NOTES
-          ILLUMinator ${version}.
+          Illuminator ${version}.
 
-          - **Windows:** \`ILLUMinator-${version}-win-x64.exe\` (Intel and AMD) or \`ILLUMinator-${version}-win-arm64.exe\` (ARM, such as Snapdragon), or \`ILLUMinator-${version}-win-x64.msi\` (Windows Installer package, for managed installs)
-          - **macOS:** \`ILLUMinator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`ILLUMinator-${version}-mac-x64.dmg\` (Intel)
-          - **Linux:** \`ILLUMinator-${version}-linux-amd64.deb\` (Debian, Ubuntu) or \`ILLUMinator-${version}-linux-x86_64.AppImage\` (other distributions)
-          - **Web:** \`ILLUMinator-${version}-web.zip\`, to unzip onto any static web server
+          - **Windows:** \`Illuminator-${version}-win-x64.exe\` (Intel and AMD) or \`Illuminator-${version}-win-arm64.exe\` (ARM, such as Snapdragon), or \`Illuminator-${version}-win-x64.msi\` (Windows Installer package, for managed installs)
+          - **macOS:** \`Illuminator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`Illuminator-${version}-mac-x64.dmg\` (Intel)
+          - **Linux:** \`Illuminator-${version}-linux-amd64.deb\` (Debian, Ubuntu) or \`Illuminator-${version}-linux-x86_64.AppImage\` (other distributions)
+          - **Web:** \`Illuminator-${version}-web.zip\`, to unzip onto any static web server
 
           The installers are not code signed. On Windows, choose *More info → Run anyway* if SmartScreen warns. On macOS, right-click the app and choose *Open* the first time. On Linux, make the AppImage executable (\`chmod +x\`) before running it.
           NOTES
@@ -127,6 +135,6 @@ jobs:
             gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
           else
             gh release create "$tag" "${files[@]}" --target "$GITHUB_SHA" \
-              --repo "$GITHUB_REPOSITORY" --title "ILLUMinator ${version}" \
+              --repo "$GITHUB_REPOSITORY" --title "Illuminator ${version}" \
               --notes-file notes.md --generate-notes
           fi

@@ -22,7 +22,7 @@ Photos/IMG_0001/IMG_0001.LFR
                /thumb.jpg
 ```
 
-The desktop app keeps the library in `Pictures/ILLUMinator` (change it in Settings); a browser keeps it in its private storage. Albums are listed in the left sidebar: drag photos onto an album, or use the ••• button on a photo.
+The desktop app keeps the library in `Pictures/Illuminator` (change it in Settings; a library already in `Pictures/ILLUMinator` stays there); a browser keeps it in its private storage. Albums are listed in the left sidebar: drag photos onto an album, or use the ••• button on a photo.
 
 Settings → Import Lytro Desktop library adds every photo in a Lytro Desktop library (or any folder, including a copy of a camera card) to a new album, with the edits Lytro Desktop saved for each one.
 

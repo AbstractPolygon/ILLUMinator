@@ -10,6 +10,12 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const camera = require('./camera.cjs');
 
+// The app was called ILLUMinator: the settings and library state kept under that name stay in use (a case-sensitive file system, as on Linux, tells the two names apart).
+{
+  const legacy = path.join(app.getPath('appData'), 'ILLUMinator');
+  if (fs.existsSync(legacy) && !fs.existsSync(path.join(app.getPath('appData'), 'Illuminator'))) app.setPath('userData', legacy);
+}
+
 // Render on the faster GPU of computers that have two (laptops).
 app.commandLine.appendSwitch('force_high_performance_gpu');
 
@@ -66,7 +72,10 @@ async function saveSettings() {
 
 // Where the library lives (the user can choose it in Settings).
 function libraryDir() {
-  return settings.libraryDir || path.join(app.getPath('pictures'), 'ILLUMinator');
+  if (settings.libraryDir) return settings.libraryDir;
+  // The app was called ILLUMinator: a library already made under that name stays there (a case-sensitive file system tells the two apart).
+  const legacy = path.join(app.getPath('pictures'), 'ILLUMinator');
+  return fs.existsSync(legacy) ? legacy : path.join(app.getPath('pictures'), 'Illuminator');
 }
 
 // A path inside the library from one the app gives ('Photos/IMG_0001/...').
@@ -467,7 +476,7 @@ async function offerLinuxMenuEntry() {
     if (res.checkboxChecked) {
       const desktop = app.getPath('desktop');
       await fsp.mkdir(desktop, { recursive: true });
-      await fsp.writeFile(path.join(desktop, 'ILLUMinator.desktop'), entry, { mode: 0o755 });
+      await fsp.writeFile(path.join(desktop, 'Illuminator.desktop'), entry, { mode: 0o755 });
     }
     settings.menuEntry = 'added';
     await saveSettings();

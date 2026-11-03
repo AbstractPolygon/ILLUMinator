@@ -6,7 +6,7 @@
 
 - **Windows:** the `-x64.exe` for most PCs (Intel and AMD), the `-arm64.exe` for ARM PCs (such as Snapdragon). It installs into Program Files, adds Illuminator to the Start menu, and the last page of the installer has a checkbox to put a shortcut on the desktop.
 - **macOS:** the `-arm64.dmg` for Apple Silicon, the `-x64.dmg` for Intel. The app is not code signed: right-click it and choose *Open* the first time.
-- **Linux:** the `.deb` for Debian and Ubuntu (`sudo apt install ./ILLUMinator-*.deb`), or the `.AppImage` for other distributions (`chmod +x` it, then run it). The `.deb` adds Illuminator to the applications menu. The first time an AppImage runs it asks whether to add itself to the applications menu, with a checkbox for a desktop shortcut; it only writes into your home folder.
+- **Linux:** the `.deb` for Debian and Ubuntu (`sudo apt install ./Illuminator-*.deb`), or the `.AppImage` for other distributions (`chmod +x` it, then run it). The `.deb` adds Illuminator to the applications menu. The first time an AppImage runs it asks whether to add itself to the applications menu, with a checkbox for a desktop shortcut; it only writes into your home folder.
 
 Or run it from source (Node.js 20 or newer):
 
@@ -19,7 +19,7 @@ npm start
 
 `npm run dist` builds an installer for your system (Windows, macOS, Linux).
 
-**Browser.** Each release also has the web version, `ILLUMinator-<version>-web.zip`: unzip it and upload what is inside to any web server (served over HTTPS). Or serve the `app` folder of the source; nothing to install for the people who use it.
+**Browser.** Each release also has the web version, `Illuminator-<version>-web.zip`: unzip it and upload what is inside to any web server (served over HTTPS). Or serve the `app` folder of the source; nothing to install for the people who use it.
 
 ```
 npm run web            # http://localhost:8080

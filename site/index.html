@@ -602,8 +602,8 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       for (const box of document.querySelectorAll('.dl')) {
         let best = null;
         for (const a of box.querySelectorAll('.dl-file')) {
-          // "ILLUMinator-0.5.30-win-x64.exe" -> "win-x64.exe"
-          const suffix = decodeURIComponent(a.href.split('/').pop()).replace(/^ILLUMinator-[^-]+-/, '');
+          // "Illuminator-0.5.52-win-x64.exe" (or "ILLUMinator-0.5.30-win-x64.exe" of older releases) -> "win-x64.exe"
+          const suffix = decodeURIComponent(a.href.split('/').pop()).replace(/^illuminator-[^-]+-/i, '');
           for (const rel of published) {
             const asset = (rel.assets || []).find((x) => x.name.endsWith('-' + suffix));
             if (!asset) continue;
