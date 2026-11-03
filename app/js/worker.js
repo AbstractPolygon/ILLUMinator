@@ -27,6 +27,7 @@ import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhi
 import { makeDetail, applyDetail, detailForSize, engineUnsharp, engineUsmMap, totalGain } from './core/detail.js';
 import { engineDenoise, engineNrTables, NR_SPACE } from './core/enginenr.js';
 import { engineModulation } from './core/enginemod.js';
+import { engineModulationGpu, engineModulationGpuAvailable } from './gpu/enginemod.js';
 import { guideDepthEdges } from './core/depthguide.js';
 import { nrFilterGpu, nrFilterTex } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
@@ -637,6 +638,7 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
   // The processed version kept with the photo (core/processed-cache.js), if there is one: the depth the engine's way, and the focus offset.
   state.depthCacheIn = depthCache;
   state.depthCacheOut = null;
+  state.openOut = null;
   // A Lytro Desktop depth map kept with the photo replaces the measured one.
   state.userDepth = userDepth;
   state.gen++;
@@ -694,12 +696,25 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     state.usmMap = null;
     if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
       try {
-        state.modulation = await loadModulation(state.lf);
-        lap('modulation');
-        state.engineScale = state.modulation ? engineColorScale(state.modulation, state.lf.cam, state.dev, state.lf.grid) : null;
-        lap('colourScale');
-        state.engineWb = state.modulation ? computeEngineWb() : null;
-        lap('whiteBalance');
+        const kept = usableOpenCache(state.depthCacheIn && state.depthCacheIn.open);
+        state.openOut = kept;
+        if (kept) {
+          // Worked out when the photo was opened before: the modulation frame is read only if a render needs it.
+          state.engineScale = kept.scale;
+          state.engineWb = kept.wb || null;
+          lap('fromKept');
+        } else {
+          state.modulation = await loadModulation(state.lf);
+          lap('modulation');
+          state.engineScale = state.modulation ? engineColorScale(state.modulation, state.lf.cam, state.dev, state.lf.grid) : null;
+          lap('colourScale');
+          state.engineWb = state.modulation ? computeEngineWb() : null;
+          lap('whiteBalance');
+          if (finite3(state.engineScale)) {
+            state.openOut = { key: openCacheKey(), scale: Array.from(state.engineScale), wb: state.engineWb ? { gains: Array.from(state.engineWb.gains), rel: Array.from(state.engineWb.rel), cct: state.engineWb.cct } : null };
+            postDepthCache();
+          }
+        }
       } catch (e) {
         console.error('ENGINESCALE failed', e && e.message);
         state.modulation = undefined;
@@ -1731,7 +1746,7 @@ async function ensureDepth(id) {
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
     if (style === 'combined' || style === 'match') {
-      const kept = state.depthCacheIn && state.depthCacheIn.key === depthCacheKey() && style === 'match' && engineDepthAvailable() ? state.depthCacheIn : null;
+      const kept = state.depthCacheIn && state.depthCacheIn.alpha.length && state.depthCacheIn.key === depthCacheKey() && style === 'match' && engineDepthAvailable() ? state.depthCacheIn : null;
       // With the processed version kept, the depth views are not rendered again; only their raster size is needed.
       if (kept) state.engineViews = Object.assign([], { raster: { w: kept.w, h: kept.h } });
       else await prepareEngineViews(id);
@@ -1857,7 +1872,17 @@ async function loadModulation(lf) {
     hot = null;
   }
   try {
-    const plane = engineModulation(raw, lf.cam, state.dev, lf.grid, hot);
+    let plane = null;
+    // On the graphics card where there is one (gpu/enginemod.js): the same plane to within 32 bit precision, without the six passes over the sensor on the CPU.
+    if (state.gpu && state.settings.engineModulationGpu !== false && !dbg.noGpuModulation && engineModulationGpuAvailable(state.gpu, lf.cam)) {
+      try {
+        plane = engineModulationGpu(state.gpu, raw, lf.cam, state.dev, lf.grid, hot);
+      } catch (e) {
+        console.warn('The modulation plane could not be built on the GPU; using the CPU:', e && e.message);
+        plane = null;
+      }
+    }
+    if (!plane) plane = engineModulation(raw, lf.cam, state.dev, lf.grid, hot);
     // the engine's white balance reads the plain frame (its image is divided by the frame over its mean), not the demodulation plane
     plane.frame = raw;
     return plane;
@@ -1985,14 +2010,31 @@ function depthCacheKey() {
 }
 function depthCacheFor(raster) {
   const c = state.depthCacheIn;
-  return c && raster && c.key === depthCacheKey() && c.w === raster.w && c.h === raster.h ? c : null;
+  return c && c.alpha.length && raster && c.key === depthCacheKey() && c.w === raster.w && c.h === raster.h ? c : null;
 }
-// Tells the page to keep the measurement (and the focus offset) with the photo.
+// What opening the photo works out (the engine's colour units and white balance, from its modulation frame), kept with the photo so reopening it does not read and
+// process that frame (about 3 s on a full sensor). The key says what it was worked out with.
+const OPEN_CACHE_FORMAT = 1;
+function openCacheKey() {
+  const s = state.settings;
+  return JSON.stringify({ app: VERSION, format: OPEN_CACHE_FORMAT, photo: state.lf && state.lf.photoId, hot: s.hotPixels !== false, wb: s.engineWb !== false, mod: s.engineModulation !== false });
+}
+const finite3 = (a) => Array.isArray(a) && a.length === 3 && a.every(Number.isFinite);
+function usableOpenCache(o) {
+  if (!o || o.key !== openCacheKey() || !finite3(o.scale)) return null;
+  if (o.wb && !(finite3(o.wb.gains) && finite3(o.wb.rel) && Number.isFinite(o.wb.cct))) return null;
+  return o;
+}
+// Tells the page to keep the measurement (and the focus offset, and what opening worked out) with the photo.
 function postDepthCache() {
-  const c = state.depthCacheOut;
-  if (!c || state.pp || !state.lf || !state.lf.photoId) return;
-  const alpha = Float32Array.from(c.alpha);
-  post({ type: 'cache', photoId: state.lf.photoId, cache: { key: c.key, w: c.w, h: c.h, alpha, focusOffset: state.focusOffset } }, [alpha.buffer]);
+  if (state.pp || !state.lf || !state.lf.photoId) return;
+  const kept = state.depthCacheIn && state.depthCacheIn.alpha.length && state.depthCacheIn.key === depthCacheKey() ? state.depthCacheIn : null;
+  const c = state.depthCacheOut || kept;
+  const open = state.openOut || undefined;
+  if (!c && !open) return;
+  const alpha = c ? Float32Array.from(c.alpha) : new Float32Array(0);
+  const focusOffset = Number.isFinite(state.focusOffset) ? state.focusOffset : c && c.focusOffset;
+  post({ type: 'cache', photoId: state.lf.photoId, cache: { key: c ? c.key : depthCacheKey(), w: c ? c.w : 0, h: c ? c.h : 0, alpha, focusOffset, open } }, [alpha.buffer]);
 }
 
 function measureLytro(progress) {

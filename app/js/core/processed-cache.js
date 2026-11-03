@@ -10,9 +10,11 @@ export const PROCESSED_FILE = 'processed.illuminator.bin';
 const MAGIC = 0x434c5049; // 'ILPC' read as a little endian uint32
 const FORMAT = 1;
 
-// { key, w, h, alpha: Float32Array, focusOffset?: number } -> Uint8Array
-export function encodeProcessed({ key, w, h, alpha, focusOffset }) {
-  const header = new TextEncoder().encode(JSON.stringify({ key, w, h, focusOffset: Number.isFinite(focusOffset) ? focusOffset : null }));
+// { key, w, h, alpha: Float32Array, focusOffset?: number, open?: object } -> Uint8Array
+// `open` (any JSON) is what opening the photo works out and would otherwise work out again (the engine's colour units and white balance, with its own key);
+// w and h are 0 and alpha empty while the depth has not been measured yet.
+export function encodeProcessed({ key, w, h, alpha, focusOffset, open }) {
+  const header = new TextEncoder().encode(JSON.stringify({ key, w, h, focusOffset: Number.isFinite(focusOffset) ? focusOffset : null, open: open || null }));
   const padded = Math.ceil(header.length / 4) * 4;
   const out = new Uint8Array(12 + padded + alpha.length * 4);
   const view = new DataView(out.buffer);
@@ -34,8 +36,8 @@ export function decodeProcessed(buffer) {
     const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 12, length)));
     const at = 12 + Math.ceil(length / 4) * 4;
     const n = header.w * header.h;
-    if (!(n > 0) || buffer.byteLength < at + n * 4) return null;
-    return { key: header.key, w: header.w, h: header.h, focusOffset: Number.isFinite(header.focusOffset) ? header.focusOffset : undefined, alpha: new Float32Array(buffer.slice(at, at + n * 4)) };
+    if (!(n >= 0) || (n === 0 && !header.open) || buffer.byteLength < at + n * 4) return null;
+    return { key: header.key, w: header.w, h: header.h, focusOffset: Number.isFinite(header.focusOffset) ? header.focusOffset : undefined, open: header.open || undefined, alpha: new Float32Array(buffer.slice(at, at + n * 4)) };
   } catch {
     return null;
   }

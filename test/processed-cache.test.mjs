@@ -26,3 +26,14 @@ test('damaged or foreign files are not used', () => {
   const good = encodeProcessed({ key: 'k', w: 4, h: 4, alpha: new Float32Array(16) });
   assert.equal(decodeProcessed(buf(good.subarray(0, good.length - 8))), null, 'cut short');
 });
+
+test('what opening worked out is kept, with or without the depth', () => {
+  const open = { key: 'o', scale: [0.5, 0.6, 0.7], wb: { gains: [1.2, 1, 1.3], rel: [1, 1, 1], cct: 5000 } };
+  const only = decodeProcessed(buf(encodeProcessed({ key: 'k', w: 0, h: 0, alpha: new Float32Array(0), open })));
+  assert.deepEqual(only.open, open);
+  assert.equal(only.alpha.length, 0);
+  const both = decodeProcessed(buf(encodeProcessed({ key: 'k', w: 2, h: 2, alpha: Float32Array.of(1, 2, 3, 4), focusOffset: 0.5, open })));
+  assert.deepEqual(both.open, open);
+  assert.deepEqual([...both.alpha], [1, 2, 3, 4]);
+  assert.equal(decodeProcessed(buf(encodeProcessed({ key: 'k', w: 0, h: 0, alpha: new Float32Array(0) }))), null, 'nothing kept');
+});

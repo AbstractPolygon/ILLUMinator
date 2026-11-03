@@ -13,7 +13,7 @@
 import { MOD_CURVE_B64 } from './enginemod-tables.js';
 
 let CURVE = null;
-function curve() {
+export function curve() {
   if (CURVE) return CURVE;
   const bin = typeof atob === 'function' ? atob(MOD_CURVE_B64) : Buffer.from(MOD_CURVE_B64, 'base64').toString('binary');
   const bytes = new Uint8Array(bin.length);
@@ -23,7 +23,7 @@ function curve() {
 }
 
 // phase index of (x, y): (y & 1) * 2 + (x & 1); the curve channel of each phase (R 0, Gr 1, B 2, Gb 3: green is Gr on the row that holds red)
-function phaseChannels(cfa) {
+export function phaseChannels(cfa) {
   const out = [0, 0, 0, 0];
   for (let py = 0; py < 2; py++) {
     const rowHasRed = cfa[py][0] === 0 || cfa[py][1] === 0;
