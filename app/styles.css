@@ -731,7 +731,8 @@ label.lut-amount { margin-top: 14px; }
 
 #camera-dialog-source { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 40vh; overflow: auto; }
 
-.models-list { display: flex; flex-direction: column; gap: 6px; }
+.models-list { display: flex; flex-direction: column; gap: 0; }
+.models-list .model-row { margin: 0; padding: 1px 0; }
 .model-row .model-state { margin-left: auto; }
 
 .mem-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; margin: 0 0 10px; }
