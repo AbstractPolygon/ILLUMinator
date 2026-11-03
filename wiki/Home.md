@@ -10,10 +10,10 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 
 ## Start here
 
-- [[Getting Started]]: install, open your first photo, find your way around
-- [[Library and Albums]]: where photos and edits are kept, organizing with albums
-- [[Importing]]: from Lytro Desktop, from files
-- [[Editing]]: the photo viewer, and every panel:
+- [[Getting Started]]
+- [[Library and Albums]]
+- [[Importing]]
+- [[Editing]]
   - [[Histogram and Info]]
   - [[Crop]]
   - [[Process]]
@@ -24,7 +24,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
   - [[Animation]]
   - [[Render]]
   - [[Microlens Grid]]
-- [[Exporting]]: stills, full sensor renders and videos
+- [[Exporting]]
 - [[Keyboard Shortcuts]]
 - [[File Formats]]
 - [[Troubleshooting]]
