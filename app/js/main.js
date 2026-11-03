@@ -6020,6 +6020,8 @@ function showAnimationEnabled() {
   $('anim-controls').disabled = !on;
   const camera = state.mode === 'camera';
   for (const id of ['stop-btn', 'pause-btn', 'play-btn', 'loop-btn', 'webm-btn', 'scrub']) $(id).disabled = !state.info || !camera || !on;
+  // The keyframe controls in the sidebar show only while animation is enabled.
+  updateKeyButtons();
 }
 $('anim-on').onchange = () => {
   if (!$('anim-on').checked) {
