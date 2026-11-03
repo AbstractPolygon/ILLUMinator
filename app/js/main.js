@@ -9,6 +9,7 @@ import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
 import { connectWebUsb, downloadPicture } from './camera/webusb.js';
+import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -646,9 +647,25 @@ async function openItem(photo) {
   renderLibrary();
   const bytes = await file.arrayBuffer();
   const userDepth = await readUserDepth(photo);
-  await openWith({ bytes, userDepth }, userDepth ? [bytes, userDepth.data.buffer] : [bytes]);
+  // Desktop app: the processed version kept next to the photo, so the depth is not measured again (core/processed-cache.js).
+  const depthCache = native ? decodeProcessed(await lib.processed(photo).catch(() => null)) : null;
+  const transfer = [bytes];
+  if (userDepth) transfer.push(userDepth.data.buffer);
+  if (depthCache) transfer.push(depthCache.alpha.buffer);
+  await openWith({ bytes, userDepth, depthCache }, transfer);
   if (state.info && state.current && state.current.photo === photo) lib.setPhotoId(photo, state.info.photoId).catch(() => {});
 }
+
+// The worker measured something worth keeping (the depth, the focus offset): saved next to the photo, a moment after the last change.
+let processedTimer = null;
+engine.onCache = (msg) => {
+  if (!native || !state.current || !state.info || state.info.photoId !== msg.photoId) return;
+  const photo = state.current.photo;
+  clearTimeout(processedTimer);
+  processedTimer = setTimeout(() => {
+    lib.saveProcessed(photo, encodeProcessed(msg.cache)).catch((err) => console.warn('Could not save the processed version', err));
+  }, 1500);
+};
 
 // The depth map from Lytro Desktop, kept with the photo when its library
 // was imported: used instead of measuring depth (core/userdepth.js). An

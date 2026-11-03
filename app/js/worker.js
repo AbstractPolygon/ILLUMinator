@@ -17,6 +17,7 @@ import { pickObjects, signatures } from './core/objects.js';
 import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
 import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
+import { VERSION } from './version.js';
 import { removePeriodicPattern } from './core/notch.js';
 import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
 import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
@@ -543,8 +544,11 @@ function requireRaw() {
   if (!state.lf || !state.lf.raw) throw new Error('No light field loaded');
 }
 
-async function open({ id, bytes, synthetic, userDepth = null }) {
+async function open({ id, bytes, synthetic, userDepth = null, depthCache = null }) {
   state.lf = null;
+  // The processed version kept with the photo (core/processed-cache.js), if there is one: the depth the engine's way, and the focus offset.
+  state.depthCacheIn = depthCache;
+  state.depthCacheOut = null;
   // A Lytro Desktop depth map kept with the photo replaces the measured one.
   state.userDepth = userDepth;
   state.gen++;
@@ -807,6 +811,10 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   // The depth is a little off from where this photo's rays meet (Lytro's by
   // an amount that differs from photo to photo): find by how much, once per
   // photo, and move the depth map by it.
+  if (state.focusOffset === undefined && state.depthCacheIn && state.depthCacheIn.key === depthCacheKey() && Number.isFinite(state.depthCacheIn.focusOffset)) {
+    state.focusOffset = state.depthCacheIn.focusOffset;
+    applyDepthSmoothing();
+  }
   if (allInFocus && state.depth && state.focusOffset === undefined) {
     progress('Finding the focus', 0);
     const probeBase = await allInFocusBase(id, u, v);
@@ -818,6 +826,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     globalThis.__focusMetrics = probe.metrics;
     state.focusOffset = probe.focusOffset;
     globalThis.__focusOffset = state.focusOffset;
+    postDepthCache();
     if (globalThis.__probeOnly) return { cancelled: true };
     applyDepthSmoothing();
   }
@@ -1606,7 +1615,12 @@ async function ensureDepth(id) {
     state.depthParts = null;
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
-    if (style === 'combined' || style === 'match') await prepareEngineViews(id);
+    if (style === 'combined' || style === 'match') {
+      const kept = state.depthCacheIn && state.depthCacheIn.key === depthCacheKey() && style === 'match' && engineDepthAvailable() ? state.depthCacheIn : null;
+      // With the processed version kept, the depth views are not rendered again; only their raster size is needed.
+      if (kept) state.engineViews = Object.assign([], { raster: { w: kept.w, h: kept.h } });
+      else await prepareEngineViews(id);
+    }
     try {
       if (style === 'combined') {
         const classic = measureClassic(id, fast, report(0, 0.4));
@@ -1826,6 +1840,24 @@ function engineViewMatrix() {
 
 // The Lytro-style depth (core/depthmatch.js): on the GPU when there is one,
 // and on the CPU if the GPU cannot do it. Returns the finished, unsmoothed depth.
+// The processed version of the photo (core/processed-cache.js): what the depth the engine's way was measured with. A cache with another key is not used.
+const DEPTH_CACHE_FORMAT = 1;
+function depthCacheKey() {
+  const s = state.settings;
+  return JSON.stringify({ app: VERSION, format: DEPTH_CACHE_FORMAT, photo: state.lf && state.lf.photoId, detail: s.detail, hot: s.hotPixels !== false });
+}
+function depthCacheFor(raster) {
+  const c = state.depthCacheIn;
+  return c && raster && c.key === depthCacheKey() && c.w === raster.w && c.h === raster.h ? c : null;
+}
+// Tells the page to keep the measurement (and the focus offset) with the photo.
+function postDepthCache() {
+  const c = state.depthCacheOut;
+  if (!c || state.pp || !state.lf || !state.lf.photoId) return;
+  const alpha = Float32Array.from(c.alpha);
+  post({ type: 'cache', photoId: state.lf.photoId, cache: { key: c.key, w: c.w, h: c.h, alpha, focusOffset: state.focusOffset } }, [alpha.buffer]);
+}
+
 function measureLytro(progress) {
   const raster = state.engineViews && state.engineViews.raster;
   const { outW, outH } = raster ? { outW: raster.w, outH: raster.h } : state.sampler;
@@ -1855,12 +1887,23 @@ function measureLytro(progress) {
   }
   if ((globalThis.__lytro || {}).depthViews && globalThis.__lytro.depthViews.single) DEPTH_PASSES.refs = [4];
   let measured = null;
-  if (raster && !(globalThis.__lytro || {}).oldEstimator && state.engineViews) {
+  const kept = !(globalThis.__lytro || {}).oldEstimator ? depthCacheFor(raster) : null;
+  if (kept) {
+    measured = { alpha: Float32Array.from(kept.alpha), cost: null, meanCost: null };
+    state.depthCacheOut = { key: kept.key, w: kept.w, h: kept.h, alpha: kept.alpha };
+  }
+  let engineMeasured = false;
+  if (!measured && raster && !(globalThis.__lytro || {}).oldEstimator && state.engineViews) {
+    engineMeasured = true;
     // The engine's own estimator on its views (core/enginedepth.js): in the engine's order, the centre last.
     const colors = viewColors(depthViews(), outW * outH, outW, outH);
     const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
     const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuCost) ? (v, w, h, labels) => engineCostVolumeGpu(state.gpu, v, w, h, labels) : null, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuSolve) ? (cost, guide, w, h, labels, prog) => engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog) : null);
     measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
+  }
+  if (engineMeasured && measured) {
+    state.depthCacheOut = { key: depthCacheKey(), w: raster.w, h: raster.h, alpha: measured.alpha };
+    postDepthCache();
   }
   if (!measured && state.gpu) {
     try {

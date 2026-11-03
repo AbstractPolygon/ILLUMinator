@@ -27,6 +27,7 @@ export const LIBRARY_VERSION = 1;
 export const EDITS_FILE = 'edits.illuminator.json';
 const INDEX = 'library.json';
 const PHOTOS = 'Photos';
+import { PROCESSED_FILE } from '../core/processed-cache.js';
 
 const LIGHT_FIELD = /\.(lfr|lfp|raw)$/i;
 
@@ -252,6 +253,16 @@ export class Library {
     const dir = `${PHOTOS}/${photo.id}`;
     const [image, range] = await Promise.all([this.store.file(`${dir}/${photo.depthMap}`), this.store.file(`${dir}/${photo.depthRange}`)]);
     return image && range ? { image, range } : null;
+  }
+
+  // The processed version ILLUMinator keeps next to the photo (core/processed-cache.js), as an ArrayBuffer, or null.
+  async processed(photo) {
+    const f = await this.store.file(`${PHOTOS}/${photo.id}/${PROCESSED_FILE}`).catch(() => null);
+    return f ? f.arrayBuffer() : null;
+  }
+
+  saveProcessed(photo, bytes) {
+    return this.store.writeBlob(`${PHOTOS}/${photo.id}/${PROCESSED_FILE}`, new Blob([bytes]));
   }
 
   // The photo's Lytro Desktop stack.lfp (holding the depth Lytro computed), or null.

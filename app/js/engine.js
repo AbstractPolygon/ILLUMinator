@@ -17,6 +17,10 @@ export class Engine {
       if (this.onNotice) this.onNotice(msg.message);
       return;
     }
+    if (msg.type === 'cache') {
+      if (this.onCache) this.onCache(msg);
+      return;
+    }
     const p = this.pending.get(msg.id);
     if (!p) return;
     if (msg.type === 'progress') {
