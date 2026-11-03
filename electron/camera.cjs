@@ -303,16 +303,58 @@ async function listCameras({ roots, adb = true, lytro = true } = {}) {
   return usbFound.concat(drives, adb ? await scanAdb() : []);
 }
 
-// An LFP file from the three parts a first generation camera hands out for
-// a picture: RAW (sensor data), TXT (metadata, JSON) and 128 (thumbnail).
-async function assembleLfp({ raw, txt }) {
+// A PNG of 8 bit RGB pixels (a first generation camera's thumbnail may be raw).
+function crc32(buf) {
+  let c;
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    c = (crc ^ buf[i]) & 0xff;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crc = (crc >>> 8) ^ c;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngOfRgb(rgb, width, height) {
+  const chunk = (type, data) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, 'latin1');
+    data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // RGB
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) rgb.copy(rows, y * (width * 3 + 1) + 1, y * width * 3, (y + 1) * width * 3);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', require('node:zlib').deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+// The picture of a first generation camera's thumbnail file (.128): a JPEG as it is, raw 8 bit RGB squares as a PNG, anything else null.
+function thumbnailPicture(data) {
+  if (!data || data.length < 16) return null;
+  if (data[0] === 0xff && data[1] === 0xd8) return { mime: 'image/jpeg', bytes: data, width: 128, height: 128 };
+  const side = Math.round(Math.sqrt(data.length / 3));
+  if (side * side * 3 === data.length) return { mime: 'image/png', bytes: pngOfRgb(data, side, side), width: side, height: side };
+  return null;
+}
+
+// An LFP file from the parts a first generation camera hands out for a picture: RAW (sensor data), TXT (metadata, JSON) and 128 (thumbnail, optional).
+// The TXT file is { master: { picture: { frameArray: [{ frame: { metadata, privateMetadata } }] } }, compressedFrame, debug }: the frame's metadata is inside `master`.
+async function assembleLfp({ raw, txt, thumb = null }) {
   const lfp = await import(pathToFileURL(path.join(__dirname, '..', 'app', 'js', 'core', 'lfp.js')).href);
   const parsed = JSON.parse(txt.toString('utf8').replace(/\0+$/, ''));
-  const metadata = parsed.metadata || parsed;
-  const privateMetadata = parsed.privateMetadata || parsed.private || {};
+  const inner = parsed.master && parsed.master.picture && parsed.master.picture.frameArray && parsed.master.picture.frameArray[0] && parsed.master.picture.frameArray[0].frame;
+  const metadata = inner && inner.metadata ? inner.metadata : parsed.metadata || parsed;
+  const privateMetadata = (inner && inner.privateMetadata) || parsed.privateMetadata || parsed.private || {};
   const metaBytes = lfp.encodeJson(metadata);
   const privBytes = lfp.encodeJson(privateMetadata);
   const rawBytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.length);
+  const picture = thumbnailPicture(thumb);
   const toc = {
     picture: {
       frameArray: [{
@@ -324,13 +366,38 @@ async function assembleLfp({ raw, txt }) {
       }],
     },
   };
-  const { bytes } = await lfp.writeContainer([
+  const sections = [
     { type: 'LFC', data: metaBytes },
     { type: 'LFC', data: privBytes },
     { type: 'LFC', data: rawBytes },
-    { type: 'LFM', data: lfp.encodeJson(toc) },
-  ]);
+  ];
+  if (picture) {
+    const thumbBytes = new Uint8Array(picture.bytes.buffer, picture.bytes.byteOffset, picture.bytes.length);
+    toc.thumbnailArray = [{ imageRef: await lfp.refFor(thumbBytes), width: picture.width, height: picture.height, representation: picture.mime === 'image/png' ? 'png' : 'jpeg' }];
+    sections.push({ type: 'LFC', data: thumbBytes });
+  }
+  sections.push({ type: 'LFM', data: lfp.encodeJson(toc) });
+  const { bytes } = await lfp.writeContainer(sections);
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+}
+
+// The thumbnail of a picture on a first generation camera reached over USB or its disk: { mime, bytes } or null. Kept, as asking the camera is slow.
+const thumbnailCache = new Map();
+async function lytroThumbnail(entry, fileId) {
+  const key = `${entry.id}/${fileId}`;
+  if (thumbnailCache.has(key)) return thumbnailCache.get(key);
+  const pic = entry.pictures.find((p) => p.id === fileId);
+  let result = null;
+  if (pic && entry.product === lytroUsb.FIRST_GENERATION_PRODUCT) {
+    try {
+      const t = thumbnailPicture(await entry.camera.download('file', LytroCamera.pathOf(pic, '128')));
+      result = t ? { mime: t.mime, bytes: t.bytes } : null;
+    } catch (err) {
+      log(`no thumbnail for ${pic.name}: ${err.message}`);
+    }
+  }
+  thumbnailCache.set(key, result);
+  return result;
 }
 
 // A picture off a camera on its own USB protocol: the ILLUM's single
@@ -350,7 +417,8 @@ async function downloadLytroPicture(entry, file) {
   }
   const raw = await cam.download('file', LytroCamera.pathOf(pic, 'RAW'));
   const txt = await cam.download('file', LytroCamera.pathOf(pic, 'TXT'));
-  return { name: `${pic.folder}_${pic.name}.lfp`, data: await assembleLfp({ raw, txt }) };
+  const thumb = await cam.download('file', LytroCamera.pathOf(pic, '128')).catch(() => null);
+  return { name: `${pic.folder}_${pic.name}.lfp`, data: await assembleLfp({ raw, txt, thumb }) };
 }
 
 function copyWithProgress(src, dest, onBytes) {
@@ -435,4 +503,4 @@ async function fileReader(file) {
   };
 }
 
-module.exports = { pullUsbCalibration, pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };
+module.exports = { lytroThumbnail, thumbnailPicture, pullUsbCalibration, pullDriveCalibration, driveInfo, pullAdbCalibration, usbProblems, usbDiagnostics, assembleLfp, LYTRO_USB_VENDOR, isLytroUsb, listCameras, importFiles, scanVolume, volumeRoots, parseLsLong, fileReader, LIGHT_FIELD };

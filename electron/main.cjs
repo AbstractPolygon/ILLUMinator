@@ -282,6 +282,7 @@ function registerIpc() {
   // Thumbnail of a photo on a camera drive, reading only the thumbnail.
   ipcMain.handle('camera-thumbnail', async (_e, cameraId, fileId) => {
     const c = findCamera(cameraId);
+    if (c.kind === 'lytro') return camera.lytroThumbnail(c, fileId);
     if (c.kind !== 'drive') return null;
     const { readThumbnail } = await lfpModule();
     const reader = await camera.fileReader(checkAllowed(fileId));

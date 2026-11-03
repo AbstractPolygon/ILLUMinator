@@ -308,6 +308,16 @@ export async function readLightFieldPicture(reader) {
     privateMetadata = json.get(frame.privateMetadataRef) || frame.privateMetadata || null;
     rawRef = frame.imageRef || null;
   }
+  // A first generation camera's own .TXT file (what earlier versions of the app stored as the picture's metadata when importing from the camera):
+  // { master: { picture: { frameArray: [{ frame: { metadata, privateMetadata } }] } }, compressedFrame, debug }. The frame's own metadata is inside.
+  if (metadata && !metadata.image && metadata.master) {
+    const inner = asArray(metadata.master.picture && metadata.master.picture.frameArray)[0];
+    const innerFrame = inner && inner.frame;
+    if (innerFrame && innerFrame.metadata) {
+      metadata = innerFrame.metadata;
+      if (!privateMetadata || !Object.keys(privateMetadata).length) privateMetadata = innerFrame.privateMetadata || privateMetadata;
+    }
+  }
   const compressed = asArray(toc.frames).some((f) => asArray(f && f.accelerations).some((a) => a && a.kind === 'compressed'));
   const thumbnails = findThumbnailRefs(toc);
   const loadDepth = async (d) => {
