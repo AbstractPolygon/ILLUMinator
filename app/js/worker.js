@@ -49,6 +49,9 @@ import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpat
 import { GpuRenderer } from './gpu/renderer.js';
 import { lytroSplatGpu } from './gpu/lytroengine.js';
 
+// Requests whose picture is wanted at 16 bits per channel (see finishGpu).
+const bits16Ids = new Set();
+
 const state = {
   lut: null, // the photo's LUT (core/lut.js), or null
   lf: null,
@@ -444,7 +447,7 @@ function packedMasks(ctx) {
 // The color pass: color, defringing, local adjustments and tone mapping.
 // The engine's noise reduction wholly on the GPU: the colour matrix (lens and flare before it), the filter between two textures, then the tone, defringe, local adjustments and
 // sharpening of the usual present. Returns the picture as an ImageBitmap; throws where a step is not possible (the CPU path follows).
-function nrOnGpu(tex, w, h, packed, cs, distortionCorrected) {
+function nrOnGpu(tex, w, h, packed, cs, distortionCorrected, bits16 = false) {
   const gpu = state.gpu;
   const gl = gpu.gl;
   if (w < 40 || h < 40) throw new Error('picture too small');
@@ -460,7 +463,7 @@ function nrOnGpu(tex, w, h, packed, cs, distortionCorrected) {
     });
     const tables = engineNrTables({ gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 });
     clean = nrFilterTex(gpu, lin, w, h, tables, NR_SPACE);
-    return gpu.present(clean, w, h, {
+    return gpu[bits16 ? 'presentBits16' : 'present'](clean, w, h, {
       matrix: IDENTITY,
       exposure: 1,
       fringe: cs.settings.defringe,
@@ -481,8 +484,11 @@ function nrOnGpu(tex, w, h, packed, cs, distortionCorrected) {
 // the filter done by a later 'final' view (message.nrDeferred tells the page to ask for it), both leave it out; 'final' does it without the preview picture; otherwise a picture without it
 // is sent first as a preview frame, then the finished one.
 function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected = false, ctx = undefined, mode = undefined) {
-  // The color pass on the GPU: an ImageBitmap.
-  const presentBitmap = () => state.gpu.present(tex, w, h, {
+  // A picture saved at 16 bits per channel (the page asked with bits16): RGB values instead of an ImageBitmap; where a step can only run on the CPU the usual 8-bit picture comes back and the page says so.
+  const bits16 = message && bits16Ids.has(message.id);
+  const send = (pic) => (pic instanceof Uint16Array ? post({ ...message, width: w, height: h, pixels16: pic.buffer }, [pic.buffer]) : post({ ...message, width: w, height: h, bitmap: pic }, [pic]));
+  // The color pass on the GPU: an ImageBitmap (or the 16-bit values).
+  const presentBitmap = () => state.gpu[bits16 ? 'presentBits16' : 'present'](tex, w, h, {
     matrix: cs.matrix,
     exposure: cs.baseExposure * Math.pow(2, cs.settings.ev),
     fringe: cs.settings.defringe,
@@ -503,16 +509,16 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
   } else if (nr) {
     if (!(globalThis.__lytro && globalThis.__lytro.noGpuNr)) {
       try {
-        const bitmap = nrOnGpu(tex, w, h, packed, cs, distortionCorrected);
+        const pic = nrOnGpu(tex, w, h, packed, cs, distortionCorrected, bits16);
         state.gpuNr = true;
-        post({ ...message, width: w, height: h, bitmap }, [bitmap]);
+        send(pic);
         return;
       } catch (e) {
         state.gpuNr = false;
         gpuFellBack('The noise reduction', e);
       }
     }
-    if (mode !== 'final' && message.type === 'result' && message.id != null) {
+    if (mode !== 'final' && !bits16 && message.type === 'result' && message.id != null) {
       const preview = presentBitmap();
       post({ id: message.id, type: 'frame', index: -1, preview: true, width: w, height: h, bitmap: preview }, [preview]);
     }
@@ -527,8 +533,7 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
     post({ ...message, width: w, height: h, pixels: pixels.buffer }, [pixels.buffer]);
     return;
   }
-  const bitmap = presentBitmap();
-  post({ ...message, width: w, height: h, bitmap }, [bitmap]);
+  send(presentBitmap());
 }
 
 // The viewpoint for masks that follow it (see resolveMasks).
@@ -2612,11 +2617,14 @@ const handlers = { setLut, setCalibrations, measureWhite: measureWhiteImage, ope
 self.onmessage = async (event) => {
   const msg = event.data;
   const handler = handlers[msg.type];
+  if (msg.bits16) bits16Ids.add(msg.id);
   try {
     if (!handler) throw new Error(`Unknown request ${msg.type}`);
     const result = await handler(msg);
     if (result !== undefined) post({ id: msg.id, type: 'result', result });
   } catch (err) {
     post({ id: msg.id, type: 'error', message: err && err.message ? err.message : String(err) });
+  } finally {
+    bits16Ids.delete(msg.id);
   }
 };

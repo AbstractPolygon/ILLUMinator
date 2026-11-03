@@ -11,6 +11,7 @@ import { importCalibration, listCalibrations, loadCalibration, removeCalibration
 import { connectWebUsb, downloadPicture } from './camera/webusb.js';
 import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
 import { hashKey, stillKeyText } from './core/still-cache.js';
+import { encodePng16 } from './core/png16.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
@@ -5176,15 +5177,55 @@ function enlargeForSave(source) {
 
 // Photo > File format: PNG, or JPEG at its quality.
 function savePhoto(source, name) {
+  if ($('photo-format').value === 'png16' && source === canvas && showsCamera() && !stereoShown() && state.info) {
+    savePhoto16(name);
+    return;
+  }
   const jpeg = $('photo-format').value === 'jpeg';
   const type = jpeg ? 'image/jpeg' : 'image/png';
   enlargeForSave(source).toBlob((blob) => download(blob, `${name}.${jpeg ? 'jpg' : 'png'}`), type, jpeg ? +$('photo-quality').value / 100 : undefined);
 }
 
+// PNG at 16 bits per channel: the picture on show made again by the graphics card with the high and low byte of every value kept (worker finishGpu, bits16), so the fine
+// tonal steps the 8-bit canvas drops are in the file. At the picture's own size (the Photo Size upscaling works on the 8-bit canvas). Without the graphics card, or for
+// a view that is not the picture (stereo, depth, lenslets), the usual 8-bit PNG is saved and the notice says so.
+async function savePhoto16(name) {
+  const eightBit = (why) => {
+    showNotice('Saved at 8 bits per channel', why);
+    const type = 'image/png';
+    enlargeForSave(canvas).toBlob((blob) => download(blob, `${name}.png`), type);
+  };
+  try {
+    const passes = +$('still-passes').value;
+    let msg;
+    if (state.fullRes && state.still) {
+      const { promise } = engine.job('superRes', 'superres', { ...(state.stillFrame || cameraParams()), scale: +$('still-scale').value, passes, bits16: true }, { onProgress: showProgress });
+      msg = await promise;
+    } else if (passes > 0 && state.info.hasRaw) {
+      const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: +$('detail').value, passes, label: 'Processing', bits16: true }, { onProgress: showProgress });
+      msg = await promise;
+    } else {
+      msg = await engine.request('view', { ...cameraParams(), final: true, bits16: true }, { onProgress: showProgress });
+    }
+    hideProgress();
+    if (!msg || !msg.pixels16) {
+      eightBit('A 16-bit picture needs the graphics card (and its noise reduction); this one was made without it.');
+      return;
+    }
+    const png = await encodePng16(new Uint16Array(msg.pixels16), msg.width, msg.height);
+    await download(new Blob([png], { type: 'image/png' }), `${name}.png`);
+    if ((+$('photo-size').value || 1) !== 1) showNotice('Saved at 16 bits per channel', `At the picture's own size, ${msg.width}×${msg.height}: Photo Size enlarging works on 8-bit pictures only.`);
+  } catch (err) {
+    hideProgress();
+    showError(err);
+  }
+}
+
 function showPhotoFormat() {
-  const jpeg = $('photo-format').value === 'jpeg';
+  const format = $('photo-format').value;
+  const jpeg = format === 'jpeg';
   $('photo-quality-row').hidden = !jpeg;
-  $('png-btn').textContent = jpeg ? 'Save JPEG' : 'Save PNG';
+  $('png-btn').textContent = jpeg ? 'Save JPEG' : format === 'png16' ? 'Save 16-bit PNG' : 'Save PNG';
 }
 $('photo-format').addEventListener('change', showPhotoFormat);
 $('photo-quality').oninput = () => showSliderValue($('photo-quality'));

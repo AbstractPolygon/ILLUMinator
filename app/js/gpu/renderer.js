@@ -719,6 +719,13 @@ const USM_APPLY = `${USM_COMMON}
 uniform sampler2D uBlur;
 uniform float uAmount;
 uniform float uThreshold;
+uniform int uBytePass;
+vec4 packOut(vec3 s) {
+  if (uBytePass == 0) return vec4(s, 1.0);
+  vec3 v = floor(clamp(s, 0.0, 1.0) * 65535.0 + 0.5);
+  vec3 hi = floor(v / 256.0);
+  return vec4((uBytePass == 1 ? hi : v - hi * 256.0) / 255.0, 1.0);
+}
 float labFinv(float f) { return f > 0.206893 ? f * f * f : (f - 0.137931) / 7.787037; }
 vec3 encode(vec3 x) { x = clamp(x, 0.0, 1.0); return mix(1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, x * 12.92, lessThanEqual(x, vec3(0.0031308))); }
 const mat3 SRGB_XYZ = mat3(0.4124564, 0.2126729, 0.0193339, 0.3575761, 0.7151522, 0.1191920, 0.1804375, 0.0721750, 0.9503041);
@@ -730,7 +737,7 @@ void main() {
   float L = 116.0 * labF(xyz.y) - 16.0;
   float d = L - texelFetch(uBlur, p, 0).r;
   float core = abs(d) >= uThreshold ? d - sign(d) * uThreshold : 0.0;
-  if (core == 0.0) { outColor = vec4(c.rgb, 1.0); return; }
+  if (core == 0.0) { outColor = packOut(c.rgb); return; }
   float fY = labF(xyz.y);
   float aa = 500.0 * (labF(xyz.x / 0.95047) - fY);
   float bb = 200.0 * (fY - labF(xyz.z / 1.08883));
@@ -738,7 +745,7 @@ void main() {
   float fN = (L + amount * core + 16.0) / 116.0;
   float Yn = labFinv(fN);
   vec3 xyz2 = vec3(0.95047 * labFinv(fN + aa / 500.0), Yn, 1.08883 * labFinv(fN - bb / 200.0));
-  outColor = vec4(encode(XYZ_SRGB * xyz2), 1.0);
+  outColor = packOut(encode(XYZ_SRGB * xyz2));
 }`;
 
 const DETAIL_SHARPEN = `#version 300 es
@@ -1141,6 +1148,15 @@ vec3 encodeOut(vec3 c) {
   return clamp(q, 0.0, 1.0);
 }
 
+// 16-bit export: the finished value split over two passes, one writing the high byte and the other the low byte of round(65535 * value) into 8-bit channels.
+uniform int uBytePass;
+vec4 packOut(vec3 s) {
+  if (uBytePass == 0) return vec4(s, 1.0);
+  vec3 v = floor(clamp(s, 0.0, 1.0) * 65535.0 + 0.5);
+  vec3 hi = floor(v / 256.0);
+  return vec4((uBytePass == 1 ? hi : v - hi * 256.0) / 255.0, 1.0);
+}
+
 void main() {
   ivec2 size = textureSize(uSrc, 0);
   // (the canvas has its first row at the top; a texture target keeps the rows as they are)
@@ -1189,7 +1205,7 @@ void main() {
     vec3 g = texture(uLut, q * (n - 1.0) / n + 0.5 / n).rgb;
     s = mix(s, clamp(g, 0.0, 1.0), uLutAmount);
   }
-  outColor = vec4(s, 1.0);
+  outColor = packOut(s);
 }`;
 
 // The lens correction as a position map (core/lens.js lensWarp), so the
@@ -2750,13 +2766,13 @@ export class GpuRenderer {
   }
 
   // Scratch textures by size, reused between frames.
-  scratch(w, h, name) {
-    const key = `${w}x${h}:${name}`;
+  scratch(w, h, name, internal = this.gl.RGBA16F) {
+    const key = `${w}x${h}:${name}${internal === this.gl.RGBA16F ? '' : ':f32'}`;
     let t = this.pool.get(key);
     if (!t) {
       // Half floats: plenty for display, and half the memory at full
-      // resolution.
-      t = this.texture(w, h, this.gl.RGBA16F);
+      // resolution (32-bit floats where the picture is saved at 16 bits).
+      t = this.texture(w, h, internal);
       this.pool.set(key, t);
     }
     return t;
@@ -3962,15 +3978,17 @@ export class GpuRenderer {
   }
 
   // `toTexture`: only the colour matrix, lens and flare, as linear colour into that RGBA32F texture (for the noise reduction, which runs between this and the finishing present).
-  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0, usm = null, toTexture = null }) {
+  present(src, w, h, { matrix, exposure, fringe, look = null, veilAmount = 0, lens = null, local = null, lutAmount = 0, lytro = false, sharpen = 0, usm = null, toTexture = null, into = null, bytePass = 0, fine = false }) {
     const gl = this.gl;
     const P = this.programs.present;
     // Resizing reallocates the canvas: only when the size changes.
-    if (!toTexture && this.canvas.width !== w) this.canvas.width = w;
-    if (!toTexture && this.canvas.height !== h) this.canvas.height = h;
-    const shot = !toTexture && sharpen > 0 ? this.scratch(w, h, 'usmPicture') : null;
+    if (!toTexture && !into && this.canvas.width !== w) this.canvas.width = w;
+    if (!toTexture && !into && this.canvas.height !== h) this.canvas.height = h;
+    const shot = !toTexture && sharpen > 0 ? this.scratch(w, h, 'usmPicture', fine ? gl.RGBA32F : gl.RGBA16F) : null;
+    // (into: an 8-bit texture instead of the canvas, written as the high or low byte of the 16-bit value: bytePass 1 or 2)
     if (toTexture) this.target(toTexture, w, h);
     else if (shot) this.target(shot, w, h);
+    else if (into) this.target(into, w, h);
     else {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
@@ -4025,6 +4043,7 @@ export class GpuRenderer {
       gl.uniform2fv(P.u.uLytroHue, LYTRO_HUE.flat());
     }
     gl.uniform1i(P.u.uStage, toTexture ? 1 : 0);
+    gl.uniform1i(P.u.uBytePass, shot || toTexture ? 0 : bytePass);
     gl.uniform1i(P.u.uLookOn, look ? 1 : 0);
     if (look) {
       gl.uniform4f(P.u.uTone, look.contrast, look.highlights, look.shadows, look.whites);
@@ -4035,11 +4054,43 @@ export class GpuRenderer {
     }
     this.draw();
     if (toTexture) return null;
-    if (shot) this.engineUnsharp(shot, w, h, sharpen, usm);
-    return this.canvas.transferToImageBitmap();
+    if (shot) this.engineUnsharp(shot, w, h, sharpen, usm, into, bytePass, fine);
+    return into ? null : this.canvas.transferToImageBitmap();
+  }
+
+  // The finished picture at 16 bits per channel: the whole present twice into an 8-bit texture (high byte, low byte) and read back. Returns RGB as a Uint16Array,
+  // the first row the top of the picture.
+  presentBits16(src, w, h, opts) {
+    const gl = this.gl;
+    const out = this.texture(w, h, gl.RGBA8);
+    try {
+      const bytes = [1, 2].map((bytePass) => {
+        this.present(src, w, h, { ...opts, into: out, bytePass, fine: true });
+        this.target(out, w, h);
+        gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+        const px = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        return px;
+      });
+      if (gl.getError() !== gl.NO_ERROR) throw new Error('The GPU could not make the 16-bit picture');
+      const rgb = new Uint16Array(w * h * 3);
+      for (let y = 0; y < h; y++) {
+        const from = (h - 1 - y) * w * 4;
+        let o = y * w * 3;
+        for (let x = 0; x < w; x++, o += 3) {
+          const i = from + x * 4;
+          rgb[o] = (bytes[0][i] << 8) | bytes[1][i];
+          rgb[o + 1] = (bytes[0][i + 1] << 8) | bytes[1][i + 1];
+          rgb[o + 2] = (bytes[0][i + 2] << 8) | bytes[1][i + 2];
+        }
+      }
+      return rgb;
+    } finally {
+      gl.deleteTexture(out);
+    }
   }
   // The engine's unsharp mask (core/detail.js engineUnsharp) on a display picture held in `shot`, drawn to the canvas.
-  engineUnsharp(shot, w, h, sharpen, usm = null) {
+  engineUnsharp(shot, w, h, sharpen, usm = null, into = null, bytePass = 0, fine = false) {
     const gl = this.gl;
     const map = usm || engineUsmMap(null, 1, 1, 1);
     if (!this.usmTex || this.usmTex.map !== map) {
@@ -4049,8 +4100,8 @@ export class GpuRenderer {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, map.w, map.h, gl.RG, gl.FLOAT, map.data);
       this.usmTex = { map, tex };
     }
-    const mid = this.scratch(w, h, 'usmMid');
-    const blur = this.scratch(w, h, 'usmBlur');
+    const mid = this.scratch(w, h, 'usmMid', fine ? gl.RGBA32F : gl.RGBA16F);
+    const blur = this.scratch(w, h, 'usmBlur', fine ? gl.RGBA32F : gl.RGBA16F);
     const B = this.programs.usmBlur;
     const pass = (from, to, axis, decode) => {
       this.target(to, w, h);
@@ -4066,8 +4117,11 @@ export class GpuRenderer {
     };
     pass(shot, mid, [1, 0], 1);
     pass(mid, blur, [0, 1], 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, w, h);
+    if (into) this.target(into, w, h);
+    else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, w, h);
+    }
     const A = this.programs.usmApply;
     gl.useProgram(A.p);
     gl.uniform1i(A.u.uSrc, 1);
@@ -4078,6 +4132,7 @@ export class GpuRenderer {
     this.bindTex(3, this.usmTex.tex);
     gl.uniform1f(A.u.uAmount, sharpen);
     gl.uniform1f(A.u.uThreshold, ENGINE_USM.threshold);
+    gl.uniform1i(A.u.uBytePass, bytePass);
     this.draw();
   }
 }
