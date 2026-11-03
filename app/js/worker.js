@@ -648,8 +648,17 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     onProgress('Generating sample', 0);
     data = await makeSyntheticLfr(synthetic);
   }
+  // Where the time of opening goes (printed to the console once the photo is open).
+  const laps = {};
+  let t0 = Date.now();
+  const lap = (name) => {
+    const t = Date.now();
+    laps[name] = t - t0;
+    t0 = t;
+  };
   state.pp = null;
   state.lf = await decodeLightField(data, { onProgress });
+  lap('decode');
   if (!state.lf.raw && state.lf.stacks.length) {
     onProgress('Decoding images', 0.5);
     state.pp = await buildProcessed(state.lf);
@@ -660,6 +669,7 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     state.rawOriginal = state.lf.raw;
     state.rawFixed = null;
     if (state.settings.hotPixels !== false) useHotPixelFix(true);
+    lap('hotPixels');
     state.dev = makeDevelopParams(state.lf.cam);
     // Off until its meaning is settled: applied as a direction shift it made the picture worse against the engine's (MAE 4.62 -> 4.96).
     state.geoTable = state.lf.geometryBytes && globalThis.__useGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
@@ -672,8 +682,11 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
       if (state.gpu && state.lut) state.gpu.setLut(state.lut);
     }
+    lap('setup');
     if (state.gpu) state.gpu.setRaw(state.lf.raw, state.lf.cam, state.dev);
+    lap('uploadRaw');
     rebuildSampler();
+    lap('sampler');
     // The engine's colour units for this photo (from its modulation frame), for the engine's colour pipeline; without the frame the Lytro look stays.
     state.engineScale = null;
     state.engineWb = null;
@@ -682,15 +695,20 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
       try {
         state.modulation = await loadModulation(state.lf);
+        lap('modulation');
         state.engineScale = state.modulation ? engineColorScale(state.modulation, state.lf.cam, state.dev, state.lf.grid) : null;
+        lap('colourScale');
         state.engineWb = state.modulation ? computeEngineWb() : null;
+        lap('whiteBalance');
       } catch (e) {
         console.error('ENGINESCALE failed', e && e.message);
         state.modulation = undefined;
       }
       if (globalThis.__lytro && globalThis.__lytro.printGrid) console.error('ENGINESCALE', JSON.stringify(state.engineScale));
       if (state.engineScale) updateColor();
+      lap('colour');
     }
+    console.info(`Opened in ${((Object.values(laps).reduce((a, b) => a + b, 0)) / 1000).toFixed(1)} s (${state.gpu ? 'GPU' : 'no GPU'}): ${JSON.stringify(laps)}`);
   }
   return summary();
 }
