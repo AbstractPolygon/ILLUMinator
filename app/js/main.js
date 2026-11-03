@@ -781,6 +781,8 @@ function draw(img) {
   else ctx.drawImage(img, 0, 0);
   if (cropState.editing) positionCropBox();
   canvas.classList.remove('hidden');
+  // What the app shows is enlarged with the Upscaling settings too, as it will be saved or exported (not while dragging, nor the depth map).
+  if (!drag.on && !state.depthShown && state.mode === 'camera') showAtPhotoSize(shownScale(w, h));
   scheduleHistogram();
   if (state.wantThumb && state.mode === 'camera') saveThumbnail();
 }
@@ -1101,9 +1103,11 @@ async function renderCamera() {
 function refresh() {
   if (!state.info) return;
   if (state.mode === 'lenslets') renderLenslets();
-  else if (state.fullRes && state.still) draw(state.still);
+  else if (state.depthShown) {
+    renderDepth();
+    if (state.fullRes && !state.still) renderStill();
+  } else if (state.fullRes && state.still) draw(state.still);
   else if (state.fullRes) renderStill();
-  else if (state.depthShown) renderDepth();
   else if (state.showingFrames) showFrame(state.index);
   else renderCamera();
 }
@@ -1361,9 +1365,11 @@ async function renderStill() {
       if (img && state.fullRes && state.current && state.current.photo === photo) {
         state.still = img;
         state.lensStill = { img, scale };
-        draw(img);
-        showAtPhotoSize();
-        $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+        if (!state.depthShown) {
+          draw(img);
+          showAtPhotoSize();
+          $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+        }
         return;
       }
     }
@@ -1375,9 +1381,11 @@ async function renderStill() {
     if (msg && (msg.pixels || msg.bitmap) && state.fullRes) {
       state.still = toImageData(msg);
       state.lensStill = { img: state.still, scale };
-      draw(state.still);
-      showAtPhotoSize();
-      $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+      if (!state.depthShown) {
+        draw(state.still);
+        showAtPhotoSize();
+        $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+      }
       // Kept next to the photo for next time (not waited for).
       if (hash) {
         const shown = state.still;
@@ -1443,7 +1451,7 @@ function setFullRes(on, { restore = true } = {}) {
     state.stillIndex = state.index;
     setPlaying(false);
     state.showingFrames = false;
-    setDepthShown(false, { restore: false });
+    // The depth map, if shown, stays on screen; the still is made meanwhile and shows when the depth map goes off.
     renderStill();
     return;
   }
@@ -5098,21 +5106,29 @@ function upscaleSettings() {
   return { method: $('upscale-method').value, sharpen: +$('upscale-sharpen').value / 100 };
 }
 
-// A rendered still is shown at the Photo Size, enlarged with the Upscaling
-// settings, exactly as it will be saved (the picture already on the canvas,
-// through crop and rotation, is enlarged; clicks map back through the same
-// scale). Save then writes the canvas as it is.
-function showAtPhotoSize() {
-  const k = +$('photo-size').value || 1;
-  if (k === 1) return;
-  const big = enlargeForSave(canvas);
+// The scale a picture of w x h is shown at: the Photo Size for a picture, the Video Size (when it is a height, as 1080p) for an animation frame. At most 4096 px wide.
+function shownScale(w, h) {
+  let k = 1;
+  if (state.showingFrames) {
+    const v = $('video-size').value;
+    if (/^\d+$/.test(v)) k = +v / Math.min(w, h);
+  } else {
+    k = +$('photo-size').value || 1;
+  }
+  return Math.max(1, Math.min(k, 4096 / Math.max(w, 1)));
+}
+
+// A picture is shown enlarged with the Upscaling settings, exactly as it will be saved (the picture already on the canvas, through crop and rotation, is
+// enlarged; clicks map back through the same scale). Save then writes the canvas as it is.
+function showAtPhotoSize(k = +$('photo-size').value || 1) {
+  if (!(k > 1) || state.enlarged) return;
+  const big = upscaleImage(canvas, Math.round(canvas.width * k), Math.round(canvas.height * k), upscaleSettings());
   canvas.width = big.width;
   canvas.height = big.height;
   ctx.drawImage(big, 0, 0);
   layoutCanvas();
   if (state.geom) state.geom = { ...state.geom, inverse: invert(state.geom.matrix.map((v) => v * k)) };
   state.enlarged = true;
-  scheduleHistogram();
 }
 
 function enlargeForSave(source) {
@@ -5186,6 +5202,10 @@ $('video-quality').ondblclick = () => {
   scheduleSave();
 };
 $('upscale-sharpen').oninput = () => showSliderValue($('upscale-sharpen'));
+// The picture shown follows the Photo Size, Video Size and Upscaling settings.
+for (const id of ['photo-size', 'video-size', 'upscale-method', 'upscale-sharpen']) {
+  $(id).addEventListener('change', () => { if (state.lastImage && !state.lastImage.pair && !state.depthShown) draw(state.lastImage); });
+}
 $('upscale-sharpen').ondblclick = () => {
   $('upscale-sharpen').value = $('upscale-sharpen').dataset.default;
   showSliderValue($('upscale-sharpen'));
