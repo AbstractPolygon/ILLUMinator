@@ -26,7 +26,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
   - [[Microlens Grid]]
 - [[Exporting]]: stills, full sensor renders and videos
 - [[Keyboard Shortcuts]]
-- [[File Formats]]: the library, the edits files and the Lytro files Illuminator reads
+- [[File Formats]]
 - [[Troubleshooting]]
 
 ## Supported files
