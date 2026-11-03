@@ -45,3 +45,9 @@ The calibration is kept in your library and applies to every photo taken with th
 The camera's hot pixel list is used together with the search that *Remove hot pixels* does. The white images (one for each zoom and focus setting, 34 in an ILLUM backup) are measured while the backup is added, which takes a minute or so: each shows where every lens really sits, and only those centers are kept, a few hundred kilobytes per image. A photo made with one of them uses its lens centers directly, so it skips the measuring step it otherwise needs at its first full-resolution render. Lens grid tables and focus tables are added next.
 
 *Lens centers* in the same place chooses where each lens's center comes from: the camera's calibration (the default when it has been added) or a measurement from each photo at its first full resolution render, which takes longer. The choice is kept for next time.
+
+## From a camera
+
+*Import from camera…* (desktop app) lists the photos on a connected Lytro camera, with their thumbnails, and imports the ones you pick (*Select all* and *Select none* are next to each other). The ILLUM shows up as a drive. The first generation Lytro is reached the way Lytro Desktop does it, through its disk, so no driver is needed on Windows; its photos are put together from the camera's raw, metadata and thumbnail files. The same photos also show in the *Camera* section above the library when a camera is plugged in.
+
+First generation photos get Lytro Desktop's own automatic level (an exposure found from the picture and the camera's ISO) and its colour steps: the colour is limited to the sensor's range before the colour matrix, then a contrast curve is applied. *Look → Flat* turns this off.

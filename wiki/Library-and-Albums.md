@@ -5,6 +5,8 @@
 Every photo you open, drop or import is copied into the library, each in a separate folder with its edits next to it. Your original files are never changed.
 
 - **Desktop app:** the library is a folder, `Pictures/ILLUMinator` by default. Change it in **Settings → Library location → Choose folder…**.
+- **Processed version:** next to each photo the desktop app keeps what it measured (the depth map and the focus offset, `processed.illuminator.bin`) and the last few full sensor renders, so reopening a photo is quicker. They are made again when the photo's settings or the app version change.
+- **Open in Explorer / Finder:** the photo's ••• menu in the left sidebar opens its folder (desktop app only).
 - **Browser:** the library is kept in the browser's private storage for the site. If the browser cannot store files (some private windows), photos are kept until the page is closed, and the sidebar says so.
 
 The library folder looks like this:

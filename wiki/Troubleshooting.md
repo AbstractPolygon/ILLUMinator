@@ -9,3 +9,7 @@
 **Lytro Desktop edits were not applied.** They are used only for photos that have no ILLUMinator edits yet. Open the picture's `raw.lfp` together with its `stack.view.lfp` (importing a Lytro Desktop library does this for you). The note over the picture lists edits that are not supported yet.
 
 **Report a problem:** [GitHub issues](https://github.com/AbstractPolygon/ILLUMinator/issues).
+
+**The first generation camera does not show (Windows).** It is read through its disk, which needs the camera switched on and its USB cable connected; the *Import from camera…* dialog's diagnostics list the disks it saw. If its thumbnails look like colour noise, send the camera log, which says how the thumbnail files are stored.
+
+**Depth measuring is slow.** With a real graphics card the depth is measured on it; when a step falls back to the processor, or only a software renderer is found, a note appears over the picture. Choosing *Depth method → ILLUMinator* is the quickest measurement.

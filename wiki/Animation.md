@@ -26,7 +26,7 @@ The readout shows the current frame and time of the whole, and *Length* sets the
 
 ## Keyframes in the sidebar
 
-Every setting that can be animated has <img src="images/key-prev.png" width="8" height="14" alt="previous keyframe"> ◆ <img src="images/key-next.png" width="8" height="14" alt="next keyframe"> at its right in the sidebar, in a separate column (as in DaVinci Resolve's Inspector):
+The keyframe controls show only while *Animation → Enabled* is on. Every setting that can be animated has <img src="images/key-prev.png" width="8" height="14" alt="previous keyframe"> ◆ <img src="images/key-next.png" width="8" height="14" alt="next keyframe"> at its right in the sidebar, in a separate column (as in DaVinci Resolve's Inspector):
 
 **◆** turns the setting's animation on or off. *Hollow:* not animated; clicking it adds a keyframe at the playhead, and turns on *Animate: Keyframes* if needed. *Filled:* animated; clicking it removes all of that setting's keyframes. *Blue:* a keyframe of the setting sits at the playhead.
 
