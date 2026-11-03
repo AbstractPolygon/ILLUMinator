@@ -34,7 +34,7 @@ Because a Lytro photo is a light field, it keeps working like a camera after the
 | File | From | What Illuminator does with it |
 | --- | --- | --- |
 | `.LFR` | Lytro ILLUM | Process full light field |
-| `.LFP` (raw) | First generation Lytro, Lytro Desktop libraries | Process full light field |
+| `.LFP` (raw) | First generation Lytro | Process full light field |
 | `.LFP` (processed) | Exported from Lytro Desktop | The pictures stored in it: focus stack, viewpoints or depth based |
 | `stack.view.lfp` | Lytro Desktop | The edits Lytro Desktop saved for a picture |
 
