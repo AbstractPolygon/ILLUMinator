@@ -24,6 +24,15 @@ uniform float uRatio;
 out vec4 outColor;
 const float PI = 3.14159265;
 float sinc(float x) { return x == 0.0 ? 1.0 : sin(PI * x) / (PI * x); }
+// 16-bit export (upscaleBits16): the final pass run twice, writing the high and then the low byte of round(65535 * value) into 8-bit channels.
+uniform int uBytePass;
+vec4 packOut(vec4 c) {
+  if (uBytePass == 0) return c;
+  vec3 v = floor(clamp(c.rgb, 0.0, 1.0) * 65535.0 + 0.5);
+  vec3 hi = floor(v / 256.0);
+  return vec4((uBytePass == 1 ? hi : v - hi * 256.0) / 255.0, 1.0);
+}
+
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   ivec2 size = textureSize(uSrc, 0);
@@ -45,7 +54,7 @@ void main() {
     sum += texelFetch(uSrc, uAxis == 0 ? ivec2(k, p.y) : ivec2(p.x, k), 0) * w;
     wsum += w;
   }
-  outColor = sum / wsum;
+  outColor = packOut(sum / wsum);
 }`;
 
 // Unsharp mask against a box blur of radius uRadius, then clamped.
@@ -55,6 +64,15 @@ uniform sampler2D uSrc;
 uniform int uRadius;
 uniform float uAmount;
 out vec4 outColor;
+// 16-bit export (upscaleBits16): the final pass run twice, writing the high and then the low byte of round(65535 * value) into 8-bit channels.
+uniform int uBytePass;
+vec4 packOut(vec4 c) {
+  if (uBytePass == 0) return c;
+  vec3 v = floor(clamp(c.rgb, 0.0, 1.0) * 65535.0 + 0.5);
+  vec3 hi = floor(v / 256.0);
+  return vec4((uBytePass == 1 ? hi : v - hi * 256.0) / 255.0, 1.0);
+}
+
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   ivec2 last = textureSize(uSrc, 0) - 1;
@@ -69,7 +87,7 @@ void main() {
   }
   float n = float((2 * uRadius + 1) * (2 * uRadius + 1));
   blur /= n;
-  outColor = vec4(clamp(c.rgb + (c.rgb - blur) * uAmount, 0.0, 1.0), clamp(c.a, 0.0, 1.0));
+  outColor = packOut(vec4(clamp(c.rgb + (c.rgb - blur) * uAmount, 0.0, 1.0), clamp(c.a, 0.0, 1.0)));
 }`;
 
 // FSR 1 EASU: 12 taps around the sample, weighted along the local edge.
@@ -106,6 +124,15 @@ void tapF(inout vec3 ac, inout float aw, vec2 off, vec2 dir, vec2 len2, float lo
   ac += c * w;
   aw += w;
 }
+// 16-bit export (upscaleBits16): the final pass run twice, writing the high and then the low byte of round(65535 * value) into 8-bit channels.
+uniform int uBytePass;
+vec4 packOut(vec4 c) {
+  if (uBytePass == 0) return c;
+  vec3 v = floor(clamp(c.rgb, 0.0, 1.0) * 65535.0 + 0.5);
+  vec3 hi = floor(v / 256.0);
+  return vec4((uBytePass == 1 ? hi : v - hi * 256.0) / 255.0, 1.0);
+}
+
 void main() {
   ivec2 last = textureSize(uSrc, 0) - 1;
   vec2 pp = (gl_FragCoord.xy) * uScale - 0.5;
@@ -149,7 +176,7 @@ void main() {
   tapF(ac, aw, vec2(1.0, 2.0) - t, dir, len2, lob, clp, o);
   vec3 lo = min(min(f, g), min(j, k));
   vec3 hi = max(max(f, g), max(j, k));
-  outColor = vec4(clamp(ac / aw, lo, hi), 1.0);
+  outColor = packOut(vec4(clamp(ac / aw, lo, hi), 1.0));
 }`;
 
 // FSR 1 RCAS: sharpens as far as the neighbors allow without clipping.
@@ -158,6 +185,15 @@ precision highp float;
 uniform sampler2D uSrc;
 uniform float uSharp;
 out vec4 outColor;
+// 16-bit export (upscaleBits16): the final pass run twice, writing the high and then the low byte of round(65535 * value) into 8-bit channels.
+uniform int uBytePass;
+vec4 packOut(vec4 c) {
+  if (uBytePass == 0) return c;
+  vec3 v = floor(clamp(c.rgb, 0.0, 1.0) * 65535.0 + 0.5);
+  vec3 hi = floor(v / 256.0);
+  return vec4((uBytePass == 1 ? hi : v - hi * 256.0) / 255.0, 1.0);
+}
+
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   ivec2 last = textureSize(uSrc, 0) - 1;
@@ -173,7 +209,7 @@ void main() {
   vec3 lobeC = max(-hitMin, hitMax);
   float lobe = max(-(0.25 - 1.0 / 16.0), min(max(lobeC.r, max(lobeC.g, lobeC.b)), 0.0)) * uSharp;
   vec3 c = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);
-  outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+  outColor = packOut(vec4(clamp(c, 0.0, 1.0), 1.0));
 }`;
 let ctx;
 
@@ -205,12 +241,21 @@ function setup() {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    ctx = { canvas, gl, float, resample: compile(gl, RESAMPLE), sharpen: compile(gl, SHARPEN), easu: compile(gl, EASU), rcas: compile(gl, RCAS), max: gl.getParameter(gl.MAX_TEXTURE_SIZE) };
+    ctx = { canvas, gl, float, resample: compile(gl, RESAMPLE), sharpen: compile(gl, SHARPEN), easu: compile(gl, EASU), rcas: compile(gl, RCAS), convert: compile(gl, CONVERT), max: gl.getParameter(gl.MAX_TEXTURE_SIZE) };
   } catch {
     ctx = null;
   }
   return ctx;
 }
+
+// The 16-bit source picture (RGBA16UI) as floats between 0 and 1, so the passes that follow read it like any other.
+const CONVERT = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+uniform usampler2D uSrcU;
+out vec4 outColor;
+void main() { outColor = vec4(vec3(texelFetch(uSrcU, ivec2(gl_FragCoord.xy), 0).rgb) / 65535.0, 1.0); }`;
 
 function texture(gl, w, h, float, source) {
   const t = gl.createTexture();
@@ -242,7 +287,7 @@ function pass(gl, program, src, target, w, h, uniforms) {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, src);
   gl.uniform1i(gl.getUniformLocation(program, 'uSrc'), 0);
-  for (const [name, [kind, v]] of Object.entries(uniforms)) gl[kind](gl.getUniformLocation(program, name), ...[].concat(v));
+  for (const [name, [kind, v]] of Object.entries({ uBytePass: ['uniform1i', 0], ...uniforms })) gl[kind](gl.getUniformLocation(program, name), ...[].concat(v));
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   if (fb) gl.deleteFramebuffer(fb);
 }
@@ -294,4 +339,94 @@ function upscaleOnCpu(source, W, H, opts) {
   const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H });
   canvas.getContext('2d').putImageData(new ImageData(out.data, W, H), 0, 0);
   return canvas;
+}
+
+// The same enlarging as upscaleImage for a picture at 16 bits per channel: `rgb` is a Uint16Array (w * h * 3, the first row the top). Returns the enlarged picture the same
+// way (W * H * 3), or null where the card cannot do it (no float render targets, a size beyond its textures): the caller saves the picture as it is. Everything between the
+// first and the last pass is in 32-bit floats (16-bit floats above about 24 million pixels, to keep the memory in bounds), and the last pass runs twice, for the two bytes.
+export function upscaleBits16(rgb, w, h, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
+  const c = setup();
+  if (!c || !c.float || Math.max(W, H, w, h) > c.max) return null;
+  const { gl } = c;
+  const owned = [];
+  const make = (tw, th, f32, internal, format, type) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, tw, th, 0, format, type, null);
+    owned.push(t);
+    return t;
+  };
+  const floats = (tw, th, f32) => make(tw, th, f32, f32 ? gl.RGBA32F : gl.RGBA16F, gl.RGBA, f32 ? gl.FLOAT : gl.HALF_FLOAT);
+  try {
+    const big32 = W * H <= 24e6;
+    const rgba = new Uint16Array(w * h * 4);
+    for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+      rgba[j] = rgb[i];
+      rgba[j + 1] = rgb[i + 1];
+      rgba[j + 2] = rgb[i + 2];
+      rgba[j + 3] = 65535;
+    }
+    const src16 = make(w, h, false, gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, rgba);
+    const src = floats(w, h, true);
+    pass(gl, c.convert, src16, src, w, h, { uSrcU: ['uniform1i', 0] });
+    // the passes before the last one, and the last one (run once for each byte)
+    let last;
+    if (method === 'fsr' && W >= w && H >= h) {
+      const sharp = rcasStrength(sharpen);
+      const big = sharp ? floats(W, H, big32) : null;
+      if (big) {
+        pass(gl, c.easu, src, big, W, H, { uScale: ['uniform2f', [w / W, h / H]] });
+        last = (target, bytePass) => pass(gl, c.rcas, big, target, W, H, { uSharp: ['uniform1f', sharp], uBytePass: ['uniform1i', bytePass] });
+      } else {
+        last = (target, bytePass) => pass(gl, c.easu, src, target, W, H, { uScale: ['uniform2f', [w / W, h / H]], uBytePass: ['uniform1i', bytePass] });
+      }
+    } else {
+      const lanczos = method === 'lanczos' || method === 'fsr' ? 1 : 0;
+      const rows = floats(W, h, big32);
+      pass(gl, c.resample, src, rows, W, h, { uAxis: ['uniform1i', 0], uLanczos: ['uniform1i', lanczos], uRatio: ['uniform1f', w / W] });
+      const vertical = (target, bytePass) => pass(gl, c.resample, rows, target, W, H, { uAxis: ['uniform1i', 1], uLanczos: ['uniform1i', lanczos], uRatio: ['uniform1f', h / H], uBytePass: ['uniform1i', bytePass] });
+      if (sharpen > 0) {
+        const both = floats(W, H, big32);
+        vertical(both, 0);
+        const radius = Math.min(4, Math.max(1, Math.round(Math.max(W / w, H / h))));
+        last = (target, bytePass) => pass(gl, c.sharpen, both, target, W, H, { uRadius: ['uniform1i', radius], uAmount: ['uniform1f', sharpen * 1.5], uBytePass: ['uniform1i', bytePass] });
+      } else {
+        last = vertical;
+      }
+    }
+    const out8 = make(W, H, false, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+    const out = new Uint16Array(W * H * 3);
+    const bytes = new Uint8Array(W * H * 4);
+    const fb = gl.createFramebuffer();
+    try {
+      for (const bytePass of [1, 2]) {
+        last(out8, bytePass);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out8, 0);
+        gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+        gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+        for (let i = 0, j = 0; i < out.length; i += 3, j += 4) {
+          if (bytePass === 1) {
+            out[i] = bytes[j] << 8;
+            out[i + 1] = bytes[j + 1] << 8;
+            out[i + 2] = bytes[j + 2] << 8;
+          } else {
+            out[i] |= bytes[j];
+            out[i + 1] |= bytes[j + 1];
+            out[i + 2] |= bytes[j + 2];
+          }
+        }
+      }
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fb);
+    }
+    if (gl.getError() !== gl.NO_ERROR) return null;
+    return out;
+  } finally {
+    for (const t of owned) gl.deleteTexture(t);
+  }
 }

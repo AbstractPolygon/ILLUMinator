@@ -4,7 +4,7 @@ import { Engine, toImageData } from './engine.js';
 import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { decodePngGray, parseDepthRange, stackDepth } from './core/userdepth.js';
-import { upscaleImage } from './gpu/upscale.js';
+import { upscaleImage, upscaleBits16 } from './gpu/upscale.js';
 import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
@@ -2234,13 +2234,10 @@ async function showLibraryLocation() {
   $('library-choose').hidden = kind !== 'folder';
   if (kind === 'folder') {
     $('library-path').textContent = await native.libraryDir();
-    $('library-note').textContent = 'Each photo is kept in its own folder in the library, with its edits next to it. Albums are listed in library.json.';
   } else if (kind === 'browser') {
     $('library-path').textContent = 'This browser’s storage';
-    $('library-note').textContent = 'In a browser the library is stored privately by the browser. Use the desktop app to keep it in a folder of your choice.';
   } else {
     $('library-path').textContent = 'Not available';
-    $('library-note').textContent = 'This browser cannot store a library here, so photos are kept until the page is closed. Use the desktop app or another browser to keep a library.';
   }
 }
 
@@ -2360,15 +2357,24 @@ $('cal-lens-source').onchange = () => {
   } catch {
     // Not remembered.
   }
-  sendCalibrations().then(() => {
-    if (state.current) $('cal-note').textContent = 'Applies to the open photo at its next full resolution render.';
-  });
+  sendCalibrations();
 };
 $('cal-add').onclick = async () => (!native ? showDesktopOnly(...CALIBRATION_ONLY) : addCalibration(await openCalibrationFile().catch(() => null)));
 $('cal-folder').onclick = async () => {
   if (!native) return showDesktopOnly(...CALIBRATION_ONLY);
   const picked = await pickFolder('Choose the camera’s calibration folder', { calibration: true }).catch(() => null);
   if (picked && picked.files.length) addCalibration(picked.files.map((f) => ({ path: f.path, file: f.file })));
+};
+
+// Settings > Check for updates on startup (the desktop app; Help > Check for Updates works whatever it says).
+$('updates-setting').hidden = !native;
+$('check-updates').checked = updateCheckOn();
+$('check-updates').onchange = () => {
+  try {
+    localStorage.setItem('illuminator.checkUpdates', $('check-updates').checked ? '1' : '0');
+  } catch {
+    // Not remembered.
+  }
 };
 
 $('settings-btn').onclick = async () => {
@@ -5187,7 +5193,7 @@ function savePhoto(source, name) {
 }
 
 // PNG at 16 bits per channel: the picture on show made again by the graphics card with the high and low byte of every value kept (worker finishGpu, bits16), so the fine
-// tonal steps the 8-bit canvas drops are in the file. At the picture's own size (the Photo Size upscaling works on the 8-bit canvas). Without the graphics card, or for
+// tonal steps the 8-bit canvas drops are in the file. Enlarged by the Photo Size at 16 bits too. Without the graphics card, or for
 // a view that is not the picture (stereo, depth, lenslets), the usual 8-bit PNG is saved and the notice says so.
 async function savePhoto16(name) {
   const eightBit = (why) => {
@@ -5212,9 +5218,25 @@ async function savePhoto16(name) {
       eightBit('A 16-bit picture needs the graphics card (and its noise reduction); this one was made without it.');
       return;
     }
-    const png = await encodePng16(new Uint16Array(msg.pixels16), msg.width, msg.height);
+    let rgb = new Uint16Array(msg.pixels16);
+    let width = msg.width;
+    let height = msg.height;
+    // Enlarged by the Photo Size with the Upscaling settings, at 16 bits as well (gpu/upscale.js upscaleBits16).
+    const k = +$('photo-size').value || 1;
+    if (k !== 1) {
+      const W = Math.round(width * k);
+      const H = Math.round(height * k);
+      const big = upscaleBits16(rgb, width, height, W, H, upscaleSettings());
+      if (big) {
+        rgb = big;
+        width = W;
+        height = H;
+      } else {
+        showNotice('Saved at the picture\'s own size', `The graphics card cannot enlarge a 16-bit picture to ${W}×${H}; it is saved at ${width}×${height}.`);
+      }
+    }
+    const png = await encodePng16(rgb, width, height);
     await download(new Blob([png], { type: 'image/png' }), `${name}.png`);
-    if ((+$('photo-size').value || 1) !== 1) showNotice('Saved at 16 bits per channel', `At the picture's own size, ${msg.width}×${msg.height}: Photo Size enlarging works on 8-bit pictures only.`);
   } catch (err) {
     hideProgress();
     showError(err);
@@ -7054,8 +7076,16 @@ function thisOs() {
 }
 
 // manual: from Help > Check for Updates, which says what it found; the automatic checks (at start, then every few hours) stay silent unless there is a new release.
+function updateCheckOn() {
+  try {
+    return localStorage.getItem('illuminator.checkUpdates') !== '0';
+  } catch {
+    return true;
+  }
+}
+
 async function checkForUpdate(manual = false) {
-  if (!window.lytroNative) return;
+  if (!window.lytroNative || (!manual && !updateCheckOn())) return;
   let release;
   try {
     const r = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });

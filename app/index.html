@@ -901,10 +901,12 @@
   <dialog id="settings-dialog">
     <form method="dialog">
       <h2>Settings</h2>
+      <section class="setting" id="updates-setting" hidden>
+        <label class="check"><input type="checkbox" id="check-updates" checked> Check for updates on startup</label>
+      </section>
       <section class="setting">
         <h3>Library location</h3>
         <p id="library-path" class="path"></p>
-        <p id="library-note" class="hint"></p>
         <div class="row">
           <button type="button" id="library-choose">Choose folder…</button>
         </div>
@@ -916,7 +918,6 @@
       </section>
       <section class="setting">
         <h3>Camera calibration</h3>
-        <p class="hint">Each camera has its calibration data: which pixels are defective, its lens grid at every zoom and focus, and white images. Add yours (a camera backup <code>.tar</code> file, or its unpacked folder) so photos from that camera render with it (adding a backup takes a minute or so while its white images are measured). It is kept in your library and used for photos with the same camera serial number.</p>
         <ul id="cal-list" class="cal-list"></ul>
         <label class="row" title="Where each lens's center comes from. The camera's calibration uses its white images; the other measures every lens from the photo at its first full resolution render, which takes longer.">Lens centers
           <select id="cal-lens-source">
