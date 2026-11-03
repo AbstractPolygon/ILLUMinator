@@ -116,7 +116,8 @@ function dilate(mask, w, h, steps) {
 }
 
 // `classic` and `match`: depth (alpha) per pixel, w x h. Returns the combined map on `match`'s scale.
-export function combineDepth(classic, match, w, h, P = DEPTH_COMBINE) {
+// `amount` (0..1, 0.5 the default mix): 0 is the classic depth alone (on the Lytro-style scale), 1 the Lytro-style depth alone, in between a straight blend towards each end.
+export function combineDepth(classic, match, w, h, P = DEPTH_COMBINE, amount = 0.5) {
   const n = w * h;
   const ok = new Uint8Array(n);
   const valid = [];
@@ -138,6 +139,16 @@ export function combineDepth(classic, match, w, h, P = DEPTH_COMBINE) {
   const blend = gaussianBlur(weight, w, h, P.blendSigma);
   const mix = new Float32Array(n);
   for (let i = 0; i < n; i++) mix[i] = Number.isFinite(classic[i]) ? match[i] + blend[i] * (classic[i] * p0 + p1 - match[i]) : match[i];
+  if (amount !== 0.5) {
+    const lo = amount < 0.5;
+    const t = lo ? amount / 0.5 : (amount - 0.5) / 0.5;
+    for (let i = 0; i < n; i++) {
+      const fitted = Number.isFinite(classic[i]) ? classic[i] * p0 + p1 : match[i];
+      mix[i] = lo ? fitted + (mix[i] - fitted) * t : mix[i] + (match[i] - mix[i]) * t;
+    }
+  }
+  // The outline cleanup belongs to the Lytro-style half: it fades out towards the classic end.
+  const cleanup = Math.min(1, amount / 0.5);
   const range = percentile(valid, 0.95) - percentile(valid, 0.05);
   const spread = localRange(match, w, h, P.edgeWindow);
   const jump = new Uint8Array(n);
@@ -156,7 +167,7 @@ export function combineDepth(classic, match, w, h, P = DEPTH_COMBINE) {
         for (let dx = -r; dx <= r; dx++) win[k++] = mix[yy * w + Math.min(w - 1, Math.max(0, x + dx))];
       }
       win.sort();
-      out[i] = win[win.length >> 1];
+      out[i] = mix[i] + (win[win.length >> 1] - mix[i]) * cleanup;
     }
   }
   return out;

@@ -1302,6 +1302,7 @@ async function settings({ id, settings: s }) {
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
   const styleChanged = s.depthStyle !== undefined && (s.depthStyle === 'guided') !== (state.settings.depthStyle === 'guided') || (s.depthStyle !== undefined && resolveDepthStyle(s.depthStyle) !== resolveDepthStyle(state.settings.depthStyle));
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
+  const blendChanged = s.depthBlend !== undefined && s.depthBlend !== (state.settings.depthBlend ?? 0.5);
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
   if ((qualityChanged || sourceChanged || objectsChanged || styleChanged) && state.depthRaw && !detailChanged) {
@@ -1309,6 +1310,11 @@ async function settings({ id, settings: s }) {
     state.depth = null;
     state.depthRaw = null;
     await ensureDepth(id);
+  } else if (blendChanged && !detailChanged && state.depthParts && state.depthRaw) {
+    // The blend of the two measurements changes without measuring again.
+    const { classic, match, outW, outH } = state.depthParts;
+    state.depthRaw = { ...state.depthRaw, alpha: combineDepth(classic, match, outW, outH, undefined, state.settings.depthBlend ?? 0.5) };
+    settleDepth(outW, outH);
   } else if (smoothingChanged && !detailChanged) applyDepthSmoothing();
   // A depth mask needs the depth map.
   if (state.lf && state.lf.raw && !state.depth && parseMasks(s.local && s.local.masks).some((m) => m.kind === 'depth')) await ensureDepth(id);
@@ -1575,6 +1581,7 @@ async function ensureDepth(id) {
     let style = resolveDepthStyle(state.settings.depthStyle);
     if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
+    state.depthParts = null;
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
     if (style === 'combined' || style === 'match') await prepareEngineViews(id);
@@ -1583,7 +1590,8 @@ async function ensureDepth(id) {
         const classic = measureClassic(id, fast, report(0, 0.4));
         const match = measureLytro(report(0.4, 0.95));
         if (match && classic) {
-          state.depthRaw = { ...match, engineMap: undefined, alpha: combineDepth(classic.alpha, match.alpha, outW, outH) };
+          state.depthParts = { classic: classic.alpha, match: match.alpha, outW, outH };
+          state.depthRaw = { ...match, engineMap: undefined, alpha: combineDepth(classic.alpha, match.alpha, outW, outH, undefined, state.settings.depthBlend ?? 0.5) };
         } else {
           state.depthRaw = classic || match || measureClassic(id, fast, report(0, 1), true);
         }
@@ -1603,9 +1611,7 @@ async function ensureDepth(id) {
     // Lytro Desktop puts depth edges on the picture's edges (a joint adaptive
     // filter and an MRF in its engine): the same here, on the depth as finally
     // measured, so every style gets it.
-    if (EDGE_SNAP_DEPTH.on && state.depthRaw) state.depthRaw = { ...state.depthRaw, alpha: snapDepthEdges(state.depthRaw.alpha, depthColorGuide(centerView()), outW, outH) };
-    if (globalThis.__finalDepthDump) globalThis.__finalDepthDump(state.depthRaw.alpha, centerView(), outW, outH);
-    applyDepthSmoothing();
+    settleDepth(outW, outH);
   }
   if (globalThis.__depthOverride && state.depth) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
   return true;
@@ -2017,6 +2023,13 @@ function smoothedDepth(alpha, confidence) {
 function activeRayWarpForShift() {
   const warp = state.rayWarp;
   return warp && state.lf && state.lf.grid ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0;
+}
+
+// The last steps of a measured depth map: edges snapped to the picture's, then the smoothing.
+function settleDepth(outW, outH) {
+  if (EDGE_SNAP_DEPTH.on && state.depthRaw) state.depthRaw = { ...state.depthRaw, alpha: snapDepthEdges(state.depthRaw.alpha, depthColorGuide(centerView()), outW, outH) };
+  if (globalThis.__finalDepthDump) globalThis.__finalDepthDump(state.depthRaw.alpha, centerView(), outW, outH);
+  applyDepthSmoothing();
 }
 
 function applyDepthSmoothing() {

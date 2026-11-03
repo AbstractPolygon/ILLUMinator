@@ -33,3 +33,27 @@ test('a map with too few valid pixels is returned as it is', () => {
   const c = new Float32Array(100).fill(NaN);
   assert.deepEqual(Array.from(combineDepth(c, m, 10, 10)), Array.from(m));
 });
+
+test('the blend amount runs from the classic depth alone to the Lytro-style depth alone', () => {
+  const match = new Float32Array(W * H);
+  const classic = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const x = i % W;
+    const y = (i / W) | 0;
+    match[i] = (x < W / 2 ? -1 : 1) + 0.01 * y;
+    classic[i] = 2 * match[i] + 0.5 + 0.05 * Math.sin(x + y);
+  }
+  const lytro = combineDepth(classic, match, W, H, undefined, 1);
+  const own = combineDepth(classic, match, W, H, undefined, 0);
+  const mid = combineDepth(classic, match, W, H);
+  const half = combineDepth(classic, match, W, H, undefined, 0.5);
+  let dLytro = 0, dOwn = 0, same = 0;
+  for (let i = 0; i < W * H; i++) {
+    dLytro += Math.abs(lytro[i] - match[i]);
+    dOwn += Math.abs(own[i] - (classic[i] - 0.5) / 2);
+    same += Math.abs(mid[i] - half[i]);
+  }
+  assert.ok(dLytro / (W * H) < 0.01, `Lytro-style end ${dLytro / (W * H)}`);
+  assert.ok(dOwn / (W * H) < 0.02, `classic end ${dOwn / (W * H)}`);
+  assert.equal(same, 0, '0.5 is the default mix');
+});
