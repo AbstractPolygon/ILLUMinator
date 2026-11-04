@@ -70,6 +70,8 @@ test('the GPU region filters match the CPU versions', async (t) => {
           objects[p] = blk % 3;
         }
       }
+      const rgb = new Float32Array(n * 3);
+      for (let p = 0; p < n; p++) for (let c = 0; c < 3; c++) rgb[3 * p + c] = Math.min(1, Math.max(0, (lab[3 * p + c] + 60) / 160));
       const cmp = (a, b) => {
         let worst = 0;
         let off = 0;
@@ -85,18 +87,66 @@ test('the GPU region filters match the CPU versions', async (t) => {
       out.smoothRampsObjects = cmp(S.smoothRamps(depth, lab, w, h, Infinity, objects, 8, 4, 10), g.smoothRamps(depth, lab, w, h, Infinity, objects, 8, 4, 10));
       out.colorMedian = cmp(S.colorMedian(depth, lab, w, h), g.colorMedian(depth, lab, w, h));
       out.snapToObjects = cmp(S.snapToObjects(depth, objects, w, h), g.snapToObjects(depth, objects, w, h));
+      out.guidedFilter = cmp(S.guidedFilter(depth, lab, w, h, 5, 0.003), g.guidedFilter(depth, lab, w, h, 5, 0.003));
       out.layerSnap = cmp(S.layerSnap(depth, lab, w, h), g.layerSnap(depth, lab, w, h));
       out.layerSnapHard = cmp(S.layerSnap(depth, lab, w, h, { hard: true }), g.layerSnap(depth, lab, w, h, { hard: true }));
+      // flattenHalos: two big objects with planar depth and a halo of too-near depth along their border, as around a near object
+      {
+        const obj2 = new Uint32Array(n);
+        const dep2 = new Float32Array(n);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const p = y * w + x;
+            obj2[p] = x < w / 2 ? 7 : 9;
+            let d = 0.1 + 0.3 * (x / w) + 0.2 * (y / h) + 0.003 * rnd();
+            if (Math.abs(x - w / 2) < 6 && y % 3 !== 0) d -= 0.25;
+            dep2[p] = d;
+          }
+        }
+        const c = S.flattenHalos(dep2, obj2, w, h);
+        const gp = g.flattenHalos(dep2, obj2, w, h);
+        let changed = 0;
+        for (let i = 0; i < n; i++) if (c[i] !== dep2[i]) changed++;
+        out.flattenHalos = cmp(c, gp);
+        out.flattenHalosChanged = { worst: 0, off: 0, note: changed / n };
+      }
+      // Lab from rgb
+      {
+        const cpuLab = new Float32Array(n * 3);
+        for (let p = 0; p < n; p++) S.toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], cpuLab, 3 * p);
+        const gpuLab = g.labOf(rgb, w, h);
+        let worst = 0;
+        for (let i = 0; i < cpuLab.length; i++) worst = Math.max(worst, Math.abs(cpuLab[i] - gpuLab[i]));
+        out.lab = { worst: worst / 100, off: 0 };
+      }
+      // the superpixels
+      {
+        const cpuL = S.slic(lab, w, h, 120).label;
+        const gpuL = g.slicLabels(lab, w, h, 120);
+        let off = 0;
+        for (let i = 0; i < n; i++) if (cpuL[i] !== gpuL[i]) off++;
+        out.slicLabels = { worst: 0, off: off / n };
+      }
+      out.guidedFilterColor = cmp(S.guidedFilterColor(depth, rgb, w, h), S.guidedFilterColor(depth, rgb, w, h, 5, 0.003, g));
+      // the object model's input
+      {
+        const { segmentInput } = await import('/js/core/segmodel.js');
+        const cpu = segmentInput(rgb, w, h);
+        const gp = g.segInput(rgb, w, h);
+        let worst = 0;
+        for (let i = 0; i < cpu.input.length; i++) worst = Math.max(worst, Math.abs(cpu.input[i] - gp.input[i]));
+        out.segInput = { worst: worst / 255, off: gp.nw === cpu.nw && gp.nh === cpu.nh ? 0 : 1 };
+      }
       // the whole cleanup, both ways
-      const rgb = new Float32Array(n * 3);
-      for (let p = 0; p < n; p++) for (let c = 0; c < 3; c++) rgb[3 * p + c] = Math.min(1, Math.max(0, (lab[3 * p + c] + 60) / 160));
-      const conf = new Float32Array(n).fill(0.7);
+      const conf = new Float32Array(n);
+      for (let i = 0; i < n; i++) conf[i] = 0.3 + 0.7 * rnd();  // varied, as real confidences are (equal ones tie exactly at the median)
       out.segmentDepth = cmp(S.segmentDepth(depth, conf, rgb, w, h, { count: 120 }), S.segmentDepth(depth, conf, rgb, w, h, { count: 120, gpu: g }));
       out.segmentDepthObjects = cmp(S.segmentDepth(depth, conf, rgb, w, h, { count: 120, objects }), S.segmentDepth(depth, conf, rgb, w, h, { count: 120, objects, gpu: g }));
       return out;
     });
     if (!res) return t.skip('No float-renderable WebGL2');
     for (const [name, { worst, off }] of Object.entries(res)) {
+      if (name === 'flattenHalosChanged') { t.diagnostic(`flattenHalos moved ${(100 * Object.values({ v: res[name].note })[0]).toFixed(1)}% of the pixels on the CPU`); assert.ok(res[name].note > 0.02, 'the halo test must change something'); continue; }
       t.diagnostic(`${name}: largest difference ${worst.toExponential(2)}, ${(off * 100).toFixed(3)}% of pixels differ`);
       // float32 against double: a few ties may fall the other way in the medians
       const limit = name === 'smoothRamps' || name === 'smoothRampsObjects' ? 1e-3 : Infinity;

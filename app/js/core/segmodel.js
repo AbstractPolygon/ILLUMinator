@@ -99,13 +99,9 @@ export function loadSegModel(onProgress = () => {}) {
   return loading;
 }
 
-// Masks of the objects in a picture. `rgb`: linear 0..1, 3 per pixel, w x h.
-// A grid of `cols` x `rows` points is tried; each gives the mask of the
-// object under it. The masks are made at `scale` of the picture's size (much
-// faster). Returns { w, h, masks: [{ bin, area, quality }] } for core/objects.js.
-export async function findObjectMasks(model, rgb, w, h, { cols = 9, rows = 6, scale: outScale = 0.5, onProgress = () => {} } = {}) {
-  const { ort, encoder, decoder } = model;
-  // sRGB, exposed so the picture's bright end is near white.
+// The encoder's input: the picture (linear 0..1, 3 per pixel, w x h) as sRGB 0..255, exposed so its 99.5th percentile of brightness is white,
+// scaled so its long side is 1024. (gpu/regions.js does the same on the graphics card; pass it as `prep`.)
+export function segmentInput(rgb, w, h) {
   const n = w * h;
   const luma = new Float32Array(n);
   for (let i = 0; i < n; i++) luma[i] = 0.2126 * rgb[3 * i] + 0.7152 * rgb[3 * i + 1] + 0.0722 * rgb[3 * i + 2];
@@ -132,6 +128,16 @@ export async function findObjectMasks(model, rgb, w, h, { cols = 9, rows = 6, sc
       }
     }
   }
+  return { input, nw, nh, scale };
+}
+
+// Masks of the objects in a picture. `rgb`: linear 0..1, 3 per pixel, w x h.
+// A grid of `cols` x `rows` points is tried; each gives the mask of the
+// object under it. The masks are made at `scale` of the picture's size (much
+// faster). Returns { w, h, masks: [{ bin, area, quality }] } for core/objects.js.
+export async function findObjectMasks(model, rgb, w, h, { cols = 9, rows = 6, scale: outScale = 0.5, onProgress = () => {}, prep = null } = {}) {
+  const { ort, encoder, decoder } = model;
+  const { input, nw, nh, scale } = (prep && prep(rgb, w, h)) || segmentInput(rgb, w, h);
   onProgress('Finding objects', 0);
   let embeddings = (await encoder.run({ input_image: new ort.Tensor('float32', input, [nh, nw, 3]) })).image_embeddings;
   let decode = decoder;

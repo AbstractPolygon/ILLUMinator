@@ -8,7 +8,7 @@ import { signatureDistance } from './objects.js';
 // 38% to 33% of the picture (72% to 37% on shiny metal).
 
 // sRGB-ish 0..1 -> CIE Lab.
-function toLab(r, g, b, out, o) {
+export function toLab(r, g, b, out, o) {
   const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
   const R = lin(r);
   const G = lin(g);
@@ -81,21 +81,19 @@ export function slic(lab, w, h, count = 2500, compactness = 8, iterations = 6) {
   return { label, count: k };
 }
 
-// The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
-// picture's color (0..1, 3 per pixel). Returns new depths.
-export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, snap = 0.05, snapPasses = 2, guide = { radius: 5, eps: 0.003 }, objects = null, gpu = null } = {}) {
+// Per region (k of them): the confidence-weighted median depth `value`, mean confidence `trust`, pixel count `count`, and the pairs of
+// touching regions as [a, b, weight] triples (weight: how alike their mean colours are).
+export function regionStats(alpha, confidence, lab, label, k, w, h, colorSigma) {
   const n = w * h;
-  const lab = new Float32Array(n * 3);
-  for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
-  const { label, count: k } = slic(lab, w, h, count, compactness);
-  // Each region: confidence-weighted median depth, mean confidence and color.
   const members = Array.from({ length: k }, () => []);
   for (let p = 0; p < n; p++) members[label[p]].push(p);
   const value = new Float32Array(k);
   const trust = new Float32Array(k);
+  const count = new Float32Array(k);
   const mean = new Float32Array(k * 3);
   for (let c = 0; c < k; c++) {
     const ps = members[c];
+    count[c] = ps.length;
     if (!ps.length) continue;
     ps.sort((a, b) => alpha[a] - alpha[b]);
     let total = 0;
@@ -120,8 +118,7 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
     const key = a < b ? a * k + b : b * k + a;
     if (seen.has(key)) return;
     seen.add(key);
-    const d2 = (mean[3 * a] - mean[3 * b]) ** 2 + (mean[3 * a + 1] - mean[3 * b + 1]) ** 2 + (mean[3 * a + 2] - mean[3 * b + 2]) ** 2;
-    pairs.push(a, b, Math.exp(-d2 / (colorSigma * colorSigma)));
+    pairs.push(a, b, pairWeight(mean, a, b, colorSigma));
   };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -130,6 +127,17 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
       if (y + 1 < h) link(label[p], label[p + w]);
     }
   }
+  return { k, value, trust, count, pairs };
+}
+
+export function pairWeight(mean, a, b, colorSigma) {
+  const d2 = (mean[3 * a] - mean[3 * b]) ** 2 + (mean[3 * a + 1] - mean[3 * b + 1]) ** 2 + (mean[3 * a + 2] - mean[3 * b + 2]) ** 2;
+  return Math.exp(-d2 / (colorSigma * colorSigma));
+}
+
+// The solve over the regions (a few thousand nodes, a few thousand pairs): neighbouring regions pull toward each other, then regions whose
+// depths ended up close become one flat plateau (a greedy merge in order of closeness, so it is sequential by nature).
+export function solveRegions({ k, value, trust, count, pairs }, { strength = 1, iterations = 30, plateau = 0.012 } = {}) {
   let cur = Float32Array.from(value);
   for (let it = 0; it < iterations; it++) {
     const num = new Float32Array(k);
@@ -180,11 +188,30 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
     const den = new Float64Array(k);
     for (let c = 0; c < k; c++) {
       const r = root(c);
-      num[r] += (trust[c] + 1e-4) * members[c].length * cur[c];
-      den[r] += (trust[c] + 1e-4) * members[c].length;
+      num[r] += (trust[c] + 1e-4) * count[c] * cur[c];
+      den[r] += (trust[c] + 1e-4) * count[c];
     }
     for (let c = 0; c < k; c++) cur[c] = num[root(c)] / den[root(c)];
   }
+  return cur;
+}
+
+// The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
+// picture's color (0..1, 3 per pixel). Returns new depths.
+export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, snap = 0.05, snapPasses = 2, guide = { radius: 5, eps: 0.003 }, objects = null, gpu = null } = {}) {
+  // the whole cleanup on the graphics card when it can (gpu/regions.js), else here
+  if (gpu && gpu.segmentDepth) {
+    const done = gpu.segmentDepth(alpha, confidence, rgb, w, h, { count, compactness, strength, iterations, colorSigma, plateau, edge, snapPasses, guide, objects, flatten: OBJECT_FLAT.on });
+    if (done) return done;
+  }
+  const n = w * h;
+  const lab = new Float32Array(n * 3);
+  for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
+  const { label, count: k } = slic(lab, w, h, count, compactness);
+  // Each region's confidence-weighted median depth, trust and color, and which regions touch (here, or on the graphics card for the whole
+  // cleanup, see gpu/regions.js), then the small solve over the regions.
+  const stats = regionStats(alpha, confidence, lab, label, k, w, h, colorSigma);
+  const cur = solveRegions(stats, { strength, iterations, plateau });
   const out = new Float32Array(n);
   for (let p = 0; p < n; p++) out[p] = cur[label[p]];
   if (!(edge > 0)) return out;
@@ -201,7 +228,8 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
   }
   // With objects known, an outline (not the size of a step) is what keeps
   // two sides apart, so depth flows freely within each object.
-  const snapped = flattenHalos((gpu && gpu.snapToObjects(out, objects, w, h)) || snapToObjects(out, objects, w, h), objects, w, h);
+  const snappedToObjects = (gpu && gpu.snapToObjects(out, objects, w, h)) || snapToObjects(out, objects, w, h);
+  const snapped = (gpu && gpu.flattenHalos(snappedToObjects, objects, w, h)) || flattenHalos(snappedToObjects, objects, w, h);
   const flat = OBJECT_FLAT.on ? flattenObjects(snapped, objects, w, h, OBJECT_FLAT) : snapped;
   return (gpu && gpu.smoothRamps(flat, lab, w, h, Infinity, objects, 8, 4, 10)) || smoothRamps(flat, lab, w, h, Infinity, objects, 8, 4, 10);
 }
@@ -474,8 +502,8 @@ export function flattenHalos(depth, objects, w, h, { minShare = 0.03, band = 45,
     let mad = spread;
     for (let it = 0; it < 8; it++) {
       let sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, s1 = 0, sxd = 0, syd = 0, sd = 0;
+      // every pixel of the object (the graphics card's version does the same)
       ids.forEach((i, k) => {
-        if (k % 3) return;
         const x = (i % w) / w;
         const y = Math.floor(i / w) / h;
         const wt = wts[k];
@@ -580,7 +608,9 @@ export function guidedFilter(depth, lab, w, h, r = 6, eps = 0.004) {
 
 // The guided filter for a depth map without region cleanup (normal
 // quality): the guide is the picture's brightness (`rgb`, 0..1, 3 per pixel).
-export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
+export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003, gpu = null) {
+  const onCard = gpu && gpu.guidedFilterRgb && gpu.guidedFilterRgb(depth, rgb, w, h, r, eps);
+  if (onCard) return onCard;
   const lab = new Float32Array(w * h * 3);
   for (let p = 0; p < w * h; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
   return guidedFilter(depth, lab, w, h, r, eps);
@@ -592,13 +622,13 @@ export function guidedFilterColor(depth, rgb, w, h, r = 5, eps = 0.003) {
 // vote among like colored neighbors straightens the border (colorMedian).
 // `rgb`: the picture, 0..1, 3 per pixel.
 export const EDGE_SNAP_DEPTH = { on: false, passes: 2, layer: { radius: 20, stride: 3, band: 0.2, hard: true } };
-export function snapDepthEdges(depth, rgb, w, h) {
+export function snapDepthEdges(depth, rgb, w, h, gpu = null) {
   if (globalThis.__snapDump) globalThis.__snapDump(depth, rgb, w, h);
   if (!EDGE_SNAP_DEPTH.on) return depth;
   const lab = new Float32Array(w * h * 3);
   for (let p = 0; p < w * h; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
-  let d = layerSnap(depth, lab, w, h, EDGE_SNAP_DEPTH.layer);
-  for (let i = 0; i < EDGE_SNAP_DEPTH.passes; i++) d = colorMedian(d, lab, w, h);
+  let d = (gpu && gpu.layerSnap(depth, lab, w, h, EDGE_SNAP_DEPTH.layer)) || layerSnap(depth, lab, w, h, EDGE_SNAP_DEPTH.layer);
+  for (let i = 0; i < EDGE_SNAP_DEPTH.passes; i++) d = (gpu && gpu.colorMedian(d, lab, w, h)) || colorMedian(d, lab, w, h);
   return d;
 }
 

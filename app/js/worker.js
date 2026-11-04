@@ -1682,7 +1682,7 @@ async function findObjects(id) {
   try {
     const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
     const model = await loadSegModel(progress);
-    const found = await findObjectMasks(model, centerView(), outW, outH, { onProgress: progress });
+    const found = await findObjectMasks(model, centerView(), outW, outH, { onProgress: progress, prep: DEPTH_REGIONS.gpu && DEPTH_REGIONS.gpu.segInput });
     const small = signatures(pickObjects(found.masks, found.w, found.h), found.w, found.h);
     // Back to the depth map's size.
     const labels = new Uint32Array(outW * outH);
