@@ -1709,7 +1709,6 @@ async function ensureViewDepth(id) {
   state.depthRaw = quick;
   state.depthFast = true;
   applyDepthSmoothing();
-  if (globalThis.__viewDepthDump) globalThis.__viewDepthDump(state.depth.alpha, outW, outH);
   return !!state.depth;
 }
 
@@ -1956,19 +1955,22 @@ async function prepareEngineViews(id) {
   state.engineViews = list;
 }
 
-// Separable filter over the premultiplied view (colour and weight), zero outside.
+// Separable filter over the premultiplied view (colour and weight), zero outside. The taps that fall outside are left out of the sum
+// (the loop bounds are worked out once per sample, not tested per tap); the sum runs in the same order as the plain version.
 function filterPremultiplied(acc, W, H, kx, ky) {
   const pass = (src, dst, n, stride, lines, lineStride, k) => {
     const r = (k.length - 1) >> 1;
     for (let l = 0; l < lines; l++) {
+      const base = 4 * l * lineStride;
+      const step = 4 * stride;
       for (let i = 0; i < n; i++) {
+        const t0 = Math.max(-r, -i);
+        const t1 = Math.min(r, n - 1 - i);
+        const o = base + i * step;
         for (let c = 0; c < 4; c++) {
           let a = 0;
-          for (let t = -r; t <= r; t++) {
-            const j = i + t;
-            if (j >= 0 && j < n) a += k[t + r] * src[4 * (l * lineStride + j * stride) + c];
-          }
-          dst[4 * (l * lineStride + i * stride) + c] = a;
+          for (let t = t0; t <= t1; t++) a += k[t + r] * src[o + t * step + c];
+          dst[o + c] = a;
         }
       }
     }
@@ -2445,7 +2447,6 @@ async function focusAt({ id, x, y, u = 0, v = 0 }) {
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
   const d = state.settings.detail;
-  if (globalThis.__viewsDump) globalThis.__viewsDump(state.refocusViews, outW, outH);
   const measure = (px, py, opts) => {
     if (!state.gpu) return focusAtPoint(state.refocusViews, outW, outH, px, py, opts);
     // On the GPU only the views around the point are read back: the window,
