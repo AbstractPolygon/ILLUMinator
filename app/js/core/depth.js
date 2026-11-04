@@ -1216,6 +1216,7 @@ export function focusAtPoint(views, width, height, x, y, { min = -1.2, max = 1.2
   }
   const finite = costs.filter(Number.isFinite);
   const mean = finite.reduce((s, c) => s + c, 0) / Math.max(1, finite.length);
+  if (globalThis.__focusCosts) globalThis.__focusCosts.push({ alphas, costs, radius });
   return { alpha: alphas[best] + offset * step, confidence: mean > 0 ? (mean - costs[best]) / mean : 0 };
 }
 

@@ -414,7 +414,12 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
 async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, mode = undefined, color = null, distortionCorrected = false }, message) {
   const gpu = state.gpu;
   if ((dof > 0 || bokeh.blur > 0) && (await ensureViewDepth(id))) {
+    // Whatever really is at the focus depth stays sharp, also where the depth map has it wrong (thin near objects, such as the wires of a fence): see GpuRenderer.focusMask.
+    // (not with a tilted focus plane, whose depth differs across the picture)
+    const tilted = bokeh.tilt && (bokeh.tilt[0] || bokeh.tilt[1]);
+    const sharp = state.settings.focusMask !== false && gpu.views && !tilted ? gpu.focusMask(alpha, { u0: masks.view ? masks.view.u : 0, v0: masks.view ? masks.view.v : 0, clip: state.dev.clip }) : null;
     tex = gpu.depthOfField(tex, w, h, {
+      sharp,
       focus: alpha,
       strength: dof * pxPerUnit,
       shape: bokeh.shape,
@@ -1704,6 +1709,7 @@ async function ensureViewDepth(id) {
   state.depthRaw = quick;
   state.depthFast = true;
   applyDepthSmoothing();
+  if (globalThis.__viewDepthDump) globalThis.__viewDepthDump(state.depth.alpha, outW, outH);
   return !!state.depth;
 }
 
@@ -2439,6 +2445,7 @@ async function focusAt({ id, x, y, u = 0, v = 0 }) {
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
   const d = state.settings.detail;
+  if (globalThis.__viewsDump) globalThis.__viewsDump(state.refocusViews, outW, outH);
   const measure = (px, py, opts) => {
     if (!state.gpu) return focusAtPoint(state.refocusViews, outW, outH, px, py, opts);
     // On the GPU only the views around the point are read back: the window,

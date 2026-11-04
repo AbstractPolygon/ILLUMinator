@@ -340,6 +340,85 @@ void main() {
   outColor = vec4(mix(ref, sum / wsum, uBlend), 1.0);
 }`;
 
+// The focus mask (what stays sharp where the depth map is wrong): the views looked at where a point at the focus depth would appear in each. Where they agree
+// (low variance next to the brightness) and the picture has structure there (an edge or texture, not a flat patch, which looks the same sharp or blurred), the
+// surface really is at the focus depth, whatever the depth map says: thin or smooth near objects (the wires of a fence) that the depth map smears into the background.
+// Step 1: per pixel, the views' disagreement (x) and mean brightness (y).
+const FOCUS_SCORE = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray uViews;
+uniform int uCount;
+uniform vec4 uView[${MAX_VIEWS}];
+uniform vec2 uSize;
+uniform float uClip;
+out vec4 outColor;
+void main() {
+  vec2 x = gl_FragCoord.xy - 0.5;
+  float sum = 0.0;
+  float sq = 0.0;
+  float wsum = 0.0;
+  for (int k = 0; k < ${MAX_VIEWS}; k++) {
+    if (k >= uCount) break;
+    vec4 v = uView[k];
+    if (v.z < 1e-3) continue;
+    vec2 s = x + v.xy;
+    if (s.x < 0.0 || s.y < 0.0 || s.x > uSize.x - 1.0 || s.y > uSize.y - 1.0) continue;
+    vec4 c = texture(uViews, vec3((s + 0.5) / uSize, float(k)));
+    float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float w = v.z * c.a;
+    sum += l * w;
+    sq += l * l * w;
+    wsum += w;
+  }
+  if (wsum <= 0.0) { outColor = vec4(1e4, 0.0, 0.0, 1.0); return; }
+  float mean = sum / wsum;
+  float variance = max(sq / wsum - mean * mean, 0.0);
+  float floorLevel = 0.004 * uClip;
+  outColor = vec4(variance / (0.02 * mean * mean + floorLevel * floorLevel), mean, 0.0, 1.0);
+}`;
+// Step 2: consistent and structured.
+const FOCUS_MASK = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uScore;
+uniform float uClip;
+out vec4 outColor;
+float meanAt(ivec2 q, ivec2 size) { return texelFetch(uScore, clamp(q, ivec2(0), size - 1), 0).g; }
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uScore, 0);
+  float nv = texelFetch(uScore, p, 0).r;
+  float tl = meanAt(p + ivec2(-1, -1), size), t = meanAt(p + ivec2(0, -1), size), tr = meanAt(p + ivec2(1, -1), size);
+  float l = meanAt(p + ivec2(-1, 0), size), c = meanAt(p, size), r = meanAt(p + ivec2(1, 0), size);
+  float bl = meanAt(p + ivec2(-1, 1), size), b = meanAt(p + ivec2(0, 1), size), br = meanAt(p + ivec2(1, 1), size);
+  float gx = (tr + 2.0 * r + br - tl - 2.0 * l - bl) / 8.0;
+  float gy = (bl + 2.0 * b + br - tl - 2.0 * t - tr) / 8.0;
+  float g = length(vec2(gx, gy)) / (c + 0.02 * uClip);
+  float consistent = 1.0 - smoothstep(0.08, 0.30, nv);
+  float structured = smoothstep(0.02, 0.06, g);
+  outColor = vec4(consistent * structured, 0.0, 0.0, 1.0);
+}`;
+// Step 3 (twice, along x then y): the maximum within uRadius, so the flat inside of a thin object, between its edges, is kept with them.
+const FOCUS_SPREAD = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform ivec2 uDir;
+uniform int uRadius;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  float m = 0.0;
+  for (int i = -8; i <= 8; i++) {
+    if (i < -uRadius || i > uRadius) continue;
+    m = max(m, texelFetch(uSrc, clamp(p + uDir * i, ivec2(0), size - 1), 0).r);
+  }
+  outColor = vec4(m, 0.0, 0.0, 1.0);
+}`;
+
 // Depth of field, step 1: per pixel, the blur radius (from the depth map)
 // and the color with clipped highlights given back some of their light.
 const DOF_PREP = `#version 300 es
@@ -357,6 +436,8 @@ uniform float uStrength;    // blur radius in pixels per unit of focus differenc
 uniform float uBlur;        // blur radius (pixels) added everywhere, the sharp range included
 uniform float uClip;
 uniform float uHighlights;
+uniform sampler2D uSharp;   // the focus mask (FOCUS_SCORE), 0..1: kept sharp where it is 1
+uniform int uSharpOn;
 out vec4 outColor;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
@@ -369,7 +450,8 @@ void main() {
   // softEdge in core/dof.js).
   float e = max(abs(d) - uSpread, 0.0);
   if (uSmooth > 0.0) e = e < uSmooth ? e * e / (2.0 * uSmooth) : e - 0.5 * uSmooth;
-  d = (d < 0.0 ? -1.0 : 1.0) * (uStrength * e + uBlur);
+  float keep = uSharpOn == 1 ? texture(uSharp, n).r : 0.0;
+  d = (d < 0.0 ? -1.0 : 1.0) * (uStrength * e * (1.0 - keep) + uBlur);
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float knee = 0.8 * uClip;
   float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
@@ -2354,6 +2436,9 @@ export class GpuRenderer {
       refocus: program(gl, REFOCUS_PASS),
       chroma: program(gl, CHROMA_PASS),
       dofPrep: program(gl, DOF_PREP),
+      focusScore: program(gl, FOCUS_SCORE),
+      focusMask: program(gl, FOCUS_MASK),
+      focusSpread: program(gl, FOCUS_SPREAD),
       dofGather: program(gl, DOF_GATHER),
       dofTiles: program(gl, DOF_TILES),
       merge: program(gl, MERGE_PASS),
@@ -3198,7 +3283,60 @@ export class GpuRenderer {
   // of this image per unit of focus difference. Returns the result texture.
   // `draft`: quicker, for previews while dragging: more of the blur at half
   // size and fewer taps.
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, blur = 0, draft = false }) {
+  // The focus mask for a point of focus `alpha` seen from viewpoint (u0, v0): a view size texture, 1 where the views agree at that depth on structure (see FOCUS_SCORE).
+  // null without the views.
+  focusMask(alpha, { u0 = 0, v0 = 0, clip = 1 } = {}) {
+    if (!this.views) return null;
+    const gl = this.gl;
+    const { outW: w, outH: h } = this.sampler;
+    const { tex, samples, detail } = this.views;
+    const data = new Float32Array(MAX_VIEWS * 4);
+    samples.forEach(({ u, v }, k) => {
+      data[4 * k] = alpha * (u - u0) * detail;
+      data[4 * k + 1] = alpha * (v - v0) * detail;
+      data[4 * k + 2] = 1;
+    });
+    const score = this.scratch(w, h, 'focusScore');
+    const flat = this.scratch(w, h, 'focusFlat');
+    const wide = this.scratch(w, h, 'focusWide');
+    const mask = this.scratch(w, h, 'focusMaskOut');
+    let P = this.programs.focusScore;
+    this.target(score, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uViews, 2);
+    this.bindTex(2, tex, gl.TEXTURE_2D_ARRAY);
+    gl.uniform1i(P.u.uCount, samples.length);
+    gl.uniform4fv(P.u.uView, data);
+    gl.uniform2f(P.u.uSize, w, h);
+    gl.uniform1f(P.u.uClip, clip);
+    this.draw();
+    P = this.programs.focusMask;
+    this.target(flat, w, h);
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uScore, 1);
+    this.bindTex(1, score);
+    gl.uniform1f(P.u.uClip, clip);
+    this.draw();
+    P = this.programs.focusSpread;
+    gl.useProgram(P.p);
+    gl.uniform1i(P.u.uSrc, 1);
+    gl.uniform1i(P.u.uRadius, 4);
+    this.target(wide, w, h);
+    this.bindTex(1, flat);
+    gl.uniform2i(P.u.uDir, 1, 0);
+    this.draw();
+    this.target(mask, w, h);
+    this.bindTex(1, wide);
+    gl.uniform2i(P.u.uDir, 0, 1);
+    this.draw();
+    // sampled at the picture's size, smoothly
+    gl.bindTexture(gl.TEXTURE_2D, mask);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return mask;
+  }
+
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, blur = 0, draft = false, sharp = null }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -3219,6 +3357,9 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uBlur, blur);
     gl.uniform1f(P.u.uClip, clip);
     gl.uniform1f(P.u.uHighlights, highlights);
+    gl.uniform1i(P.u.uSharp, 5);
+    this.bindTex(5, sharp || this.depthTex);
+    gl.uniform1i(P.u.uSharpOn, sharp ? 1 : 0);
     this.draw();
 
     gl.bindTexture(gl.TEXTURE_2D, prep);
