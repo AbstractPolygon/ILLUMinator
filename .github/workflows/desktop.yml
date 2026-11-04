@@ -58,6 +58,48 @@ jobs:
           # No signing certificate: build unsigned.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: Check the MSI installer's desktop option
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist -Filter *.msi | Select-Object -First 1).FullName
+          Write-Host "MSI: $msi"
+
+          # The setup page is in the package: Dialog table, and the Next button of the folder page leads to it.
+          $wi = New-Object -ComObject WindowsInstaller.Installer
+          $db = $wi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $wi, @($msi, 0))
+          function Query($sql) {
+            $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db, @($sql))
+            $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+            $rows = @()
+            while ($rec = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)) {
+              $rows += $rec.GetType().InvokeMember('StringData', 'GetProperty', $null, $rec, @(1))
+            }
+            $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null) | Out-Null
+            return $rows
+          }
+          if ((Query "SELECT Dialog FROM Dialog WHERE Dialog='DesktopOptionDlg'").Count -ne 1) { throw 'DesktopOptionDlg is missing from the MSI' }
+          if ((Query "SELECT Control FROM Control WHERE Dialog_='DesktopOptionDlg' AND Control='DesktopCheck' AND Property='ADDTODESKTOP'").Count -ne 1) { throw 'The Add to desktop checkbox is missing' }
+          if ((Query "SELECT Dialog_ FROM ControlEvent WHERE Dialog_='InstallDirDlg' AND Control_='Next' AND Argument='DesktopOptionDlg'").Count -lt 1) { throw 'The folder page does not lead to the shortcut page' }
+          if ((Query "SELECT Dialog_ FROM ControlEvent WHERE Dialog_='DesktopOptionDlg' AND Control_='Next' AND Argument='VerifyReadyDlg'").Count -lt 1) { throw 'The shortcut page does not lead to Ready to install' }
+          Write-Host 'Setup page present'
+
+          # Silent installs: ticked by default, off with ADDTODESKTOP=0.
+          $links = @("$env:PUBLIC\Desktop\Illuminator.lnk", "$env:USERPROFILE\Desktop\Illuminator.lnk")
+          function Has-Link { return @($links | Where-Object { Test-Path $_ }).Count -gt 0 }
+          function Msi($argList) {
+            $p = Start-Process msiexec.exe -ArgumentList $argList -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "msiexec $argList exited with $($p.ExitCode)" }
+          }
+          Msi "/i `"$msi`" /qn /norestart /l*v $env:RUNNER_TEMP\msi-default.log"
+          if (-not (Has-Link)) { throw 'Default install: no desktop shortcut' }
+          Msi "/x `"$msi`" /qn /norestart"
+          if (Has-Link) { throw 'Uninstall left the desktop shortcut behind' }
+          Msi "/i `"$msi`" ADDTODESKTOP=0 /qn /norestart /l*v $env:RUNNER_TEMP\msi-nodesktop.log"
+          if (Has-Link) { throw 'ADDTODESKTOP=0 still created a desktop shortcut' }
+          Msi "/x `"$msi`" /qn /norestart"
+          Write-Host 'MSI desktop option works'
+
       - name: Version
         id: version
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"

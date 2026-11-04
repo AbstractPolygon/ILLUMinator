@@ -1,7 +1,7 @@
 {
   "name": "illuminator",
   "productName": "Illuminator",
-  "version": "0.5.70",
+  "version": "0.5.71",
   "description": "Open, refocus and animate Lytro ILLUM and first generation light field photographs",
   "license": "PolyForm-Shield-1.0.0",
   "author": "AbstractPolygon, LLC",
@@ -120,10 +120,11 @@
     "msi": {
       "oneClick": false,
       "perMachine": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "Illuminator"
-    }
+    },
+    "msiProjectCreated": "./build/msi-hook.cjs"
   },
   "devDependencies": {
     "electron": "44.4.5",
