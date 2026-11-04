@@ -5,10 +5,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { patchProject } = require('../build/msi-hook.cjs');
@@ -32,9 +28,8 @@ function render(opts) {
 }
 
 function wellFormed(xml) {
-  const f = join(mkdtempSync(join(tmpdir(), 'msi-')), 'p.wxs');
-  writeFileSync(f, xml);
-  execFileSync('xmllint', ['--noout', f]);
+  const parser = require('sax').parser(true); // strict: throws on the first error
+  parser.write(xml).close();
 }
 
 for (const desktop of [false, true]) {
@@ -45,7 +40,7 @@ for (const desktop of [false, true]) {
     assert.equal(out.match(/Id="desktopShortcut"/g).length, 1);
     assert.doesNotMatch(out, /Advertise="yes" Icon="icon.ico"\/>\s*<Shortcut Id="startMenuShortcut"[\s\S]*desktopShortcut/);
     assert.match(out, /<Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Guid="\*">\s*<Condition>ADDTODESKTOP = 1<\/Condition>/);
-    assert.match(out, /<RegistryValue Root="HKMU"[^>]*KeyPath="yes"\/>/);
+    assert.match(out, /<RegistryValue Root="HKCU"[^>]*KeyPath="yes"\/>/);
     assert.match(out, /Target="\[#mainExecutable\]"/);
     // the start menu shortcut is untouched
     assert.match(out, /Id="startMenuShortcut"/);

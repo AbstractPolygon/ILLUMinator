@@ -40,7 +40,7 @@ function patchProject(xml) {
     '      <Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Guid="*">\n' +
     '        <Condition>ADDTODESKTOP = 1</Condition>\n' +
     `        <Shortcut Id="desktopShortcut" Name="${productName}" Target="[#mainExecutable]" WorkingDirectory="APPLICATIONFOLDER"${icon}/>\n` +
-    `        <RegistryValue Root="HKMU" Key="Software\\${productName}" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes"/>\n` +
+    `        <RegistryValue Root="HKCU" Key="Software\\${productName}" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes"/>\n` +
     '      </Component>\n';
   xml = xml.replace(/([ \t]*)<\/ComponentGroup>(?![\s\S]*<\/ComponentGroup>)/, `${component}$1</ComponentGroup>`);
 
