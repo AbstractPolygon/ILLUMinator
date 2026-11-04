@@ -966,7 +966,15 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   }
 
   // the blur the engine applies to each view after the splat (P.viewBlur = { kx, ky }), before the read-back
-  if (P.viewBlur && nV) blurViewsGpu(gpu, acc, W, H, nV, P.viewBlur.kx, P.viewBlur.ky);
+  if (P.viewBlur && nV) {
+    if (P.viewBlur.keepRaw) {
+      // test hook: the views as they were before the blur, to check the blur against the CPU's on real data
+      gpu.target(acc, W, HA);
+      P.viewBlur.raw = new Float32Array(W * HA * 4);
+      gl.readPixels(0, 0, W, HA, gl.RGBA, gl.FLOAT, P.viewBlur.raw);
+    }
+    blurViewsGpu(gpu, acc, W, H, nV, P.viewBlur.kx, P.viewBlur.ky);
+  }
   gpu.target(acc, W, HA);
   const out = new Float32Array(W * HA * 4);
   gl.readPixels(0, 0, W, HA, gl.RGBA, gl.FLOAT, out);

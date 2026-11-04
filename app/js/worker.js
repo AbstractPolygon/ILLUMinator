@@ -695,7 +695,7 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
     if (state.gpu === null && state.settings.gpu !== false) {
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
-      DEPTH_REGIONS.gpu = state.gpu ? regionsGpu(state.gpu, gpuFellBack) : null;
+      DEPTH_REGIONS.gpu = state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuRegions) ? regionsGpu(state.gpu, gpuFellBack) : null;
       if (state.gpu && state.lut) state.gpu.setLut(state.lut);
     }
     lap('setup');
@@ -1938,7 +1938,25 @@ async function prepareEngineViews(id) {
         const kx = dbg.viewKernel === null ? null : dbg.viewKernel || VIEW_KERNEL;
         const ky = dbg.viewKernel === null ? null : dbg.viewKernelY || dbg.viewKernel || VIEW_KERNEL;
         const onGpu = !!(kx && ky && kx.length <= 9 && ky.length <= 9) && !dbg.noGpuBlur;
-        const acc = lytroSplatGpu(state.gpu, onGpu ? { ...input, viewBlur: { kx, ky } } : input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
+        const blur = onGpu ? { kx, ky, keepRaw: !!dbg.blurCheck } : null;
+        const acc = lytroSplatGpu(state.gpu, blur ? { ...input, viewBlur: blur } : input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
+        if (acc && blur && blur.raw) {
+          // test hook (dbg.blurCheck): the GPU's blurred views against the CPU's blur of the same unblurred views
+          let worst = 0;
+          let sum = 0;
+          const per = W * H * 4;
+          for (let v = 0; v < input.views.length; v++) {
+            const ref = blur.raw.slice(v * per, (v + 1) * per);
+            filterPremultiplied(ref, W, H, kx, ky);
+            for (let i = 0; i < per; i++) {
+              const d = Math.abs(ref[i] - acc[v * per + i]);
+              if (d > worst) worst = d;
+              sum += d;
+            }
+          }
+          globalThis.__blurCheckResult = { worst, mean: sum / (per * input.views.length), views: input.views.length, W, H };
+          console.info('BLURCHECK', JSON.stringify(globalThis.__blurCheckResult));
+        }
         if (acc) {
           state.lytroGpu = true;
           blurredOnGpu = onGpu;
