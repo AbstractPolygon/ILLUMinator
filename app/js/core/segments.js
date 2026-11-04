@@ -83,7 +83,7 @@ export function slic(lab, w, h, count = 2500, compactness = 8, iterations = 6) {
 
 // The cleanup itself. `alpha` and `confidence` per pixel, `rgb` the
 // picture's color (0..1, 3 per pixel). Returns new depths.
-export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, snap = 0.05, snapPasses = 2, guide = { radius: 5, eps: 0.003 }, objects = null } = {}) {
+export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compactness = 8, strength = 1, iterations = 30, colorSigma = 8, plateau = 0.012, edge = 0.25, snap = 0.05, snapPasses = 2, guide = { radius: 5, eps: 0.003 }, objects = null, gpu = null } = {}) {
   const n = w * h;
   const lab = new Float32Array(n * 3);
   for (let p = 0; p < n; p++) toLab(rgb[3 * p], rgb[3 * p + 1], rgb[3 * p + 2], lab, 3 * p);
@@ -193,15 +193,17 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
     // like colored neighbours, twice so the border straightens, then
     // gradual changes are smoothed.
     let d = out;
-    d = layerSnap(d, lab, w, h);
-    for (let i = 0; i < snapPasses; i++) d = colorMedian(d, lab, w, h);
-    d = smoothRamps(d, lab, w, h, edge);
+    // the per-pixel filters run on the graphics card when `gpu` (gpu/regions.js) has them, else here
+    d = (gpu && gpu.layerSnap(d, lab, w, h)) || layerSnap(d, lab, w, h);
+    for (let i = 0; i < snapPasses; i++) d = (gpu && gpu.colorMedian(d, lab, w, h)) || colorMedian(d, lab, w, h);
+    d = (gpu && gpu.smoothRamps(d, lab, w, h, edge)) || smoothRamps(d, lab, w, h, edge);
     return guide ? guidedFilter(d, lab, w, h, guide.radius, guide.eps) : d;
   }
   // With objects known, an outline (not the size of a step) is what keeps
   // two sides apart, so depth flows freely within each object.
-  const snapped = flattenHalos(snapToObjects(out, objects, w, h), objects, w, h);
-  return smoothRamps(OBJECT_FLAT.on ? flattenObjects(snapped, objects, w, h, OBJECT_FLAT) : snapped, lab, w, h, Infinity, objects, 8, 4, 10);
+  const snapped = flattenHalos((gpu && gpu.snapToObjects(out, objects, w, h)) || snapToObjects(out, objects, w, h), objects, w, h);
+  const flat = OBJECT_FLAT.on ? flattenObjects(snapped, objects, w, h, OBJECT_FLAT) : snapped;
+  return (gpu && gpu.smoothRamps(flat, lab, w, h, Infinity, objects, 8, 4, 10)) || smoothRamps(flat, lab, w, h, Infinity, objects, 8, 4, 10);
 }
 
 // Depth edges (steps larger than `edge`) follow the superpixels' borders,
@@ -211,7 +213,7 @@ export function segmentDepth(alpha, confidence, rgb, w, h, { count = 2500, compa
 // straightens. Everywhere else the depth is left as it is.
 // How strongly an object's outline between two pixels counts against pairing
 // them (per outline crossed).
-const OBJECT_COST = 5;
+export const OBJECT_COST = 5;
 const R = 8;
 const SIGMA = 4;
 export function smoothSteps(depth, lab, w, h, edge, objects = null) {

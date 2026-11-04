@@ -2,6 +2,7 @@
 // Requests: { id, type, ...args }. Replies: { id, type: 'result' | 'progress' | 'frame' | 'error', ... }.
 
 import { filterPremultiplied } from './core/viewblur.js';
+import { regionsGpu } from './gpu/regions.js';
 import { decodeLightField } from './core/decode.js';
 import { normalizeGrid, measureGrid, calibrateGrid, lensCenters, lensCenter, toLocal } from './core/lenslet.js';
 import {
@@ -694,6 +695,7 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
     if (state.gpu === null && state.settings.gpu !== false) {
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
+      DEPTH_REGIONS.gpu = state.gpu ? regionsGpu(state.gpu, gpuFellBack) : null;
       if (state.gpu && state.lut) state.gpu.setLut(state.lut);
     }
     lap('setup');
@@ -1935,10 +1937,11 @@ async function prepareEngineViews(id) {
         // the blur after the splat runs there too, before the read-back (viewKernel === null turns it off)
         const kx = dbg.viewKernel === null ? null : dbg.viewKernel || VIEW_KERNEL;
         const ky = dbg.viewKernel === null ? null : dbg.viewKernelY || dbg.viewKernel || VIEW_KERNEL;
-        const acc = lytroSplatGpu(state.gpu, kx && ky && kx.length <= 9 && ky.length <= 9 ? { ...input, viewBlur: { kx, ky } } : input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
+        const onGpu = !!(kx && ky && kx.length <= 9 && ky.length <= 9) && !dbg.noGpuBlur;
+        const acc = lytroSplatGpu(state.gpu, onGpu ? { ...input, viewBlur: { kx, ky } } : input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
         if (acc) {
           state.lytroGpu = true;
-          blurredOnGpu = !!(kx && ky && kx.length <= 9 && ky.length <= 9);
+          blurredOnGpu = onGpu;
         }
         return acc;
       } catch (e) {

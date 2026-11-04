@@ -63,21 +63,35 @@ export function loadSegModel(onProgress = () => {}) {
     const enc = await modelBytes(SEG_FILES.encoder, (p) => onProgress('Downloading object model', p * 0.65));
     const dec = await modelBytes(SEG_FILES.decoder, (p) => onProgress('Downloading object model', 0.65 + p * 0.35));
     onProgress('Loading object model', 1);
-    // The image encoder is the heavy part: on the graphics card when there is
-    // one (WebGPU), else on the CPU. The small mask decoder stays on the CPU.
+    // Both models run on the graphics card when there is one (WebGPU), else on the CPU. On the card the encoder's embeddings stay there
+    // and go straight into the decoder (no download and upload for each of the 54 points); if the decoder cannot run there the
+    // embeddings are fetched once and a CPU decoder takes over (see findObjectMasks).
     const cpu = { executionProviders: ['wasm'] };
     let encoder = null;
+    let decoder = null;
     let device = 'cpu';
     if (await hasWebGpu()) {
       try {
-        encoder = await ort.InferenceSession.create(enc, { executionProviders: ['webgpu'] });
+        decoder = await ort.InferenceSession.create(dec, { executionProviders: ['webgpu'] });
+        encoder = await ort.InferenceSession.create(enc, { executionProviders: ['webgpu'], preferredOutputLocation: { image_embeddings: 'gpu-buffer' } });
         device = 'gpu';
       } catch {
         encoder = null;
+        decoder = null;
+      }
+      if (!encoder) {
+        // the encoder alone on the card (the earlier arrangement), the decoder on the CPU
+        try {
+          encoder = await ort.InferenceSession.create(enc, { executionProviders: ['webgpu'] });
+          device = 'gpu-encoder';
+        } catch {
+          encoder = null;
+        }
       }
     }
     encoder ??= await ort.InferenceSession.create(enc, cpu);
-    return { ort, encoder, decoder: await ort.InferenceSession.create(dec, cpu), device };
+    decoder ??= await ort.InferenceSession.create(dec, cpu);
+    return { ort, encoder, decoder, device, decoderBytes: dec };
   })().catch((e) => {
     loading = null;
     throw e;
@@ -119,21 +133,34 @@ export async function findObjectMasks(model, rgb, w, h, { cols = 9, rows = 6, sc
     }
   }
   onProgress('Finding objects', 0);
-  const embeddings = (await encoder.run({ input_image: new ort.Tensor('float32', input, [nh, nw, 3]) })).image_embeddings;
+  let embeddings = (await encoder.run({ input_image: new ort.Tensor('float32', input, [nh, nw, 3]) })).image_embeddings;
+  let decode = decoder;
   const mw = Math.max(8, Math.round(w * outScale));
   const mh = Math.max(8, Math.round(h * outScale));
   const masks = [];
   const total = cols * rows;
   for (let j = 0; j < rows; j++) {
     for (let i = 0; i < cols; i++) {
-      const out = await decoder.run({
-        image_embeddings: embeddings,
+      const feeds = (emb) => ({
+        image_embeddings: emb,
         point_coords: new ort.Tensor('float32', new Float32Array([(((i + 0.5) / cols) * w) * scale, (((j + 0.5) / rows) * h) * scale]), [1, 1, 2]),
         point_labels: new ort.Tensor('float32', new Float32Array([1]), [1, 1]),
         mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
         has_mask_input: new ort.Tensor('float32', new Float32Array([0]), [1]),
         orig_im_size: new ort.Tensor('float32', new Float32Array([mh, mw]), [2]),
       });
+      let out;
+      try {
+        out = await decode.run(feeds(embeddings));
+      } catch (e) {
+        // the decoder could not run on the card: fetch the embeddings once and finish on the CPU
+        if (model.device !== 'gpu' || decode !== decoder) throw e;
+        const data = await embeddings.getData();
+        embeddings = new ort.Tensor('float32', data, embeddings.dims);
+        model.cpuDecoder ??= await ort.InferenceSession.create(model.decoderBytes, { executionProviders: ['wasm'] });
+        decode = model.cpuDecoder;
+        out = await decode.run(feeds(embeddings));
+      }
       const m = out.masks.data;
       const bin = new Uint8Array(mw * mh);
       let area = 0;
