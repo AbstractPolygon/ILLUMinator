@@ -341,6 +341,28 @@ void main() {
   o = vec4(0.299 * t.r + 0.587 * t.g + 0.114 * t.b);
 }`;
 
+// Separable filter over the premultiplied views stacked one under another (colour and weight), zero outside each view: the CPU's filterPremultiplied in worker.js.
+// uAxis (1,0) filters along rows, (0,1) down columns within the view the row belongs to (uH rows each).
+const VIEW_BLUR = `${HEAD}
+uniform sampler2D uSrc;
+uniform ivec2 uAxis;
+uniform int uH;
+uniform int uR;       // taps on each side
+uniform float uK[9];  // kernel, centre at uK[uR]
+out vec4 o;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  int row0 = (p.y / uH) * uH;
+  vec4 a = vec4(0.0);
+  for (int t = -uR; t <= uR; t++) {
+    ivec2 q = p + uAxis * t;
+    if (q.x < 0 || q.x >= size.x || q.y < row0 || q.y >= row0 + uH) continue;
+    a += uK[t + uR] * texelFetch(uSrc, q, 0);
+  }
+  o = a;
+}`;
+
 // s0 = a x everywhere but at the recursion's first sample, which keeps x (the engine starts with y[0] = x[0]).
 const IIR_INIT = `${HEAD}
 uniform sampler2D uSrc;
@@ -666,6 +688,7 @@ function programs(gpu) {
       luma: program(gl, LUMA, VERTEX),
       iirInit: program(gl, IIR_INIT, VERTEX),
       iirStep: program(gl, IIR_STEP, VERTEX),
+      viewBlur: program(gl, VIEW_BLUR, VERTEX),
       splat: program(gl, SPLAT_FRAGMENT, SPLAT_VERTEX),
     };
   }
@@ -942,11 +965,43 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.disable(gl.BLEND);
   }
 
+  // the blur the engine applies to each view after the splat (P.viewBlur = { kx, ky }), before the read-back
+  if (P.viewBlur && nV) blurViewsGpu(gpu, acc, W, H, nV, P.viewBlur.kx, P.viewBlur.ky);
   gpu.target(acc, W, HA);
   const out = new Float32Array(W * HA * 4);
   gl.readPixels(0, 0, W, HA, gl.RGBA, gl.FLOAT, out);
   for (const t of created) gl.deleteTexture(t);
   return out;
+}
+
+// Filters the premultiplied views stacked in `acc` (nV views of W x H, RGBA32F) in place: kx along rows, ky down columns, taps outside a view left out.
+// Odd kernels of at most 9 taps.
+export function blurViewsGpu(gpu, acc, W, H, nV, kx, ky) {
+  const gl = gpu.gl;
+  const prog = programs(gpu);
+  const HA = H * nV;
+  const tmp = gpu.texture(W, HA, gl.RGBA32F);
+  const pass = (src, dst, axis, k) => {
+    if (!k || k.length % 2 === 0 || k.length > 9) throw new Error('view blur kernel');
+    const p = prog.viewBlur;
+    gl.disable(gl.BLEND);
+    gl.useProgram(p.p);
+    gpu.target(dst, W, HA);
+    const U = p.u;
+    gpu.bindTex(0, src);
+    gl.uniform1i(U.uSrc, 0);
+    gl.uniform2i(U.uAxis, axis[0], axis[1]);
+    gl.uniform1i(U.uH, H);
+    gl.uniform1i(U.uR, (k.length - 1) >> 1);
+    gl.uniform1fv(U.uK, Float32Array.from([...k, ...new Array(9 - k.length).fill(0)]));
+    gpu.draw();
+  };
+  try {
+    pass(acc, tmp, [1, 0], kx);
+    pass(tmp, acc, [0, 1], ky);
+  } finally {
+    gl.deleteTexture(tmp);
+  }
 }
 
 function H_SENSOR(cam) {

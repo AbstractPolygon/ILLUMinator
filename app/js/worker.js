@@ -1,6 +1,7 @@
 // Decoding and rendering run here so the UI stays responsive.
 // Requests: { id, type, ...args }. Replies: { id, type: 'result' | 'progress' | 'frame' | 'error', ... }.
 
+import { filterPremultiplied } from './core/viewblur.js';
 import { decodeLightField } from './core/decode.js';
 import { normalizeGrid, measureGrid, calibrateGrid, lensCenters, lensCenter, toLocal } from './core/lenslet.js';
 import {
@@ -1922,6 +1923,7 @@ async function prepareEngineViews(id) {
   const W = raster ? Math.round(lf.cam.width / lf.grid.pitch) : sampler.outW;
   const H = raster ? Math.round(lf.cam.height / lf.grid.pitch) : sampler.outH;
   const tViews = Date.now();
+  let blurredOnGpu = false;
   const sp = lytroSplat({
     modulation: state.modulation,
     geoTable: parseGeometryTable(lf.geometryBytes),
@@ -1930,8 +1932,14 @@ async function prepareEngineViews(id) {
     onProgress: (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }),
   }, { ...LYTRO_SPLAT, exact: true, bisg: !dbg.noBisg, aperture: engineAperture(lf.cam, EXACT_APERTURE_FRACTION), gpu: state.gpu && !dbg.noGpuEngine && !dbg.noGpuViews ? (input) => {
       try {
-        const acc = lytroSplatGpu(state.gpu, input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
-        if (acc) state.lytroGpu = true;
+        // the blur after the splat runs there too, before the read-back (viewKernel === null turns it off)
+        const kx = dbg.viewKernel === null ? null : dbg.viewKernel || VIEW_KERNEL;
+        const ky = dbg.viewKernel === null ? null : dbg.viewKernelY || dbg.viewKernel || VIEW_KERNEL;
+        const acc = lytroSplatGpu(state.gpu, kx && ky && kx.length <= 9 && ky.length <= 9 ? { ...input, viewBlur: { kx, ky } } : input, (p) => post({ id, type: 'progress', stage: 'Rendering the depth views', progress: p }));
+        if (acc) {
+          state.lytroGpu = true;
+          blurredOnGpu = !!(kx && ky && kx.length <= 9 && ky.length <= 9);
+        }
         return acc;
       } catch (e) {
         gpuFellBack('Rendering the depth views', e);
@@ -1942,7 +1950,7 @@ async function prepareEngineViews(id) {
   const pitch = lf.grid.pitch;
   const list = sp.views.map((acc, k) => {
     const rgb = new Float32Array(W * H * 3);
-    if (dbg.viewKernel !== null) filterPremultiplied(acc, W, H, dbg.viewKernel || VIEW_KERNEL, dbg.viewKernelY || dbg.viewKernel || VIEW_KERNEL);
+    if (dbg.viewKernel !== null && !blurredOnGpu) filterPremultiplied(acc, W, H, dbg.viewKernel || VIEW_KERNEL, dbg.viewKernelY || dbg.viewKernel || VIEW_KERNEL);
     const filled = fillHoles(acc, W, H);
     for (let p = 0; p < W * H; p++) {
       const a = acc[4 * p + 3];
@@ -1953,31 +1961,6 @@ async function prepareEngineViews(id) {
   if (raster) list.raster = { w: W, h: H };
   if (globalThis.__awbDump) globalThis.__awbDump(list, W, H);
   state.engineViews = list;
-}
-
-// Separable filter over the premultiplied view (colour and weight), zero outside. The taps that fall outside are left out of the sum
-// (the loop bounds are worked out once per sample, not tested per tap); the sum runs in the same order as the plain version.
-function filterPremultiplied(acc, W, H, kx, ky) {
-  const pass = (src, dst, n, stride, lines, lineStride, k) => {
-    const r = (k.length - 1) >> 1;
-    for (let l = 0; l < lines; l++) {
-      const base = 4 * l * lineStride;
-      const step = 4 * stride;
-      for (let i = 0; i < n; i++) {
-        const t0 = Math.max(-r, -i);
-        const t1 = Math.min(r, n - 1 - i);
-        const o = base + i * step;
-        for (let c = 0; c < 4; c++) {
-          let a = 0;
-          for (let t = t0; t <= t1; t++) a += k[t + r] * src[o + t * step + c];
-          dst[o + c] = a;
-        }
-      }
-    }
-  };
-  const tmp = new Float32Array(acc.length);
-  pass(acc, tmp, W, 1, H, W, kx);
-  pass(tmp, acc, H, W, W, 1, ky);
 }
 
 function depthViews() {
