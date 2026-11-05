@@ -15,7 +15,7 @@ import { userDepthAlpha, userDepthAlphaUpscaled, engineDepthInFrame, dilateNeare
 import { LAMBDA_TO_ALPHA } from './core/recipe.js';
 import { LYTRO_EXPOSURE, lytroBalance } from './core/base.js';
 import { loadSegModel, findObjectMasks } from './core/segmodel.js';
-import { pickObjects, signatures } from './core/objects.js';
+import { pickObjects, signatures, upsampleLabels } from './core/objects.js';
 import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
 import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
@@ -1683,13 +1683,9 @@ async function findObjects(id) {
     const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
     const model = await loadSegModel(progress);
     const found = await findObjectMasks(model, centerView(), outW, outH, { onProgress: progress, prep: DEPTH_REGIONS.gpu && DEPTH_REGIONS.gpu.segInput });
-    const small = signatures(pickObjects(found.masks, found.w, found.h), found.w, found.h);
-    // Back to the depth map's size.
-    const labels = new Uint32Array(outW * outH);
-    for (let y = 0; y < outH; y++) {
-      const sy = Math.min(found.h - 1, Math.floor(((y + 0.5) * found.h) / outH));
-      for (let x = 0; x < outW; x++) labels[y * outW + x] = small[sy * found.w + Math.min(found.w - 1, Math.floor(((x + 0.5) * found.w) / outW))];
-    }
+    // the whole of it on the graphics card when there is one (gpu/regions.js), else here
+    let labels = DEPTH_REGIONS.gpu && DEPTH_REGIONS.gpu.findObjects ? DEPTH_REGIONS.gpu.findObjects(found.masks, found.w, found.h, outW, outH) : null;
+    if (!labels) labels = upsampleLabels(signatures(pickObjects(found.masks, found.w, found.h), found.w, found.h), found.w, found.h, outW, outH);
     state.objects = { w: outW, h: outH, labels };
     return state.objects.labels;
   } catch (e) {

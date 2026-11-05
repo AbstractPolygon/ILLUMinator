@@ -8,6 +8,7 @@
 
 import { program } from './renderer.js';
 import { OBJECT_COST, pairWeight, solveRegions } from '../core/segments.js';
+import { objectCandidates, chooseDistinct, paintOrder } from '../core/objects.js';
 
 const VERTEX = `#version 300 es
 in vec2 aPos;
@@ -762,6 +763,92 @@ void main() {
   o = vec4(255.0 * pow(clamp(v / white, 0.0, 1.0), vec3(1.0 / 2.2)), 0.0);
 }`;
 
+
+// ---- object finding (core/objects.js): mask overlaps, painting, the majority vote, the resize -----------------------------------------------
+
+const ATLAS_HEAD = `uniform usampler2D uAtlas;
+uniform int uCols;
+uniform int uMw;
+uniform int uMh;
+ivec2 tileOrigin(int k) { return ivec2((k % uCols) * uMw, (k / uCols) * uMh); }`;
+
+// pixels two masks share, for every pair (row i, column j < i)
+const MASK_INTER = `${HEAD}
+${ATLAS_HEAD}
+void main() {
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  int j = t.x;
+  int i = t.y;
+  if (j >= i) { o = vec4(0.0); return; }
+  ivec2 a = tileOrigin(i);
+  ivec2 b = tileOrigin(j);
+  float s = 0.0;
+  for (int y = 0; y < uMh; y++) {
+    for (int x = 0; x < uMw; x++) {
+      if (texelFetch(uAtlas, a + ivec2(x, y), 0).r != 0u && texelFetch(uAtlas, b + ivec2(x, y), 0).r != 0u) s += 1.0;
+    }
+  }
+  o = vec4(s);
+}`;
+
+// each pixel's label: the position (from 1) of the last mask in painting order that holds it
+const MASK_PAINT = `${HEAD}
+${ATLAS_HEAD}
+uniform int uM;
+uniform int uTile[32];
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float label = 0.0;
+  for (int k = 0; k < 32; k++) {
+    if (k >= uM) break;
+    if (texelFetch(uAtlas, tileOrigin(uTile[k]) + p, 0).r != 0u) label = float(k + 1);
+  }
+  o = vec4(label);
+}`;
+
+// the label most common in the window; ties go to the label that reached that count first in raster order (as signatures() counts)
+const LABEL_VOTE = `${HEAD}
+uniform sampler2D uLabel;
+uniform int uR;
+const int MAXW = 81;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uLabel, 0);
+  float best = texelFetch(uLabel, p, 0).r;
+  int bestCount = 0;
+  float vals[MAXW];
+  int n = 0;
+  for (int dy = -uR; dy <= uR; dy++) {
+    int yy = p.y + dy;
+    if (yy < 0 || yy >= sz.y) continue;
+    for (int dx = -uR; dx <= uR; dx++) {
+      int xx = p.x + dx;
+      if (xx < 0 || xx >= sz.x) continue;
+      float l = texelFetch(uLabel, ivec2(xx, yy), 0).r;
+      vals[n] = l;
+      int c = 0;
+      for (int s = 0; s < MAXW; s++) {
+        if (s > n) break;
+        if (vals[s] == l) c++;
+      }
+      n++;
+      if (c > bestCount) { bestCount = c; best = l; }
+    }
+  }
+  o = vec4(best);
+}`;
+
+const LABEL_UPSAMPLE = `${HEAD}
+uniform sampler2D uLabel;
+uniform ivec2 uOut;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 sz = textureSize(uLabel, 0);
+  int sy = min(sz.y - 1, ((2 * p.y + 1) * sz.y) / (2 * uOut.y));
+  int sx = min(sz.x - 1, ((2 * p.x + 1) * sz.x) / (2 * uOut.x));
+  o = vec4(texelFetch(uLabel, ivec2(sx, sy), 0).r);
+}`;
+
 // ---- host ---------------------------------------------------------------------------------------------------------------------------
 
 function programs(gpu) {
@@ -792,6 +879,10 @@ function programs(gpu) {
       bisectInit: frag(BISECT_INIT),
       bisectStep: frag(BISECT_STEP),
       segLuma: frag(SEG_LUMA),
+      maskInter: frag(MASK_INTER),
+      maskPaint: frag(MASK_PAINT),
+      labelVote: frag(LABEL_VOTE),
+      labelUpsample: frag(LABEL_UPSAMPLE),
       segResize: frag(SEG_RESIZE),
       threshHalf: frag(THRESH_HALF),
       threshCount: frag(THRESH_COUNT),
@@ -836,11 +927,11 @@ class Scope {
     return t;
   }
 
-  up(w, h, internal, format, type, data) {
+  up(w, h, internal, format, type, data, alignment = 4) {
     const gl = this.gl;
     const t = this.tex(w, h, internal);
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, alignment);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, format, type, data);
     return t;
   }
@@ -1144,6 +1235,65 @@ class Scope {
     return { input, nw, nh, scale };
   }
 
+  // The objects of a photo from the masks the model found (core/objects.js pickObjects + signatures + upsampleLabels), with the pixel work on
+  // the card: how much every pair of masks overlaps (all pairs at once; the greedy choice then runs on that small table), the painting of the
+  // chosen masks, the three majority votes and the resize. `masks`: [{ bin, area, quality }] of mw x mh. Returns a Uint32Array (outW x outH).
+  findObjects(masks, mw, mh, outW, outH, { radius = 3, passes = 3 } = {}) {
+    const gl = this.gl;
+    if (radius > 4) return null;
+    const cands = objectCandidates(masks, mw * mh);
+    if (!cands.length) return new Uint32Array(outW * outH);
+    const K = cands.length;
+    const cols = Math.min(K, 8);
+    const rows = Math.ceil(K / cols);
+    const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    if (cols * mw > max || rows * mh > max || K > 256) return null;
+    const atlas = new Uint8Array(cols * mw * rows * mh);
+    cands.forEach((m, k) => {
+      const ox = (k % cols) * mw;
+      const oy = Math.floor(k / cols) * mh;
+      for (let y = 0; y < mh; y++) atlas.set(m.bin.subarray(y * mw, (y + 1) * mw), (oy + y) * cols * mw + ox);
+    });
+    const atlasT = this.up(cols * mw, rows * mh, gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, atlas, 1);
+    const atlasUniforms = (U) => {
+      gl.uniform1i(U.uCols, cols);
+      gl.uniform1i(U.uMw, mw);
+      gl.uniform1i(U.uMh, mh);
+    };
+    const inter = this.read(this.pass(this.prog.maskInter, K, K, (U) => {
+      this.bind(U, [['uAtlas', atlasT]]);
+      atlasUniforms(U);
+    }), K, K);
+    const index = new Map(cands.map((m, k) => [m, k]));
+    const chosen = chooseDistinct(cands, (m, c) => inter[4 * (index.get(m) * K + index.get(c))]);
+    if (!chosen.length) return new Uint32Array(outW * outH);
+    const order = paintOrder(chosen);
+    if (order.length > 32) return null;
+    const tiles = Int32Array.from({ length: 32 }, (_, i) => (order[i] ? index.get(order[i]) : 0));
+    let label = this.pass(this.prog.maskPaint, mw, mh, (U) => {
+      this.bind(U, [['uAtlas', atlasT]]);
+      atlasUniforms(U);
+      gl.uniform1i(U.uM, order.length);
+      gl.uniform1iv(U.uTile, tiles);
+    });
+    for (let i = 0; i < passes; i++) {
+      const src = label;
+      label = this.pass(this.prog.labelVote, mw, mh, (U) => {
+        this.bind(U, [['uLabel', src]]);
+        gl.uniform1i(U.uR, radius);
+      });
+    }
+    const big = label;
+    const out = this.pass(this.prog.labelUpsample, outW, outH, (U) => {
+      this.bind(U, [['uLabel', big]]);
+      gl.uniform2i(U.uOut, outW, outH);
+    });
+    const red = this.readRed(out, outW, outH);
+    const labels = new Uint32Array(outW * outH);
+    for (let i = 0; i < labels.length; i++) labels[i] = Math.round(red[i]);
+    return labels;
+  }
+
   // SLIC superpixels (core/segments.js slic): the label of each pixel (a float R channel) and the number of regions.
   slic(labT, w, h, count = 2500, compactness = 8, iterations = 6) {
     const gl = this.gl;
@@ -1361,6 +1511,9 @@ export function regionsGpu(gpu, fellBack = () => {}) {
       const labT = sc.lab(sc.up3(w, h, rgb), w, h);
       return sc.readRed(sc.guidedFilter(sc.upR(w, h, depth), labT, w, h, r, eps), w, h);
     }),
+
+    // the objects of a photo from the model's masks, on the card (see Scope.findObjects)
+    findObjects: guard('Finding objects', (sc, masks, mw, mh, outW, outH, opts) => sc.findObjects(masks, mw, mh, outW, outH, opts)),
 
     // the object model's input, made on the card (see Scope.segmentInput)
     segInput: guard('Preparing the picture for the object model', (sc, rgb, w, h) => sc.segmentInput(sc.up3(w, h, rgb), w, h)),

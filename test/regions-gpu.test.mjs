@@ -128,6 +128,44 @@ test('the GPU region filters match the CPU versions', async (t) => {
         out.slicLabels = { worst: 0, off: off / n };
       }
       out.guidedFilterColor = cmp(S.guidedFilterColor(depth, rgb, w, h), S.guidedFilterColor(depth, rgb, w, h, 5, 0.003, g));
+      // object finding from masks: discs and boxes of different sizes, some nearly the same, some too big or too small or unsure
+      {
+        const O = await import('/js/core/objects.js');
+        const mw = 61;
+        const mh = 47;
+        const masks = [];
+        const add = (cx, cy, rx, ry, quality, box) => {
+          const bin = new Uint8Array(mw * mh);
+          let area = 0;
+          for (let y = 0; y < mh; y++) {
+            for (let x = 0; x < mw; x++) {
+              const inside = box ? Math.abs(x - cx) <= rx && Math.abs(y - cy) <= ry : ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
+              if (inside) { bin[y * mw + x] = 1; area++; }
+            }
+          }
+          masks.push({ bin, area, quality });
+        };
+        add(30, 23, 28, 20, 0.95);          // large
+        add(30, 23, 27, 19, 0.93);          // nearly the same: dropped
+        add(15, 15, 9, 8, 0.97);
+        add(45, 30, 10, 9, 0.9, true);
+        add(46, 30, 10, 9, 0.9, true);      // nearly the same box
+        add(30, 10, 6, 5, 0.99);
+        add(10, 38, 7, 6, 0.8);              // unsure: dropped
+        add(52, 8, 1, 1, 0.99);              // speck: dropped
+        add(30, 23, 40, 30, 0.99, true);     // the whole picture: dropped
+        add(22, 30, 8, 8, 0.91);
+        add(40, 12, 5, 7, 0.88, true);
+        const outW = 97;
+        const outH = 71;
+        const cpu = O.upsampleLabels(O.signatures(O.pickObjects(masks, mw, mh), mw, mh), mw, mh, outW, outH);
+        const gp = g.findObjects(masks, mw, mh, outW, outH);
+        let diff = 0;
+        let nonzero = 0;
+        for (let i = 0; i < cpu.length; i++) { if (cpu[i] !== gp[i]) diff++; if (cpu[i]) nonzero++; }
+        out.findObjects = { worst: 0, off: diff / cpu.length };
+        out.findObjectsCovered = { worst: 0, off: 0, note: nonzero / cpu.length };
+      }
       // the object model's input
       {
         const { segmentInput } = await import('/js/core/segmodel.js');
@@ -146,6 +184,7 @@ test('the GPU region filters match the CPU versions', async (t) => {
     });
     if (!res) return t.skip('No float-renderable WebGL2');
     for (const [name, { worst, off }] of Object.entries(res)) {
+      if (name === 'findObjectsCovered') { t.diagnostic(`object labels cover ${(100 * res[name].note).toFixed(0)}% of the test picture`); assert.ok(res[name].note > 0.3, 'the object test must label something'); continue; }
       if (name === 'flattenHalosChanged') { t.diagnostic(`flattenHalos moved ${(100 * Object.values({ v: res[name].note })[0]).toFixed(1)}% of the pixels on the CPU`); assert.ok(res[name].note > 0.02, 'the halo test must change something'); continue; }
       t.diagnostic(`${name}: largest difference ${worst.toExponential(2)}, ${(off * 100).toFixed(3)}% of pixels differ`);
       // float32 against double: a few ties may fall the other way in the medians
