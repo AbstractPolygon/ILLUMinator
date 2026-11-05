@@ -1076,6 +1076,7 @@ let nrFinalTimer = 0;
 let recoveryRunning = false;
 async function renderCamera({ final = false } = {}) {
   clearTimeout(nrFinalTimer);
+  cancelSharp();
   // Changes keep coming: wait for them to stop before auto rendering.
   if (autoRenderTimer) scheduleAutoRender();
   if (!canRender()) return;
@@ -1135,7 +1136,69 @@ async function renderCamera({ final = false } = {}) {
     if (v.pending) {
       v.pending = false;
       renderCamera();
+    } else {
+      scheduleSharp();
     }
+  }
+}
+
+// At f/22 (aperture closed, no depth-of-field blur) the live view is one view of the light field, at the lens grid's resolution: sharp in
+// depth but with a lens per pixel. Once changes stop, the all-in-focus picture from every sensor pixel (the engine's, as Render makes it, at
+// twice the view's size) is made in the background and shown instead; any change goes back to the live view and cancels it. Not on a
+// software renderer (minutes), not while Full resolution mode is on (it has its own Render), and not when the card's memory limit says no.
+const SHARP_DELAY = 1500;
+const SHARP_SCALE = 2;
+let sharpTimer = 0;
+const sharp = { running: false, token: 0 };
+
+function sharpWanted() {
+  const info = state.info;
+  if (!info || !info.hasRaw || state.mode !== 'camera' || !showsCamera() || state.fullResMode || state.playing || drag.on || stereoShown()) return false;
+  if (!globalThis.__sharpAnyGpu && /swiftshader|llvmpipe|software|softpipe|^CPU/i.test(info.renderer || 'CPU')) return false;  // (the flag: tests on a software renderer)
+  const lens = apertureFor(fNumber());
+  if (lens.aperture !== 0 || lens.dof !== 0) return false;
+  const size = info.stillSizes && info.stillSizes[SHARP_SCALE];
+  return !(size && !fitsMemory('vram', superResVram(size[0], size[1])));
+}
+
+function cancelSharp() {
+  clearTimeout(sharpTimer);
+  sharpTimer = 0;
+  sharp.token++;
+  if (sharp.running) engine.cancel('superres').catch(() => {});
+}
+
+function scheduleSharp() {
+  clearTimeout(sharpTimer);
+  sharpTimer = 0;
+  if (!sharpWanted()) return;
+  sharpTimer = setTimeout(runSharp, SHARP_DELAY);
+}
+
+async function runSharp() {
+  sharpTimer = 0;
+  if (!sharpWanted() || state.view.busy) return;
+  if (sharp.running) return;  // (when it ends, a cancelled one starts the next, see below)
+  const token = ++sharp.token;
+  const photo = state.current && state.current.photo;
+  sharp.running = true;
+  try {
+    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: SHARP_SCALE, passes: 0, label: 'Sharpening' }, { onProgress: (stage, p) => { if (sharp.token === token) $('frame-label').textContent = `Sharpening ${Math.round((p ?? 0) * 100)}%`; } });
+    const msg = await promise;
+    // A change since (or another photo) makes it stale.
+    if (token === sharp.token && msg && (msg.pixels || msg.bitmap) && sharpWanted() && state.current && state.current.photo === photo) {
+      const img = toImageData(msg);
+      draw(img);
+      $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+    }
+  } catch (err) {
+    // the quick view stays; nothing to tell the user about a background picture
+    console.warn('Sharp preview failed', err);
+  } finally {
+    sharp.running = false;
+    if (token === sharp.token && !$('frame-label').textContent.includes('×')) $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+    // A change cancelled it (or came while it ran, and its own try found it busy): start again once the live view is up to date.
+    if (token !== sharp.token && !sharpTimer && !state.view.busy && !state.view.pending) scheduleSharp();
   }
 }
 

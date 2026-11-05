@@ -4,7 +4,7 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 
 ## Depth
 
-- *Aperture:* f/22 to f/0.5. Small apertures keep everything sharp; wide ones blur what is away from the focus (click the picture to choose what is in focus). Beyond f/2, the widest the camera can record, the blur is synthetic, using the depth map.
+- *Aperture:* f/22 to f/0.5. Small apertures keep everything sharp (at f/22 the app first shows a quick view, and when you stop changing things it makes the all-in-focus picture from every sensor pixel in the background, at twice the view's size, and swaps it in; any change goes back to the quick view; this needs a graphics card); wide ones blur what is away from the focus (click the picture to choose what is in focus). Beyond f/2, the widest the camera can record, the blur is synthetic, using the depth map.
 - *Depth:* how quickly things blur away from the focus.
 - *Smoothing:* smooths the depth map, following the picture's edges.
 - *Depth method:* how the depth map is measured. *Automatic* picks the engine's way for raw camera photos and the blend otherwise. *Illuminator* is Illuminator's own measurement (a plain cost volume). *Classic Desktop* is the engine's way, as Lytro Desktop measures it. *Blended* mixes the two, with a *Blend* slider from Illuminator's depth (0) to Classic Desktop's (100). Measuring is done on the graphics card where there is a real one; if a step has to be done on the processor instead, a note says so. A photo's measured depth is kept next to it in the library (desktop app), so reopening it is quicker.
