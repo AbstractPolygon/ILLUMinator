@@ -4,7 +4,7 @@ The editing panels are in the right sidebar; click a title to open or close it. 
 
 ## Photo viewer
 
-- **Click** to focus on that spot. With a small aperture the click also opens it up to f/2.8, so the change shows. Thin things close to the camera, such as the wires of a fence, stay sharp when you click on them even where the depth map is too coarse to tell them from what is behind: where the views of the photo agree that there is an edge or texture at the focus depth, that pixel is kept sharp.
+- **Click** to focus on that spot. With a small aperture the click also opens it up to f/2.8, so the change shows.
 - **Drag** to move the viewpoint, like grabbing the scene and turning it.
 - **Shift-drag**, **middle mouse button drag**, or drag when zoomed in on the lenslet view, to pan. Zoom with the − / + buttons in the bar above the picture, *Fit* and *1:1*.
 
