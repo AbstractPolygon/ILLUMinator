@@ -13,7 +13,7 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 - *Object edges:* finds the objects in the photo and puts the depth map's edges on their outlines, so depth steps are clean instead of blocky. It works with or without *High quality depth map*. The first time it is turned on, it downloads an object model (about 45 MB, kept afterwards); finding the objects takes several seconds per photo, and on a computer with a graphics card most of that work (the model itself, the picture's preparation and the clean-up of the depth map) runs on the card.
 - *High quality depth map:* sharper depth edges that match the photo, and depth found even on far, very out-of-focus surfaces (a textured wall behind the subject), about two to three times as slow to measure. On by default; off, the faster, blockier depth map is used.
 - *Show depth map:* shows the depth map in color. It stays on while you change settings, move the viewpoint or press Render (the full sensor still is made meanwhile and shows when the depth map is turned off).
-- *Greyscale:* (next to Show depth map) shows the depth map in grey instead of in color.
+- *Grayscale:* (next to Show depth map) shows the depth map in gray instead of in color.
 - *Depth map contrast:* stretches the depth map's colors over a narrower range of depth, so small differences show more (Lytro Desktop's depth maps look this way). It only changes how the depth map is shown, not the depth.
 
 ## Focus Spread

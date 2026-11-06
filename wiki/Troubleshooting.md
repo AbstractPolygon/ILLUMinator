@@ -10,7 +10,7 @@
 
 **Report a problem:** [GitHub issues](https://github.com/AbstractPolygon/Illuminator/issues).
 
-**The first generation camera does not show (Windows).** It is read through its disk, which needs the camera switched on and its USB cable connected; the *Import from camera…* dialog's diagnostics list the disks it saw. If its thumbnails look like colour noise, send the camera log, which says how the thumbnail files are stored.
+**The first generation camera does not show (Windows).** It is read through its disk, which needs the camera switched on and its USB cable connected; the *Import from camera…* dialog's diagnostics list the disks it saw. If its thumbnails look like color noise, send the camera log, which says how the thumbnail files are stored.
 
 **Depth measuring is slow.** With a real graphics card the depth is measured on it; when a step falls back to the processor, or only a software renderer is found, a note appears over the picture. Choosing *Depth method → Illuminator* is the quickest measurement.
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { engineLensShift, removeSmoothOffsets, lensShiftAt } from '../app/js/core/lensshift.js';
-import { lensCenter, lensRange } from '../app/js/core/lenslet.js';
+import { lensRange } from '../app/js/core/lenslet.js';
 import { WHITE_SCALE } from '../app/js/core/calibration.js';
 
 // A lens grid and a white image whose lenses sit off the grid by known amounts.

@@ -16,7 +16,8 @@
     "build:web": "node scripts/build-web.mjs",
     "test": "node --test \"test/**/*.test.mjs\"",
     "render": "node scripts/lfr-render.mjs",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "lint": "eslint ."
   },
   "engines": {
     "node": ">=20"
@@ -129,7 +130,9 @@
   },
   "devDependencies": {
     "electron": "44.4.5",
-    "electron-builder": "26.16.1"
+    "electron-builder": "26.16.1",
+    "eslint": "10.14.0",
+    "globals": "17.14.0"
   },
   "optionalDependencies": {
     "koffi": "^2.9.0",

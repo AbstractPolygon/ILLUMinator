@@ -474,6 +474,7 @@ function noisePyramids(R, G, B, W, H, prof, nlev) {
 
 // ---- profile tables ----
 const b64 = (s) => {
+  // eslint-disable-next-line no-undef -- Node only (tests); the browser has atob
   const bin = typeof atob === 'function' ? atob(s) : Buffer.from(s, 'base64').toString('binary');
   const u = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);

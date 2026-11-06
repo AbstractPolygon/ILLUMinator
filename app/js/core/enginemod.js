@@ -16,6 +16,7 @@ import { debugFlags } from './debugflags.js';
 let CURVE = null;
 export function curve() {
   if (CURVE) return CURVE;
+  // eslint-disable-next-line no-undef -- Node only (tests); the browser has atob
   const bin = typeof atob === 'function' ? atob(MOD_CURVE_B64) : Buffer.from(MOD_CURVE_B64, 'base64').toString('binary');
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

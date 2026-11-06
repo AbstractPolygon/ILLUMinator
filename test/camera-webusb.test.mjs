@@ -1,7 +1,7 @@
 // The camera protocol over WebUSB (app/js/camera/webusb.js) against a stand-in device.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connectWebUsb, describeInterfaces, candidateInterfaces, downloadPicture, LytroCamera, WebUsbTransport } from '../app/js/camera/webusb.js';
+import { connectWebUsb, describeInterfaces, candidateInterfaces, downloadPicture, WebUsbTransport } from '../app/js/camera/webusb.js';
 
 // A WebUSB device that answers the bulk-only wrappers like the camera does.
 function fakeDevice({ files = {}, pictures = [], interfaces, claimFails = [] }) {

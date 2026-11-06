@@ -20,7 +20,7 @@ import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
 import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { VERSION } from './version.js';
-import { removePeriodicPattern, removePeriodicPatternRepeatedly, removeLatticeByTiles } from './core/notch.js';
+import { removePeriodicPatternRepeatedly, removeLatticeByTiles } from './core/notch.js';
 import { snapDepthEdges, snapToObjects, softenObjectEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
 import { methodDepthModel, readDepthModel } from './core/depthmodels.js';
 import { runDepthModel, fitModelDepth, shapeModelDepth, fuseModelDepth } from './core/depthmodel.js';
