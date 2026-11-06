@@ -31,7 +31,8 @@ import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, se
 let KEY_FPS = DEFAULT_FPS;
 import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, flipVerticalOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
-import { hook } from './core/debugflags.js';
+import { hook, setHook } from './core/debugflags.js';
+import { colorSettings as buildColorSettings, renderSettings as buildRenderSettings, FRINGES, CURVE_REGIONS } from './settingsmap.js';
 import { releaseHighlights } from './core/releasenotes.js';
 
 const $ = (id) => document.getElementById(id);
@@ -5499,7 +5500,6 @@ for (const input of document.querySelectorAll('input[type=number]')) addSteppers
 
 // ---------------------------------------------------------------- tone curve
 
-const CURVE_REGIONS = ['shadows', 'darks', 'lights', 'highlights'];
 function curveRegions() {
   return CURVE_REGIONS.map((k) => $(`curve-${k}`).value / 100);
 }
@@ -6697,69 +6697,15 @@ $('anim-on').onchange = () => {
   if (state.lastImage) draw(state.lastImage);
 };
 
-// The settings the color pass applies (Process and Optics), each slider
-// read through `val(id)`: its value, or an animation frame's keyframed one.
+// The settings the color pass applies (Process and Optics), each slider read through `val(id)`: its value, or an animation frame's keyframed one (core: settingsmap.js).
 function colorSettings(val = (id) => +$(id).value) {
-  return {
-    lutAmount: val('lut-amount') / 100,
-    ev: val('ev'),
-    lytroLook: $('base-look').value !== 'flat',
-    saturation: 1 + val('saturation') / 100,
-    autoWb: $('awb').checked,
-    wb: { kelvin: val('wb-temperature'), tint: val('wb-tint') },
-    tone: Object.fromEntries(TONES.map((k) => [k, val(`tone-${k}`) / 100])),
-    curve: { points: parsePoints($('curve-points').value), regions: CURVE_REGIONS.map((k) => val(`curve-${k}`) / 100) },
-    useCcm: $('ccm-mode').value !== 'none',
-    ccm: $('ccm-mode').value === 'custom' ? Array.from({ length: 9 }, (_, i) => +$(`ccm-${i}`).value || 0) : null,
-    color: { vibrance: val('vibrance') / 100, ...Object.fromEntries(HUE_SLIDERS.map((k) => [k, val(`hue-${k}`) / 100])) },
-    flare: { on: $('flare-on').checked, amount: val('flare-amount') / 100 },
-    lens: { auto: $('lens-auto').checked, distortion: val('lens-distortion'), vignetting: val('lens-vignetting'), midpoint: val('lens-midpoint') },
-    defringe: {
-      on: $('fringe-on').checked,
-      auto: $('fringe-auto').checked,
-      radius: val('fringe-radius'),
-      threshold: val('fringe-threshold'),
-      // [amount, hue] for purple, green, red and blue fringes.
-      colors: FRINGES.map((key) => [val(`fringe-${key}`), (val(`fringe-${key}-hue`) + 360) % 360]),
-    },
-  };
+  return buildColorSettings({ el: $, num: val });
 }
 
 async function applySettings() {
   await sendLut();
-  const settings = {
-    ...colorSettings(),
-    mvDenoise: { on: $('mv-on').checked, blend: $('mv-blend').value / 100 },
-    hotPixels: $('nr-hot').checked,
-    depthSmoothing: $('depth-smooth').value / 100,
-    depthQuality: $('depth-hq').checked ? 'high' : 'normal',
-    depthStyle: $('depth-style').value,
-    depthBlend: $('depth-blend').value / 100,
-    depthModelBlend: $('depth-model-blend').value / 100,
-    lensCentres: $('lens-centres').value,
-    latticeOn: $('lattice-on').checked,
-    latticeStrength: $('lattice-strength').value / 100,
-    latticeDetect: $('lattice-detect').value / 100,
-    depthModelSmooth: $('depth-model-smooth').value / 100,
-    depthModelCurve: $('depth-model-curve').value / 100,
-    depthContrast: $('depth-contrast').value / 100,
-    depthObjects: $('depth-objects').checked,
-    depthObjectSoft: $('depth-objects-soft').value / 100,
-    lytroDepth: $('lytro-depth').checked,
-    details: {
-      amount: +$('sharp-amount').value,
-      radius: +$('sharp-radius').value,
-      detail: +$('sharp-detail').value,
-      masking: +$('sharp-masking').value,
-      luminance: +$('nr-luminance').value,
-      color: +$('nr-color').value,
-      dust: +$('nr-dust').value,
-      speckle: +$('nr-speckle').value,
-      speckleSize: +$('nr-speckle-size').value,
-    },
-    detail: +$('detail').value,
-    local: localSettings(),
-  };
+  const settings = buildRenderSettings({ el: $, num: (id) => +$(id).value }, localSettings());
+  setHook('appliedSettings', settings); // for tests: what the page sends the engine
   $('fringe-controls').disabled = !settings.defringe.on;
   $('fringe-auto').disabled = !settings.defringe.on;
   // Auto defringe sets the colors itself.
@@ -6788,7 +6734,6 @@ async function applySettings() {
   if (state.showingFrames) backToCamera();
   refresh();
 }
-const FRINGES = ['purple', 'green', 'red', 'blue'];
 
 // Moves the defringe sliders to what auto defringe found.
 function showAutoFringe() {
@@ -7098,8 +7043,6 @@ document.addEventListener('keydown', (e) => {
 
 for (const type of ['input', 'change']) $('controls').addEventListener(type, scheduleSave);
 
-const TONES = ['contrast', 'highlights', 'shadows', 'whites', 'blacks'];
-const HUE_SLIDERS = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'];
 
 // Color sliders update the picture while dragging (one request at a time),
 // show their value and reset to their default on double-click.
