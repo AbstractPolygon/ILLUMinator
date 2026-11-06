@@ -42,6 +42,10 @@ const result = await p.evaluate(async () => {
   // frame rate and 3D controls
   $('fps-preset').value = '30'; fire('fps-preset', 'change'); log.fps = $('fps').value; log.customHidden = $('fps-custom').hidden;
   $('fps-preset').value = 'custom'; fire('fps-preset', 'change'); log.customShown = !$('fps-custom').hidden;
+  // local adjustments (no photo, so no mask can be added: these exercise the handlers)
+  $('mask-add-radial').click(); $('mask-delete').click(); fire('mask-on', 'change'); fire('mask-show', 'change');
+  $('mask-filter').value = 'pop'; fire('mask-filter', 'change'); log.filterReset = $('mask-filter').value;
+  if ($('mx-exposure')) { $('mx-exposure').value = 20; fire('mx-exposure'); fire('mx-exposure', 'change'); log.maskSlider = $('mx-exposure').value; }
   if ($('stereo-mode')) { fire('stereo-mode', 'change'); log.stereoMode = $('stereo-mode').value; }
   if ($('stereo-on')) { $('stereo-on').checked = true; fire('stereo-on', 'change'); }
   await new Promise((r) => setTimeout(r, 400));

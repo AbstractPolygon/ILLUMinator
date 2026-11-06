@@ -17,7 +17,8 @@ const text = fs.readFileSync(file, 'utf8');
 const lines = text.split('\n');
 const ast = espree.parse(text, { ecmaVersion: 'latest', sourceType: 'module', loc: true, range: true });
 const heads = [];
-lines.forEach((l, i) => { if (/^\/\/ -{5,}/.test(l)) heads.push({ line: i + 1, name: l.replace(/^\/\/ -+ ?/, '').trim() }); });
+// a section ends at the next header, or at the stub left where an earlier section was moved (`// name: ui/file.js`)
+lines.forEach((l, i) => { if (/^\/\/ -{5,}/.test(l) || /^\/\/ [^:]+: ui\/\S+\.js$/.test(l)) heads.push({ line: i + 1, name: l.replace(/^\/\/ -+ ?/, '').trim() }); });
 const hi = heads.findIndex((h) => h.name === section);
 if (hi < 0) throw new Error('no section ' + section);
 const startLine = heads[hi].line; // the header line itself

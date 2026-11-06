@@ -19,7 +19,7 @@ import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFi
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
-import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
+import { MAX_MASKS } from './core/local.js';
 import { ARCHIVE_SUFFIX } from './library/archive.js';
 import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack, isSettingTrack } from './core/keyframes.js';
 
@@ -32,6 +32,8 @@ import { colorSettings as buildColorSettings, renderSettings as buildRenderSetti
 import { initStereo } from './ui/stereo.js';
 import { initFrameRate } from './ui/framerate.js';
 import { initUpdates, updateCheckOn } from './ui/updates.js';
+import { initLocalAdjustments } from './ui/localadjust.js';
+import { initLivingFilters } from './ui/livingfilters.js';
 import { initLut } from './ui/lut.js';
 import { initWhiteBalancePicker } from './ui/whitebalance.js';
 import { initColorMatrix } from './ui/colormatrix.js';
@@ -70,6 +72,7 @@ const state = {
   album: null, // album shown in the sidebar (null: all photos)
   current: null, // { photo, name, file, sidecar } of the open photo
   view: { busy: false, pending: false },
+  maskSel: -1, // the local adjustment mask being edited (-1: none)
 };
 // Lenslets mode view: `z` screen pixels per sensor pixel, (x, y) the sensor
 // point at the middle of the viewer.
@@ -3224,191 +3227,8 @@ document.addEventListener('keydown', (e) => {
 // color matrix: ui/colormatrix.js
 const { showColorMatrix } = initColorMatrix({ $, state, applySettings: (...a) => applySettings(...a), applySettingsSoon: (...a) => applySettingsSoon(...a) });
 
-// ---------------------------------------------------------------- local adjustments
-
-// Masks (core/local.js) kept as JSON in a hidden field, so they are saved
-// with the photo's edits like every other control. The editor shows the
-// selected mask.
-const MASK_NAMES = { radial: 'Radial', linear: 'Gradient', depth: 'Depth' };
-const SHAPE_SLIDERS = {
-  radial: { x: ['mr-x', 100], y: ['mr-y', 100], w: ['mr-w', 100], h: ['mr-h', 100], feather: ['mr-feather', 100] },
-  linear: { x: ['ml-x', 100], y: ['ml-y', 100], angle: ['ml-angle', 1], width: ['ml-width', 100] },
-  depth: { near: ['md-near', 100], far: ['md-far', 100], feather: ['md-feather', 100] },
-};
-const FX_SLIDERS = { exposure: 'mx-exposure', contrast: 'mx-contrast', saturation: 'mx-saturation', temperature: 'mx-temperature', tint: 'mx-tint', blur: 'mx-blur', pixelate: 'mx-pixelate', sketch: 'mx-sketch' };
-let maskSel = -1;
-
-function getMasks() {
-  return parseMasks($('local-masks').value);
-}
-
-function setMasks(masks, { final = true } = {}) {
-  $('local-masks').value = JSON.stringify(masks);
-  applySettingsSoon();
-  if (final) scheduleSave();
-}
-
-// A mask's name: the one given to it (or its living filter's), else its
-// kind and number.
-function maskLabel(m, i) {
-  if (m.name) return m.name;
-  const same = getMasks().slice(0, i + 1).filter((x) => x.kind === m.kind).length;
-  return `${MASK_NAMES[m.kind]} ${same}`;
-}
-
-const PENCIL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg>';
-const TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
-
-function deleteMask(i) {
-  const list = getMasks();
-  if (!list[i]) return;
-  // Its animation goes with it.
-  const prefix = `mask:${list[i].id}:`;
-  let keyed = false;
-  for (const k of Object.keys(anim.tracks)) {
-    if (!k.startsWith(prefix)) continue;
-    keyed = keyed || anim.tracks[k].length > 0;
-    delete anim.tracks[k];
-  }
-  list.splice(i, 1);
-  if (maskSel >= i) maskSel = Math.max(list.length ? 0 : -1, maskSel - 1);
-  if (!list.length) $('mask-show').checked = false;
-  setMasks(list);
-  renderMasks();
-  clearSelection();
-  if (keyed) saveAnimation();
-  else renderTimeline();
-}
-
-// Asks before deleting mask i, in a small menu by `anchor`.
-function askDeleteMask(i, anchor) {
-  const m = getMasks()[i];
-  if (!m) return;
-  showMenu(anchor, []);
-  confirmInMenu(`Delete ${maskLabel(m, i)}? Its effect is removed from the photo.`, 'Delete', () => deleteMask(i));
-}
-
-function renderMasks() {
-  const masks = getMasks();
-  if (maskSel >= masks.length) maskSel = masks.length - 1;
-  $('mask-list').replaceChildren(...masks.map((m, i) => {
-    const li = document.createElement('li');
-    li.className = i === maskSel ? 'current' : '';
-    if (!m.on) li.classList.add('off');
-    const name = Object.assign(document.createElement('button'), { type: 'button', className: 'mask-name', textContent: maskLabel(m, i) });
-    name.onclick = () => {
-      maskSel = i;
-      renderMasks();
-      applySettingsSoon();
-    };
-    name.title = 'Double-click to rename';
-    const rename = () => editName(li, maskLabel(m, i), (text) => {
-      if (text) {
-        const list = getMasks();
-        if (list[i]) list[i].name = text;
-        setMasks(list);
-      }
-      renderMasks();
-      renderTimeline();
-    }, 'Mask name');
-    name.ondblclick = rename;
-    const edit = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-rename', title: 'Rename' });
-    edit.innerHTML = PENCIL_ICON;
-    edit.setAttribute('aria-label', `Rename ${maskLabel(m, i)}`);
-    edit.onclick = (e) => {
-      e.stopPropagation();
-      rename();
-    };
-    const del = Object.assign(document.createElement('button'), { type: 'button', className: 'icon-only mask-del', title: 'Delete mask' });
-    del.innerHTML = TRASH_ICON;
-    del.setAttribute('aria-label', `Delete ${maskLabel(m, i)}`);
-    del.onclick = (e) => {
-      e.stopPropagation();
-      askDeleteMask(i, del);
-    };
-    li.append(name, edit, del);
-    return li;
-  }));
-  // Masks belong to a photo: none can be added until one is open.
-  for (const kind of Object.keys(MASK_NAMES)) $(`mask-add-${kind}`).disabled = masks.length >= MAX_MASKS || !canRender();
-  $('mask-filter').disabled = masks.length >= MAX_MASKS || !canRender();
-  const m = masks[maskSel];
-  $('mask-editor').hidden = !m;
-  if (!m) {
-    $('mask-show').checked = false;
-    return;
-  }
-  for (const kind of Object.keys(SHAPE_SLIDERS)) $(`mask-shape-${kind}`).hidden = kind !== m.kind;
-  for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) $(id).value = Math.round(m[key] * k);
-  for (const [key, id] of Object.entries(FX_SLIDERS)) $(id).value = Math.round(m.fx[key] * 100);
-  $('mask-on').checked = m.on;
-  // Disabled: only Enabled (and Delete) show.
-  $('mask-editor').classList.toggle('off', !m.on);
-  $('mask-invert').checked = m.invert;
-  $('mx-strength').value = Math.round((m.strength ?? 1) * 100);
-  $('mask-follow').checked = !!m.follow;
-  for (const input of document.querySelectorAll('.local-panel input[type=range]')) showSliderValue(input);
-  updateKeyButtons();
-}
-
-// Editor controls -> the selected mask.
-function maskFromEditor(final) {
-  const masks = getMasks();
-  const m = masks[maskSel];
-  if (!m) return;
-  for (const [key, [id, k]] of Object.entries(SHAPE_SLIDERS[m.kind])) m[key] = +$(id).value / k;
-  for (const [key, id] of Object.entries(FX_SLIDERS)) m.fx[key] = +$(id).value / 100;
-  // Turned off: its keyframes leave the editor, so nothing hidden stays selected.
-  if (m.on && !$('mask-on').checked) clearSelection();
-  m.on = $('mask-on').checked;
-  if (!m.on && $('mask-show').checked) $('mask-show').checked = false;
-  m.invert = $('mask-invert').checked;
-  m.strength = +$('mx-strength').value / 100;
-  // Following the focus from where it is now.
-  const follow = $('mask-follow').checked;
-  if (follow && !m.follow) m.anchor = +$('focus').value;
-  m.follow = follow;
-  setMasks(masks, { final });
-  if (final) {
-    renderMasks();
-    autoKey();
-    renderTimeline();
-  }
-}
-
-for (const kind of Object.keys(MASK_NAMES)) {
-  $(`mask-add-${kind}`).onclick = () => {
-    const masks = getMasks();
-    if (masks.length >= MAX_MASKS || !canRender()) return;
-    masks.push(defaultMask(kind));
-    maskSel = masks.length - 1;
-    $('mask-show').checked = true;
-    setMasks(masks);
-    renderMasks();
-  };
-}
-
-for (const input of document.querySelectorAll('.local-panel input[type=range]')) {
-  input.addEventListener('input', () => {
-    showSliderValue(input);
-    maskFromEditor(false);
-  });
-  input.addEventListener('change', () => maskFromEditor(true));
-  input.addEventListener('dblclick', () => {
-    input.value = input.dataset.default;
-    showSliderValue(input);
-    maskFromEditor(true);
-  });
-}
-for (const id of ['mask-on', 'mask-invert', 'mask-follow']) $(id).addEventListener('change', () => maskFromEditor(true));
-$('mask-show').addEventListener('change', () => applySettingsSoon());
-$('mask-delete').onclick = () => askDeleteMask(maskSel, $('mask-delete'));
-
-renderMasks();
-
-function localSettings() {
-  return { masks: $('local-masks').value, show: $('mask-show').checked ? maskSel : -1 };
-}
+// local adjustments: ui/localadjust.js
+const { getMasks, setMasks, maskLabel, TRASH_ICON, renderMasks, localSettings } = initLocalAdjustments({ getAnim: () => anim, $, applySettingsSoon: (...a) => applySettingsSoon(...a), scheduleSave: (...a) => scheduleSave(...a), state, clearSelection: (...a) => clearSelection(...a), saveAnimation: (...a) => saveAnimation(...a), renderTimeline: (...a) => renderTimeline(...a), showMenu: (...a) => showMenu(...a), confirmInMenu: (...a) => confirmInMenu(...a), editName: (...a) => editName(...a), canRender: (...a) => canRender(...a), showSliderValue: (...a) => showSliderValue(...a), updateKeyButtons: (...a) => updateKeyButtons(...a), autoKey: (...a) => autoKey(...a) });
 
 // ---------------------------------------------------------------- keyframes
 
@@ -3538,7 +3358,7 @@ const keyButtonMode = (id) => (KEY_CONTROLS[id] && TRACK_MODE[KEY_CONTROLS[id][0
 function keyButtonTracks(id) {
   const shown = new Set(tracks(keyButtonMode(id)));
   if (KEY_CONTROLS[id]) return KEY_CONTROLS[id].filter((k) => shown.has(k));
-  const m = getMasks()[maskSel];
+  const m = getMasks()[state.maskSel];
   const k = m && `mask:${m.id}:${KEY_MASK_CONTROLS[id]}`;
   return k && shown.has(k) ? [k] : [];
 }
@@ -3870,7 +3690,7 @@ function applyValue(k, v) {
     if (!m) return;
     setMaskAttr(m, attr, v);
     setMasks(masks, { final: false });
-    if (masks.indexOf(m) === maskSel) renderMasks();
+    if (masks.indexOf(m) === state.maskSel) renderMasks();
     return;
   }
   if (k === 'aperture') {
@@ -5222,68 +5042,8 @@ const { showFrameRate } = initFrameRate({ $, state, getKeyFps: () => KEY_FPS, se
 // 3D: ui/stereo.js
 const { stereoShown, eyeOffset, eyeParams, stereoPreview, stereoTag } = initStereo({ $, state, engine, showProgress: (...a) => showProgress(...a), backToCamera: (...a) => backToCamera(...a), setFullRes: (...a) => setFullRes(...a), refresh: (...a) => refresh(...a), cameraParams: (...a) => cameraParams(...a), withPivotZoom: (...a) => withPivotZoom(...a), pivotFor: (...a) => pivotFor(...a), cropValues: (...a) => cropValues(...a), drawGeometry: (...a) => drawGeometry(...a), canRender: (...a) => canRender(...a), savePhoto: (...a) => savePhoto(...a), baseName: (...a) => baseName(...a), showError: (...a) => showError(...a), hideProgress: (...a) => hideProgress(...a), showSliderValue: (...a) => showSliderValue(...a) });
 
-// ---------------------------------------------------------------- living filters
-
-// Looks built from masks around the current focus; once added they are
-// ordinary masks to adjust.
-function livingFilter(name) {
-  const f = +$('focus').value;
-  const fx = (o) => ({ exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, blur: 0, pixelate: 0, sketch: 0, ...o });
-  // Depth filters follow the focus: animate it and they move with it.
-  const depth = (near, far, feather, invert, effect) => ({ ...defaultMask('depth'), near, far, feather, invert, follow: true, anchor: f, fx: fx(effect) });
-  switch (name) {
-    case 'pop': // in focus keeps its color, the rest goes gray
-      return [depth(f - 0.25, f + 0.25, 0.2, true, { saturation: -1 })];
-    case 'spotlight': // darker away from the focus point
-      return [{ ...defaultMask('radial'), x: state.focusPoint.x, y: state.focusPoint.y, w: 0.35, h: 0.35, feather: 0.7, invert: true, fx: fx({ exposure: -1.2 }) }];
-    case 'haze': // farther away is paler and softer, like air
-      return [depth(f + 0.2, 1.8, 0.6, false, { exposure: 0.35, contrast: -0.5, saturation: -0.45, temperature: -0.15 })];
-    case 'dreamy': // what is not in focus glows a little
-      return [depth(f - 0.2, f + 0.2, 0.25, true, { exposure: 0.4, contrast: -0.4, saturation: -0.2, temperature: 0.15 })];
-    case 'noir': // hard black and white, the subject lit a little brighter
-      return [
-        { ...defaultMask('depth'), near: -3, far: 3, feather: 0.2, fx: fx({ saturation: -1, contrast: 0.55, exposure: -0.15 }) },
-        depth(f - 0.2, f + 0.2, 0.2, false, { exposure: 0.35 }),
-      ];
-    case 'melancholy': // everything but the subject goes muted and blue
-      return [depth(f - 0.25, f + 0.25, 0.25, true, { saturation: -0.6, temperature: -0.5, exposure: -0.2, contrast: -0.15 })];
-    case 'carnival': // the background turns bright and festive
-      return [depth(f - 0.2, f + 0.2, 0.2, true, { saturation: 0.85, temperature: 0.25, tint: 0.2, contrast: 0.2 })];
-    case 'pinhole': // a deep vignette that shifts with the viewpoint
-      return [{ ...defaultMask('radial'), x: 0.5, y: 0.5, w: 0.48, h: 0.48, feather: 0.85, invert: true, followView: true, fx: fx({ exposure: -1.8, saturation: -0.25 }) }];
-    case 'blurplus': // what is out of focus goes softer still
-      return [depth(f - 0.15, f + 0.15, 0.25, true, { blur: 0.6 })];
-    case 'mosaic': // what is out of focus breaks into tiles
-      return [depth(f - 0.15, f + 0.15, 0.15, true, { pixelate: 0.5 })];
-    case 'crayon': // what is out of focus turns into a colored-pencil drawing
-      return [depth(f - 0.15, f + 0.15, 0.2, true, { sketch: 0.9 })];
-    case 'golden': // warm, glowing light on the far background
-      return [depth(f + 0.15, 1.8, 0.5, false, { temperature: 0.6, exposure: 0.2, saturation: 0.2, contrast: -0.15 })];
-    default:
-      return [];
-  }
-}
-
-$('mask-filter').onchange = () => {
-  const added = livingFilter($('mask-filter').value);
-  // Named after the filter (its group in the keyframe editor, too).
-  const name = ($('mask-filter').selectedOptions[0] || {}).textContent || '';
-  for (const m of added) m.name = name.trim();
-  $('mask-filter').value = '';
-  if (!added.length || !canRender()) return;
-  const masks = getMasks();
-  const room = MAX_MASKS - masks.length;
-  if (room < added.length) {
-    showNotice(`Up to ${MAX_MASKS} masks: delete one to add this filter.`);
-    startNoticeTimer();
-    return;
-  }
-  masks.push(...added);
-  maskSel = masks.length - 1;
-  setMasks(masks);
-  renderMasks();
-  renderTimeline();
-};
+// living filters: ui/livingfilters.js
+const { livingFilter } = initLivingFilters({ $, state, canRender: (...a) => canRender(...a), getMasks, showNotice: (...a) => showNotice(...a), startNoticeTimer: (...a) => startNoticeTimer(...a), setMasks, renderMasks, renderTimeline: (...a) => renderTimeline(...a) });
 
 // number fields: ui/numberfields.js
 initNumberFields();
@@ -6571,7 +6331,7 @@ async function applyEdits(info, saved) {
     showObjectSoft();
     depthModelShown = null;
     showDepthBlend(true);
-    maskSel = getMasks().length ? 0 : -1;
+    state.maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;
     renderMasks();
     resetTemperature(info, { keep: !!saved });
@@ -6583,7 +6343,7 @@ async function applyEdits(info, saved) {
       const added = livingFilter(saved.lytroFilter).map((m) => ({ ...m, name: opt ? opt.textContent.trim() : '' }));
       const masks = [...getMasks(), ...added].slice(0, MAX_MASKS);
       $('local-masks').value = JSON.stringify(masks);
-      maskSel = masks.length ? 0 : -1;
+      state.maskSel = masks.length ? 0 : -1;
       renderMasks();
     }
     showFocusPoint();
