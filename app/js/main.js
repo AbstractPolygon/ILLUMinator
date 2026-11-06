@@ -2090,19 +2090,34 @@ async function focusAt(event) {
   const [fx, fy] = sourceFraction(event);
   state.focusPoint = { x: Math.min(1, Math.max(0, fx)), y: Math.min(1, Math.max(0, fy)) };
   showFocusPoint();
+  await applyFocusAt(x, y, true);
+}
+
+// The click's own measurement, then (once the full depth map exists, see engine.onDepthReady) again on it if nothing has moved the focus since.
+let lastClick = null;
+async function applyFocusAt(x, y, opening) {
   // Blur drawn from the depth map (the default): the focus value is the depth map's value at the click. Optical refocusing: measured from the views.
   const depth = apertureFor(Math.min(fNumber(), 2.8)).aperture === 0;
-  const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v, depth }, { onProgress: showProgress });
-  hideProgress();
+  const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v, depth }, { onProgress: opening ? showProgress : undefined });
+  if (opening) hideProgress();
   if (!res || typeof res.alpha !== 'number') return;
+  if (!opening && !(lastClick && lastClick.x === x && lastClick.y === y && $('focus').value === lastClick.value)) return;
   $('focus').value = res.alpha.toFixed(2);
   showSliderValue($('focus'));
-  if (fNumber() > 4) {
+  lastClick = { x, y, value: $('focus').value, again: depth && !res.final };
+  if (opening && fNumber() > 4) {
     $('fstop').value = F_STOPS.indexOf(2.8);
     showFNumber();
   }
   cameraChanged({ final: true });
 }
+
+engine.onDepthReady = () => {
+  if (lastClick && lastClick.again) {
+    lastClick.again = false;
+    applyFocusAt(lastClick.x, lastClick.y, false);
+  }
+};
 
 // Only a short click on the picture sets the focus: not one that follows a
 // drag (turning the viewpoint, panning) or a press held down for a while.

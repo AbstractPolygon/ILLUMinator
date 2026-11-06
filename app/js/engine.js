@@ -21,6 +21,10 @@ export class Engine {
       if (this.onCache) this.onCache(msg);
       return;
     }
+    if (msg.type === 'depthReady') {
+      if (this.onDepthReady) this.onDepthReady();
+      return;
+    }
     const p = this.pending.get(msg.id);
     if (!p) return;
     if (msg.type === 'progress') {

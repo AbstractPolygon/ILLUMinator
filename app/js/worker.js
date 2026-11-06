@@ -1459,7 +1459,8 @@ async function settings({ id, settings: s }) {
   const sourceChanged = s.lytroDepth !== undefined && s.lytroDepth !== (state.settings.lytroDepth ?? true) && !!state.userDepth;
   Object.assign(state.settings, s);
   if ((qualityChanged || sourceChanged || objectsChanged || styleChanged) && state.depthRaw && !detailChanged) {
-    // Measure the depth again, the new way.
+    // Measure the depth again, the new way (after one still running, whose result it replaces).
+    if (state.depthJob) await state.depthJob.promise.catch(() => {});
     state.depth = null;
     state.depthRaw = null;
     await ensureDepth(id);
@@ -1714,8 +1715,22 @@ async function ensureViewDepth(id) {
   return !!state.depth;
 }
 
+// One measurement at a time: a second caller (a render, the depth map, a click) while one runs waits for it instead of measuring again.
 async function ensureDepth(id) {
   if (state.depth && !state.depthFast) return true;
+  const sampler = state.sampler;
+  if (state.depthJob && state.depthJob.sampler === sampler) return state.depthJob.promise;
+  const promise = measureDepthOnce(id).finally(() => {
+    if (state.depthJob && state.depthJob.promise === promise) state.depthJob = null;
+  });
+  state.depthJob = { sampler, promise };
+  return promise;
+}
+
+// The stages of a measurement are separated by a tick (`tick`) so requests that arrived meanwhile (a colour change, a view) are served between them.
+async function measureDepthOnce(id) {
+  if (state.depth && !state.depthFast) return true;
+  const sampler0 = state.sampler;
   if (state.depthFast) {
     state.depthFast = false;
     state.depth = null;
@@ -1757,18 +1772,21 @@ async function ensureDepth(id) {
     const tDepth = Date.now();
     const lap = {};
     DEPTH_REGIONS.objects = state.settings.depthObjects ? await findObjects(id) : null;
+    await tick();
     const report = (from, to) => (p) => post({ id, type: 'progress', stage: 'Measuring depth', progress: from + (to - from) * p });
     if (style === 'combined' || style === 'match') {
       const kept = state.depthCacheIn && state.depthCacheIn.alpha.length && state.depthCacheIn.key === depthCacheKey() && style === 'match' && engineDepthAvailable() ? state.depthCacheIn : null;
       // With the processed version kept, the depth views are not rendered again; only their raster size is needed.
       if (kept) state.engineViews = Object.assign([], { raster: { w: kept.w, h: kept.h } });
       else await prepareEngineViews(id);
+      await tick();
     }
     lap.views = Date.now() - tDepth;
     try {
       if (style === 'combined') {
         const classic = measureClassic(id, fast, report(0, 0.4));
         lap.classic = Date.now() - tDepth - lap.views;
+        await tick();
         const tMatch = Date.now();
         const match = measureLytro(report(0.4, 0.95));
         lap.match = Date.now() - tMatch;
@@ -1797,9 +1815,13 @@ async function ensureDepth(id) {
     // Lytro Desktop puts depth edges on the picture's edges (a joint adaptive
     // filter and an MRF in its engine): the same here, on the depth as finally
     // measured, so every style gets it.
+    await tick();
+    if (state.sampler !== sampler0) return false;  // another photo was opened (or the detail changed) meanwhile
     const tSettle = Date.now();
     settleDepth(outW, outH, lap);
+    state.depthFast = false;  // a quick measurement made while this one ran is replaced by it
     lap.settle = Date.now() - tSettle;
+    post({ type: 'depthReady' });  // (main.js re-applies a click to focus on it)
     // Where the time went, and a warning when a GPU step fell back to the CPU.
     console.info(`Depth measured in ${((Date.now() - tDepth) / 1000).toFixed(1)} s (${style}; ${state.gpu ? `GPU ${state.gpu.name || ''}${hardwareGpu() ? '' : ' (software)'}` : 'no GPU'}): ${JSON.stringify(lap)}`);
     if (state.cpuFallbacks && state.cpuFallbacks.size) {
@@ -2451,7 +2473,8 @@ async function focusAt({ id, x, y, u = 0, v = 0, depth = false }) {
   // the click, so the clicked spot is exactly what the picture then shows sharp. (The estimate below is a separate measure from the
   // views, over a limited range: it cannot place a thing nearer than that, a wire close to the lens comes out as the scene behind it.)
   if (depth) {
-    if (!(await ensureDepth(id))) return { cancelled: true };
+    // The depth the interactive picture is drawn from (the quick measurement for a raw photo until the full one exists), so the click and the blur agree and the click is not held up for minutes.
+    if (!(await ensureViewDepth(id))) return { cancelled: true };
     const { outW: dw, outH: dh } = state.sampler;
     const d = state.settings.detail;
     const at = (px, py) => {
@@ -2470,7 +2493,12 @@ async function focusAt({ id, x, y, u = 0, v = 0, depth = false }) {
     let alpha = at(x, y);
     // A viewpoint away from the center sees a point at depth alpha displaced by -alpha * (u, v).
     if (u || v) for (let k = 0; k < 2; k++) alpha = at(x - alpha * u * d, y - alpha * v * d);
-    return { alpha, confidence: 1 };
+    // The quick measurement misses what is near the lens (a fence wire): with a graphics card the full one follows in the background, and the click is made again on it (main.js engine.onDepthReady).
+    const final = !state.depthFast;
+    if (!final && hardwareGpu() && !(state.cpuFallbacks && state.cpuFallbacks.size)) {
+      ensureDepth(id).catch(() => {});
+    }
+    return { alpha, confidence: 1, final };
   }
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
