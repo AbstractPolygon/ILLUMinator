@@ -45,6 +45,10 @@ const result = await p.evaluate(async () => {
   for (const id of ['tl-autokey', 'tl-only-keyed']) if ($(id)) { $(id).checked = !$(id).checked; fire(id, 'change'); }
   if ($('tl-ease')) fire('tl-ease', 'change');
   log.timeline = !!$('tl-grid') && $('anim-keys') ? $('anim-keys').value.slice(0, 40) : 'none';
+  // export and upscaling controls
+  for (const id of ['upscale-method', 'photo-format', 'photo-size', 'video-format', 'video-codec']) if ($(id) && $(id).options && $(id).options.length > 1) { $(id).selectedIndex = 1; fire(id, 'change'); }
+  if ($('upscale-sharpen')) { $('upscale-sharpen').value = 40; fire('upscale-sharpen'); }
+  log.upscaleMethod = $('upscale-method') ? $('upscale-method').value : 'none';
   // frame rate and 3D controls
   $('fps-preset').value = '30'; fire('fps-preset', 'change'); log.fps = $('fps').value; log.customHidden = $('fps-custom').hidden;
   $('fps-preset').value = 'custom'; fire('fps-preset', 'change'); log.customShown = !$('fps-custom').hidden;

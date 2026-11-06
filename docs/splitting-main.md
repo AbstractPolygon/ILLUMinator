@@ -1,7 +1,7 @@
 # Splitting main.js
 
 `app/js/main.js` was one file of 7,700 lines. Sections that stand on their own now live under `app/js/ui/` (updates, number fields, tone curve, color matrix, white balance
-picker, LUT, frame rate, 3D, local adjustments, living filters, keyframes, curves view), about 2,600 lines (it is now about 5,100). The rest is held together by shared variables, so it cannot be cut apart by moving code alone.
+picker, LUT, frame rate, 3D, local adjustments, living filters, keyframes, curves view, export), about 3,100 lines (it is now about 4,650). The rest is held together by shared variables, so it cannot be cut apart by moving code alone.
 
 ## How a section moves
 
@@ -20,7 +20,7 @@ controls it handles react) and `node scripts/capture-settings.mjs OUT.json PLAYW
 ## What stops the rest
 
 The tool refuses a section when it shares a `let` variable with the rest of the page, since a copy handed to the new module would silently go out of step. Each such variable has been
-put on the page's `state` object instead (`state.maskSel`, `state.anim`, `state.keySel`, `state.fps`), which every module is handed:
+put on the page's `state` object instead (`state.maskSel`, `state.anim`, `state.keySel`, `state.fps`, `state.upscaleShown`), which every module is handed:
 
 1. Find what still blocks: `node scripts/extract-section.mjs "<section>" x y --dry` lists the `let` variables the section shares.
 2. For each, check it is declared once at the top level (no local variable of the same name), then rename every use to `state.<name>` and give it its starting value in the `state` literal at
@@ -28,8 +28,7 @@ put on the page's `state` object instead (`state.maskSel`, `state.anim`, `state.
 3. If the variable turns out to always equal another field (`KEY_FPS` was always `state.fps`), use that field.
 4. Move the section, then lint, `node scripts/smoke-page.mjs`, and the settings check above.
 
-What is left shared and blocks sections: `upscaleShown` (export), `rememberedFailed` and `webUsb*` (camera import and camera section). These are the next steps: export first (451 lines), then the
-two camera sections (about 400). The rest of main.js (histogram/camera view, drawing, pointer, crop, settings, edits, undo, opening, menus, grid, library) is the page's core, which the others call.
+What is left shared and blocks sections: `rememberedFailed` and `webUsb*` (camera import and camera section). The next step is the two camera sections (about 400 lines). The rest of main.js (histogram/camera view, drawing, pointer, crop, settings, edits, undo, opening, menus, grid, library) is the page's core, which the others call.
 
 A section that only reads a shared object's fields can be handed a getter instead (`getAnim: () => anim`), and a section that assigns a shared variable needs a getter and a setter.
 The tool ends a section at the next `// ------` header or at the `// name: ui/file.js` line left where an earlier section was moved.

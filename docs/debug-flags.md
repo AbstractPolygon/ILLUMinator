@@ -98,7 +98,7 @@ Read with `hook('name')`, published with `setHook('name', value)`.
 
 | Name | Kind | Used at | Comment in the code |
 |---|---|---|---|
-| `appliedSettings` | harness value | app/js/main.js:4410 | for tests: what the page sends the engine |
+| `appliedSettings` | harness value | app/js/main.js:3962 | for tests: what the page sends the engine |
 | `awbDump` | callback: receives a stage's result | app/js/worker.js:2154 |  |
 | `bankFS` | harness value | app/js/core/lytroedof.js:250 |  |
 | `bisgEngineMatrix` | harness value | app/js/core/lytroedof.js:803 |  |
