@@ -6,11 +6,12 @@
 //   node scripts/build-film-luts.mjs path/to/Film-Luts
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseCube } from '../app/js/core/lut.js';
 
 const src = process.argv[2];
 if (!src) throw new Error('Usage: node scripts/build-film-luts.mjs path/to/Film-Luts');
-const out = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'app', 'luts');
+const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'app', 'luts');
 
 const CATEGORIES = {
   'Negative Color': 'Color negative',

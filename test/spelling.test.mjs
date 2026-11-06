@@ -4,8 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BRITISH = /(?<![-\w])(colou?r(?:s|ed|ing)?(?<=colour|colours|coloured|colouring)|centres?|centred|greys?|greyscale|behaviours?|favour(?:s|ed|ite|ites)?|neighbours?|neighbouring|licences?|metres?|analyse[sd]?|organis(?:e|es|ed|ing|ation)|recognis(?:e|es|ed|ing)|normalis(?:e|es|ed|ing|ation)|optimis(?:e|es|ed|ing|ation)|artefacts?|catalogues?|grey-?scale)(?![-\w])/gi;
 
 function files() {

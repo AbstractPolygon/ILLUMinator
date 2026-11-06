@@ -26,7 +26,8 @@ const isCall = (n, name) => n && n.type === 'CallExpression' && n.callee.type ==
 
 function scan(file) {
   const rel = path.relative(root, file).split(path.sep).join('/');
-  const text = fs.readFileSync(file, 'utf8');
+  // (a Windows checkout may have CRLF line endings: they would end the same-line comment match and differ from the generated file)
+  const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   const lines = text.split('\n');
   const ast = espree.parse(text, { ecmaVersion: 'latest', sourceType: 'module', loc: true, range: true });
   const flags = [];
@@ -131,7 +132,7 @@ ${hooks.map((e) => row(e, true)).join('\n')}
 `;
 
 if (process.argv.includes('--check')) {
-  const have = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : '';
+  const have = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8').replace(/\r\n/g, '\n') : '';
   if (have !== doc) {
     console.error('docs/debug-flags.md is out of date: run node scripts/debug-flags.mjs');
     process.exit(1);
