@@ -8,13 +8,15 @@
 // anti-diagonals: every pixel of a diagonal depends only on the previous
 // diagonal, so a diagonal is one draw of points. Messages and costs are kept
 // in "atlases": four labels per texel (RGBA), one tile per group of four.
+import { fitsMemory, memoryProblem } from '../core/memorybudget.js';
 import { program } from './renderer.js';
 import { DEPTH_CBCA, DEPTH_EDGE, DEPTH_TRWS, DEPTH_LCOST, depthColorGuide, median3 } from '../core/depth.js';
 import { DEPTH_PASSES, viewColors } from '../core/depthmatch.js';
 import { ENGINE_AGG, ENGINE_MRF } from '../core/enginedepth.js';
 
 const MAX_VIEWS = 64;
-const MAX_LABELS = 64;
+// The most labels the engine's range can come to: -35 up to its top (at most 100), padded to a multiple of four.
+const MAX_LABELS = 144;
 
 const HEAD = `#version 300 es
 precision highp float;
@@ -853,6 +855,9 @@ export function engineSolveGpu(gpu, volume, guide, w, h, labels, onProgress = ()
     const aggB = work.tex(w, h);
     const outTex = work.tex(w, h);
     const shape = work.atlasShape(L / 4);
+    // seven atlases of four-label tiles (the costs, four message arrays and two sweep buffers): about 270 MB for 44 labels, 800 MB for the most (136)
+    const need = 7 * shape.width * shape.height * 16;
+    if (!fitsMemory('vram', need)) throw new Error(memoryProblem('vram', need, 'Solving the depth', 'Raise the video memory limit in Settings > Memory.'));
     const big = solverSet(work, shape);
     const fullscreen = (prog, target) => {
       gpu.target(target, w, h);

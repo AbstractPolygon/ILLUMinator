@@ -751,14 +751,14 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     ({ accY, wsum } = r);
   }
   if (hook('depthProbe') && allInFocus && depth) {
-    const hook = hook('depthProbe');
+    const probe = hook('depthProbe');
     const table = lensTable(g, cam);
-    const est = hook.makeEst(W, H, sharpY, upY);
-    const deltas = hook.deltas;
+    const est = probe.makeEst(W, H, sharpY, upY);
+    const deltas = probe.deltas;
     const err = new Float64Array(table.dx.length * deltas.length);
     const pos = new Float32Array(table.dx.length * 2);
     splatOnCpu(null, null, { table, deltas, est, err, pos });
-    hook.result = { table: { rows: table.rows, cols: table.cols, r0: table.r0, c0: table.c0 }, deltas, err, pos, W, H };
+    probe.result = { table: { rows: table.rows, cols: table.cols, r0: table.r0, c0: table.c0 }, deltas, err, pos, W, H };
   }
   let bestDis = null;
   if (allInFocus && depth && EDGE_SNAP.on) {

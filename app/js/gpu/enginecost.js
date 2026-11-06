@@ -70,7 +70,8 @@ void main() {
 
 // The two whole-pixel rules of the engine, for every pixel at once: 1 where the volume is zeroed (a blown-out label, or a cost curve whose median is within
 // `uNoisy` of its minimum), else 0. uRaw: one layer per four labels.
-const MAX_LABELS = 64;
+// The most labels the engine's range can come to: -35 up to its top (at most 100), padded to a multiple of four.
+const MAX_LABELS = 144;
 const RULES = `#version 300 es
 precision highp float;
 precision highp int;
