@@ -1272,10 +1272,12 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     }
   }
   // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 28 at 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings.
-  if (scale >= 3 && !debugFlags().noNotch) {
-    // the lattice's sharp peaks, and what a drifting frequency leaves of it (core/notch.js)
-    removeLatticeByTiles(out, W, H);
-    removePeriodicPatternRepeatedly(out, W, H, { prominence: 6 });
+  if (scale >= 3 && !debugFlags().noNotch && state.settings.latticeOn !== false) {
+    // the lattice's sharp peaks, and what a drifting frequency leaves of it (core/notch.js); Render settings > Quality > Lattice strength and detection
+    const strength = state.settings.latticeStrength ?? 0.75;
+    const prominence = Math.max(3, 12 - 12 * (state.settings.latticeDetect ?? 0.5));
+    removeLatticeByTiles(out, W, H, { ratio: Math.max(0.05, 1.1 - strength), prominence });
+    removePeriodicPatternRepeatedly(out, W, H, { prominence });
   }
   if (hook('edofLinear')) hook('edofLinear')(out, W, H);
   setHook('lytroStats', sp.stats);

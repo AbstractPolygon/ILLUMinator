@@ -29,7 +29,7 @@ export const EDIT_GROUPS = {
   details: ['sharp-amount', 'sharp-radius', 'sharp-detail', 'sharp-masking', 'mv-on', 'mv-blend', 'nr-luminance', 'nr-color', 'nr-dust', 'nr-speckle', 'nr-speckle-size', 'nr-hot'],
   defringe: ['lens-auto', 'lens-distortion', 'lens-vignetting', 'lens-midpoint', 'flare-on', 'flare-amount', 'fringe-on', 'fringe-auto', 'fringe-radius', 'fringe-threshold', ...FRINGES.flatMap((k) => [`fringe-${k}`, `fringe-${k}-hue`])],
   animation: ['anim-on', 'fps', 'anim', 'anim-keys', 'frame-zoom', 'frame-pan-x', 'frame-pan-y', 'path', 'amount', 'frames', 'near', 'far', 'steps'],
-  rendering: ['detail', 'fullres-on', 'still-scale', 'lens-centres', 'still-passes', 'auto-render', 'stereo-on', 'stereo-mode', 'stereo-baseline', 'photo-format', 'photo-quality', 'photo-size', 'video-format', 'video-codec', 'video-quality', 'video-size', 'upscale-method', 'upscale-sharpen', 'upscale-lobes', 'upscale-strength', 'upscale-denoise', 'upscale-grain', 'upscale-params'],
+  rendering: ['detail', 'fullres-on', 'still-scale', 'lens-centres', 'still-passes', 'lattice-on', 'lattice-strength', 'lattice-detect', 'auto-render', 'stereo-on', 'stereo-mode', 'stereo-baseline', 'photo-format', 'photo-quality', 'photo-size', 'video-format', 'video-codec', 'video-quality', 'video-size', 'upscale-method', 'upscale-sharpen', 'upscale-lobes', 'upscale-strength', 'upscale-denoise', 'upscale-grain', 'upscale-params'],
   local: ['local-masks'],
   geometry: ['orientation', 'straighten', 'crop-aspect', 'crop-x', 'crop-y', 'crop-w', 'crop-h'],
 };

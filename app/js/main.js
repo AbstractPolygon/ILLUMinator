@@ -6608,6 +6608,27 @@ $('lens-centres').onchange = () => {
   setFullRes(false);
 };
 $('still-scale').addEventListener('change', showPhotoSizes);
+// The lattice filter's controls show only with Detail recovery on; changing one is a new render.
+function showLatticeControls() {
+  $('lattice-controls').hidden = !(+$('still-passes').value > 0);
+}
+$('still-passes').addEventListener('change', showLatticeControls);
+showLatticeControls();
+for (const id of ['lattice-on', 'lattice-strength', 'lattice-detect']) {
+  $(id).addEventListener('input', () => {
+    if ($(id).type === 'range') showSliderValue($(id));
+    applySettingsSoon();
+    setFullRes(false);
+  });
+}
+for (const id of ['lattice-strength', 'lattice-detect']) {
+  $(id).ondblclick = () => {
+    $(id).value = $(id).dataset.default;
+    showSliderValue($(id));
+    applySettingsSoon();
+    setFullRes(false);
+  };
+}
 $('still-passes').onchange = () => {
   setFullRes(false);
   if (!state.fullRes) refresh();
@@ -6720,6 +6741,9 @@ async function applySettings() {
     depthBlend: $('depth-blend').value / 100,
     depthModelBlend: $('depth-model-blend').value / 100,
     lensCentres: $('lens-centres').value,
+    latticeOn: $('lattice-on').checked,
+    latticeStrength: $('lattice-strength').value / 100,
+    latticeDetect: $('lattice-detect').value / 100,
     depthModelSmooth: $('depth-model-smooth').value / 100,
     depthModelCurve: $('depth-model-curve').value / 100,
     depthContrast: $('depth-contrast').value / 100,
@@ -6862,6 +6886,7 @@ async function applyEdits(info, saved) {
     showAnimationEnabled();
     showVideoCodecs();
     showPhotoFormat();
+    showLatticeControls();
     upscaleShown = null;
     showUpscaleControls(true);
     showObjectSoft();
@@ -7110,7 +7135,7 @@ function showSliderValue(input) {
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
   else if (input.id === 'video-quality') out.textContent = `${v} Mbit/s`;
-  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen', 'upscale-strength', 'upscale-lobes', 'upscale-denoise', 'upscale-grain', 'depth-model-smooth', 'depth-model-curve'].includes(input.id)) out.textContent = `${v}`;
+  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen', 'upscale-strength', 'upscale-lobes', 'upscale-denoise', 'upscale-grain', 'depth-model-smooth', 'depth-model-curve', 'lattice-strength', 'lattice-detect'].includes(input.id)) out.textContent = `${v}`;
   else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;
