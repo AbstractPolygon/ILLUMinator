@@ -2555,13 +2555,9 @@ $('cal-folder').onclick = async () => {
 // Upscaling > Method. They need a graphics card with WebGPU.
 let modelBusy = false;
 const updatingModels = new Set();
-// (the desktop app only: the web version has no upscaling models, in Settings or in the Method list)
-$('models-setting').hidden = !native;
 // Depth models (Settings > Depth models): a downloaded model is a choice under Camera > Depth > Depth method.
 let depthModelBusy = false;
-$('depth-models-setting').hidden = !native;
 async function refreshDepthModels() {
-  if (!native) return;
   const select = $('depth-style');
   const before = select.value;
   const list = $('depth-models-list');
@@ -2622,7 +2618,6 @@ async function refreshDepthModels() {
 refreshDepthModels().catch(() => {});
 
 async function refreshUpscaleModels() {
-  if (!native) return;
   const select = $('upscale-method');
   const before = select.value;
   const gpuOk = await aiUpscaleAvailable();
