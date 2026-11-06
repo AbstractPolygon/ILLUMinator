@@ -2,7 +2,7 @@
 import { methodModel, readModel } from '../core/upscalemodels.js';
 import { upscaleImage, upscaleBits16 } from '../gpu/upscale.js';
 import { invert, isIdentity, geometry } from '../core/geometry.js';
-import { download, native } from '../platform.js';
+import { download } from '../platform.js';
 import { fitsMemory, exportRam, memoryProblem } from '../core/memorybudget.js';
 import { aiUpscale, denoiseRgb16 } from '../core/aiupscale.js';
 import { encodePng16 } from '../core/png16.js';
