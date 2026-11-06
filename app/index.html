@@ -526,6 +526,9 @@
             <input id="depth-blend" type="range" min="0" max="100" step="5" value="50" data-default="50">
           </label>
           <label id="depth-objects-row" class="check" title="Finds the objects in the photo and puts depth edges on their outlines, with or without the High quality depth map. The first time, it downloads a 45 MB object model (kept for later); finding the objects takes a few seconds per photo"><input id="depth-objects" type="checkbox"> Object edges</label>
+          <label id="depth-objects-soft-row" title="Softens the depth where objects meet: the steps at their outlines become a gradual ramp (too sharp edges look cut out). 0: hard outlines" hidden>Smooth edges <output data-for="depth-objects-soft" for="depth-objects-soft">30</output>
+            <input id="depth-objects-soft" type="range" min="0" max="100" step="1" value="30" data-default="30">
+          </label>
           <label id="depth-hq-row" class="check" title="Sharper depth edges, matched to the photo, for photos and videos; about twice as slow to compute. Off: the faster, rougher depth map"><input id="depth-hq" type="checkbox" checked> High quality depth map</label>
           <div class="row check-row">
             <label class="check"><input id="depth-btn" type="checkbox"> Show depth map</label>

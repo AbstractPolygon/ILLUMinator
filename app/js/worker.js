@@ -21,7 +21,7 @@ import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { VERSION } from './version.js';
 import { removePeriodicPattern } from './core/notch.js';
-import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
+import { snapDepthEdges, snapToObjects, softenObjectEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
 import { shapeDepthContrast, setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -1454,6 +1454,7 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const contrastChanged = s.depthContrast !== undefined && s.depthContrast !== (state.settings.depthContrast ?? 0);
+  const objectSoftChanged = s.depthObjectSoft !== undefined && s.depthObjectSoft !== (state.settings.depthObjectSoft ?? 0.3);
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
   const styleChanged = s.depthStyle !== undefined && (s.depthStyle === 'guided') !== (state.settings.depthStyle === 'guided') || (s.depthStyle !== undefined && resolveDepthStyle(s.depthStyle) !== resolveDepthStyle(state.settings.depthStyle));
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
@@ -1471,7 +1472,7 @@ async function settings({ id, settings: s }) {
     const { classic, match, outW, outH } = state.depthParts;
     state.depthRaw = { ...state.depthRaw, alpha: combineDepth(classic, match, outW, outH, undefined, state.settings.depthBlend ?? 0.5) };
     settleDepth(outW, outH);
-  } else if ((smoothingChanged || contrastChanged) && !detailChanged) {
+  } else if ((smoothingChanged || contrastChanged || objectSoftChanged) && !detailChanged) {
     applyDepthSmoothing();
     // (main.js applies a click to focus again on the changed depth)
     if (state.depth && !state.pp) post({ type: 'depthReady', reapply: true });
@@ -2336,10 +2337,21 @@ function activeRayWarpForShift() {
 function settleDepth(outW, outH, lap = {}) {
   const t0 = Date.now();
   if (EDGE_SNAP_DEPTH.on && state.depthRaw) state.depthRaw = { ...state.depthRaw, alpha: snapDepthEdges(state.depthRaw.alpha, depthColorGuide(centerView()), outW, outH) };
+  // Object edges for the depth methods that do not clean up regions themselves (the engine style): depth snapped to the objects' outlines, as the classic method's
+  // region cleanup does (the softening of those edges is a setting, applied with the smoothing).
+  if (state.settings.depthObjects && state.depthRaw && !state.depthRaw.flat && state.objects && state.objects.w === outW && state.objects.h === outH) {
+    const labels = state.objects.labels;
+    const gpuSnap = DEPTH_REGIONS.gpu && DEPTH_REGIONS.gpu.snapToObjects;
+    const snapped = (gpuSnap ? DEPTH_REGIONS.gpu.snapToObjects(state.depthRaw.alpha, labels, outW, outH) : null) || snapToObjects(state.depthRaw.alpha, labels, outW, outH);
+    state.depthRaw = { ...state.depthRaw, alpha: snapped, objectSnapped: true };
+  }
   lap.snap = Date.now() - t0;
   if (hook('finalDepthDump')) hook('finalDepthDump')(state.depthRaw.alpha, centerView(), outW, outH);
   applyDepthSmoothing();
 }
+
+// The widest softening of object edges (pixels of the depth map; the slider's top).
+const OBJECT_SOFT_MAX = 8;
 
 function applyDepthSmoothing() {
   const amount = state.settings.depthSmoothing ?? 0.3;
@@ -2352,7 +2364,10 @@ function applyDepthSmoothing() {
   const { outW, outH } = state.sampler;
   const guide = equalize(Float32Array.from(centerView()));
   const smooth = state.gpu ? state.gpu.smoothDepth.bind(state.gpu) : smoothDepth;
-  const smoothed = smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence, step: raw.flat ? DEPTH_STEP : 0 });
+  let smoothed = smooth(raw.alpha, outW, outH, guide, { amount, confidence: raw.confidence, step: raw.flat ? DEPTH_STEP : 0 });
+  // Object edges: the steps at the outlines made a ramp (Camera > Depth > Object edges, Smooth edges).
+  const soft = (state.settings.depthObjectSoft ?? 0.3) * OBJECT_SOFT_MAX;
+  if (state.settings.depthObjects && soft > 0 && state.objects && state.objects.w === outW && state.objects.h === outH) smoothed = softenObjectEdges(smoothed, state.objects.labels, outW, outH, soft);
   // Moved by the focus offset found for this photo (see superRes).
   const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA + rayWarpShift();
   const field = rayWarpField(outW, outH);

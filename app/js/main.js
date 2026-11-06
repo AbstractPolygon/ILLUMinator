@@ -1818,7 +1818,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-style', 'depth-blend', 'depth-objects', 'lytro-depth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-style', 'depth-blend', 'depth-objects', 'depth-objects-soft', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', 'tilt-show', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
@@ -2251,7 +2251,13 @@ $('depth-blend').oninput = () => {
 };
 showDepthBlend();
 // Object edges work on their own: with or without the high quality depth map.
-$('depth-objects').onchange = () => applySettingsSoon();
+const showObjectSoft = () => { $('depth-objects-soft-row').hidden = !$('depth-objects').checked; };
+$('depth-objects').onchange = () => { showObjectSoft(); applySettingsSoon(); };
+$('depth-objects-soft').oninput = () => {
+  showSliderValue($('depth-objects-soft'));
+  applySettingsSoon();
+};
+showObjectSoft();
 $('lytro-depth').onchange = () => applySettingsSoon();
 
 $('pivot-on').onchange = () => {
@@ -6448,6 +6454,7 @@ async function applySettings() {
     depthBlend: $('depth-blend').value / 100,
     depthContrast: $('depth-contrast').value / 100,
     depthObjects: $('depth-objects').checked,
+    depthObjectSoft: $('depth-objects-soft').value / 100,
     lytroDepth: $('lytro-depth').checked,
     details: {
       amount: +$('sharp-amount').value,

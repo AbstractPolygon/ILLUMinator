@@ -760,3 +760,74 @@ export function layerSnap(depth, lab, w, h, { radius = 12, stride = 2, minRange 
   }
   return out;
 }
+
+// Softens the depth where objects meet: the depth blurred over `sigma` pixels, mixed in by how close a pixel is to an object outline (full at the outline, none
+// beyond 2.5 sigma). Depth edges snapped to outlines (snapToObjects) are steps; this makes them a ramp. `objects`: the object label of every pixel.
+export function softenObjectEdges(depth, objects, w, h, sigma) {
+  if (!(sigma > 0)) return depth;
+  const n = w * h;
+  // distance (chamfer, in pixels) to the nearest pixel whose neighbour has another label
+  const reach = 2.5 * sigma;
+  const dist = new Float32Array(n).fill(1e9);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const o = objects[p];
+      if ((x + 1 < w && objects[p + 1] !== o) || (y + 1 < h && objects[p + w] !== o)) dist[p] = 0;
+      if ((x > 0 && objects[p - 1] !== o) || (y > 0 && objects[p - w] !== o)) dist[p] = 0;
+    }
+  }
+  const D1 = 1;
+  const D2 = Math.SQRT2;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      let d = dist[p];
+      if (x > 0) d = Math.min(d, dist[p - 1] + D1);
+      if (y > 0) {
+        d = Math.min(d, dist[p - w] + D1);
+        if (x > 0) d = Math.min(d, dist[p - w - 1] + D2);
+        if (x + 1 < w) d = Math.min(d, dist[p - w + 1] + D2);
+      }
+      dist[p] = d;
+    }
+  }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const p = y * w + x;
+      let d = dist[p];
+      if (x + 1 < w) d = Math.min(d, dist[p + 1] + D1);
+      if (y + 1 < h) {
+        d = Math.min(d, dist[p + w] + D1);
+        if (x + 1 < w) d = Math.min(d, dist[p + w + 1] + D2);
+        if (x > 0) d = Math.min(d, dist[p + w - 1] + D2);
+      }
+      dist[p] = d;
+    }
+  }
+  // separable Gaussian
+  const r = Math.ceil(2.5 * sigma);
+  const kernel = new Float32Array(2 * r + 1);
+  let sum = 0;
+  for (let i = -r; i <= r; i++) sum += kernel[i + r] = Math.exp(-0.5 * (i * i) / (sigma * sigma));
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+  const tmp = new Float32Array(n);
+  const blurred = new Float32Array(n);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let i = -r; i <= r; i++) acc += kernel[i + r] * depth[y * w + Math.min(w - 1, Math.max(0, x + i))];
+    tmp[y * w + x] = acc;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let i = -r; i <= r; i++) acc += kernel[i + r] * tmp[Math.min(h - 1, Math.max(0, y + i)) * w + x];
+    blurred[y * w + x] = acc;
+  }
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = Math.max(0, 1 - dist[i] / reach);
+    const wt = t * t * (3 - 2 * t);
+    out[i] = depth[i] + (blurred[i] - depth[i]) * wt;
+  }
+  return out;
+}
