@@ -124,7 +124,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Illuminator"
     },
-    "msiProjectCreated": "./build/msi-hook.cjs"
+    "msiProjectCreated": "./build/msi-hook.cjs",
+    "afterAllArtifactBuild": "./build/msi-finish.cjs"
   },
   "devDependencies": {
     "electron": "44.4.5",

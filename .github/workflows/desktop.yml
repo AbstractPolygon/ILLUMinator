@@ -65,7 +65,7 @@ jobs:
           $msi = (Get-ChildItem dist -Filter *.msi | Select-Object -First 1).FullName
           Write-Host "MSI: $msi"
 
-          # The setup page is in the package: Dialog table, and the Next button of the folder page leads to it.
+          # The checkbox is on the Finish page ("Completing the setup wizard"), and the Finish button makes the shortcut.
           $wi = New-Object -ComObject WindowsInstaller.Installer
           $db = $wi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $wi, @($msi, 0))
           function Query($sql) {
@@ -78,11 +78,11 @@ jobs:
             $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null) | Out-Null
             return $rows
           }
-          if ((Query "SELECT Dialog FROM Dialog WHERE Dialog='DesktopOptionDlg'").Count -ne 1) { throw 'DesktopOptionDlg is missing from the MSI' }
-          if ((Query "SELECT Control FROM Control WHERE Dialog_='DesktopOptionDlg' AND Control='DesktopCheck' AND Property='ADDTODESKTOP'").Count -ne 1) { throw 'The Add to desktop checkbox is missing' }
-          if ((Query "SELECT Dialog_ FROM ControlEvent WHERE Dialog_='InstallDirDlg' AND Control_='Next' AND Argument='DesktopOptionDlg'").Count -lt 1) { throw 'The folder page does not lead to the shortcut page' }
-          if ((Query "SELECT Dialog_ FROM ControlEvent WHERE Dialog_='DesktopOptionDlg' AND Control_='Next' AND Argument='VerifyReadyDlg'").Count -lt 1) { throw 'The shortcut page does not lead to Ready to install' }
-          Write-Host 'Setup page present'
+          if ((Query "SELECT Control FROM Control WHERE Dialog_='ExitDialog' AND Control='DesktopCheck' AND Property='ADDTODESKTOP'").Count -ne 1) { throw 'The Add to desktop checkbox is missing from the Finish page' }
+          if ((Query "SELECT Value FROM CheckBox WHERE Property='ADDTODESKTOP'").Count -ne 1) { throw 'The checkbox has no value' }
+          if ((Query "SELECT Dialog_ FROM ControlEvent WHERE Dialog_='ExitDialog' AND Control_='Finish' AND Argument='CreateDesktopShortcut'").Count -lt 1) { throw 'The Finish button does not make the shortcut' }
+          if ((Query "SELECT Action FROM CustomAction WHERE Action='CreateDesktopShortcut'").Count -ne 1) { throw 'The shortcut action is missing' }
+          Write-Host 'Finish page checkbox present'
 
           # Silent installs: ticked by default, off with ADDTODESKTOP=0.
           $links = @("$env:PUBLIC\Desktop\Illuminator.lnk", "$env:USERPROFILE\Desktop\Illuminator.lnk")

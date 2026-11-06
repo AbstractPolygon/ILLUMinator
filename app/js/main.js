@@ -2090,7 +2090,9 @@ async function focusAt(event) {
   const [fx, fy] = sourceFraction(event);
   state.focusPoint = { x: Math.min(1, Math.max(0, fx)), y: Math.min(1, Math.max(0, fy)) };
   showFocusPoint();
-  const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v }, { onProgress: showProgress });
+  // Blur drawn from the depth map (the default): the focus value is the depth map's value at the click. Optical refocusing: measured from the views.
+  const depth = apertureFor(Math.min(fNumber(), 2.8)).aperture === 0;
+  const res = await engine.request('focusAt', { x, y, u: state.camera.u, v: state.camera.v, depth }, { onProgress: showProgress });
   hideProgress();
   if (!res || typeof res.alpha !== 'number') return;
   $('focus').value = res.alpha.toFixed(2);

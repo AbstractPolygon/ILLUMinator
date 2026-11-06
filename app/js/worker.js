@@ -2441,9 +2441,34 @@ async function spreadMask({ id, alpha = 0, spread = 0, smooth = 0, tilt = [0, 0]
 // texture to judge by, the (filled-in) depth map is used instead. The point
 // is shifted back by the parallax of the current viewpoint, since the views
 // are centered.
-async function focusAt({ id, x, y, u = 0, v = 0 }) {
+async function focusAt({ id, x, y, u = 0, v = 0, depth = false }) {
   if (state.pp) return { alpha: state.pp.focusAt(x, y), confidence: 1 };
   requireRaw();
+  // When the blur is drawn from the depth map, what is in focus is what the depth map says is at the focus value: the depth at
+  // the click, so the clicked spot is exactly what the picture then shows sharp. (The estimate below is a separate measure from the
+  // views, over a limited range: it cannot place a thing nearer than that, a wire close to the lens comes out as the scene behind it.)
+  if (depth) {
+    if (!(await ensureDepth(id))) return { cancelled: true };
+    const { outW: dw, outH: dh } = state.sampler;
+    const d = state.settings.detail;
+    const at = (px, py) => {
+      const xi = Math.round(px);
+      const yi = Math.round(py);
+      const list = [];
+      for (let j = -1; j <= 1; j++) {
+        for (let i = -1; i <= 1; i++) {
+          const xx = Math.max(0, Math.min(dw - 1, xi + i));
+          const yy = Math.max(0, Math.min(dh - 1, yi + j));
+          list.push(state.depth.alpha[yy * dw + xx]);
+        }
+      }
+      return list.sort((a, b) => a - b)[4];
+    };
+    let alpha = at(x, y);
+    // A viewpoint away from the center sees a point at depth alpha displaced by -alpha * (u, v).
+    if (u || v) for (let k = 0; k < 2; k++) alpha = at(x - alpha * u * d, y - alpha * v * d);
+    return { alpha, confidence: 1 };
+  }
   if (!(await ensureRefocusViews(id))) return { cancelled: true };
   const { outW, outH } = state.sampler;
   const d = state.settings.detail;
@@ -2468,7 +2493,7 @@ async function focusAt({ id, x, y, u = 0, v = 0 }) {
   // Grow the window until it contains enough texture to judge by.
   let est = null;
   for (const radius of [5, 10, 20]) {
-    const opts = { radius, min: -1.6, max: 1.6 };
+    const opts = { radius, min: -2.6, max: 1.6 };
     est = measure(x, y, opts);
     // A viewpoint away from the center sees a point at depth alpha displaced
     // by -alpha * (u, v): measure again at the matching centered position.
