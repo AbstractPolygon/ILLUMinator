@@ -32,6 +32,7 @@ let KEY_FPS = DEFAULT_FPS;
 import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, flipVerticalOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 import { hook } from './core/debugflags.js';
+import { releaseHighlights } from './core/releasenotes.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -7673,6 +7674,15 @@ async function checkForUpdate(manual = false) {
     document.createElement('br'),
     'Download and install for the latest features.',
   );
+  // The release's short "What's new" list (core/releasenotes.js), shown above the downloads.
+  const news = releaseHighlights(release.body);
+  $('update-news').replaceChildren(...news.map(({ lead, text }) => {
+    const li = document.createElement('li');
+    if (lead) li.append(Object.assign(document.createElement('strong'), { textContent: lead }), ' ');
+    li.append(text);
+    return li;
+  }));
+  $('update-news-head').hidden = $('update-news').hidden = !news.length;
   $('update-links').replaceChildren(...files.map(({ a, b }) => {
     const li = document.createElement('li');
     if (b.os === os) li.className = 'mine';

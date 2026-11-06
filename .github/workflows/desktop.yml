@@ -160,8 +160,14 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="$GITHUB_REF_NAME"; else tag="v$(node -p "require('./package.json').version")"; fi
           version="${tag#v}"
-          cat > notes.md <<NOTES
-          Illuminator ${version}.
+          echo "Illuminator ${version}." > notes.md
+          # The short summary the app's update pop-up shows: docs/release-notes/<version>.md (bullets with a bold lead and one plain sentence each).
+          if [ -f "docs/release-notes/${version}.md" ]; then
+            { printf "\n## What's new\n\n"; cat "docs/release-notes/${version}.md"; } >> notes.md
+          fi
+          cat >> notes.md <<NOTES
+
+          ## Downloads
 
           - **Windows:** \`Illuminator-${version}-win-x64.exe\` (Intel and AMD) or \`Illuminator-${version}-win-arm64.exe\` (ARM, such as Snapdragon), or \`Illuminator-${version}-win-x64.msi\` (Windows Installer package, for managed installs)
           - **macOS:** \`Illuminator-${version}-mac-arm64.dmg\` (Apple Silicon) or \`Illuminator-${version}-mac-x64.dmg\` (Intel)

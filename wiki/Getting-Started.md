@@ -55,4 +55,4 @@ Every change is saved with the photo as you make it; there is no Save button. Op
 
 ## Updates
 
-The desktop app checks for a newer version when it starts, and again every few hours while it is open. *Help > Check for Updates…* checks right away and says so when you are up to date. If there is one, a popup lists that release's downloads (Windows, macOS and Linux, with this computer's first), each a direct link to the file. Install it over the current version; your library and edits stay as they are. *Don't remind me about this version* skips that release.
+The desktop app checks for a newer version when it starts, and again every few hours while it is open. *Help > Check for Updates…* checks right away and says so when you are up to date. If there is one, a popup shows a short *What's new* summary of that release, then its downloads (Windows, macOS and Linux, with this computer's first), each a direct link to the file. Install it over the current version; your library and edits stay as they are. *Don't remind me about this version* skips that release.
