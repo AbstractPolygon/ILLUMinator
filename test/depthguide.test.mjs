@@ -68,3 +68,36 @@ test('despeckle replaces small isolated depth patches and keeps real structure',
   const flat = new Float32Array(w * h).fill(2);
   assert.equal(despeckleDepth(flat, w, h), flat);
 });
+
+import { highlightMask, finishDepth } from '../app/js/core/depth.js';
+
+test('highlightMask marks glints and a margin around them, not smooth areas', () => {
+  const w = 40;
+  const h = 40;
+  const guide = new Float32Array(w * h).fill(0.3);
+  guide[20 * w + 20] = 1;
+  const mask = highlightMask(guide, w, h, { radius: 6, lift: 0.07, grow: 2 });
+  assert.equal(mask[20 * w + 20], 1);
+  assert.equal(mask[22 * w + 22], 1, 'margin');
+  assert.equal(mask[5 * w + 5], 0);
+  assert.equal(highlightMask(new Float32Array(w * h).fill(0.3), w, h)[20 * w + 20], 0);
+});
+
+test('depth under a glint is taken from its surroundings, however convincing its match looks', () => {
+  const w = 60;
+  const h = 60;
+  const n = w * h;
+  const guide = new Float32Array(n).fill(0.4);
+  const alpha = new Float32Array(n).fill(0.1);
+  const cost = new Float32Array(n).fill(0.1);
+  const meanCost = new Float32Array(n).fill(1);
+  for (let y = 24; y < 36; y++) {
+    for (let x = 24; x < 36; x++) {
+      guide[y * w + x] = 1;
+      alpha[y * w + x] = 1.4; // a wrong depth with a pronounced minimum
+      cost[y * w + x] = 0;
+    }
+  }
+  const out = finishDepth({ alpha, cost, meanCost }, w, h, guide, { refine: false });
+  assert.ok(Math.abs(out.alpha[30 * w + 30] - 0.1) < 0.15, `depth at the glint ${out.alpha[30 * w + 30]}`);
+});

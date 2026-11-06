@@ -319,7 +319,7 @@ function removeOutliers(alpha, confidence, w, h, threshold = 0.45, guide = null,
 
 // Filling unreliable depths: how far (share of the picture) and how
 // strictly within the photo's edges, and how much confidence counts as sure.
-export const DEPTH_FILL = { reach: 0.2, edge: 0.12, trust: 2 };
+export const DEPTH_FILL = { reach: 0.2, edge: 0.12, trust: 2, glint: 3, lift: 0.07 };
 
 // Region cleanup of high quality depth maps (core/segments.js).
 export const DEPTH_REGIONS = { on: true, count: 2500, compactness: 8, strength: 1, colorSigma: 8 };
@@ -1114,6 +1114,18 @@ export function median3(src, w, h) {
   return out;
 }
 
+// Where the picture has glints (pixels much brighter than their surroundings), as a 0/1 map grown by `grow` pixels. `guide`: the picture's brightness (depthGuide).
+export function highlightMask(guide, w, h, { radius = 6, lift = 0.07, grow = 2 } = {}) {
+  const n = w * h;
+  const mean = boxSum(guide, w, h, radius);
+  const hot = new Float32Array(n);
+  for (let i = 0; i < n; i++) hot[i] = guide[i] - mean[i] > lift ? 1 : 0;
+  const near = boxSum(hot, w, h, grow);
+  const mask = new Uint8Array(n);
+  for (let i = 0; i < n; i++) mask[i] = near[i] > 0 ? 1 : 0;
+  return mask;
+}
+
 export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { refine = true, min = DEPTH_SEARCH.min, max = DEPTH_SEARCH.max, color = null, median = null, fill = null, onProgress = null } = {}) {
   const step = (p) => onProgress && onProgress(p);
   const fillOf = fill && color ? (v, c, g, w, h, sigmaS, sigmaR, it, col) => fill(v, c, col, w, h, sigmaS, sigmaR, it) : edgeAwareFill;
@@ -1134,6 +1146,13 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   }
   // Keep confident estimates; fill the rest from confident parts of the
   // same surface (as far as it reaches, but not across the photo's edges).
+  // A glint looks different from each view (a reflection, not a surface), so the match there finds a wrong depth with a convincing minimum: the depth under and
+  // around glints is not trusted, and comes from the surroundings.
+  if (DEPTH_FILL.glint) {
+    const scale = Math.max(1, width / 625);
+    const glint = highlightMask(guide, width, height, { radius: Math.round(6 * scale), lift: DEPTH_FILL.lift, grow: Math.round(DEPTH_FILL.glint * scale) });
+    for (let i = 0; i < n; i++) if (glint[i]) confidence[i] = 0;
+  }
   const reach = Math.max(width, height) * DEPTH_FILL.reach;
   step(0);
   const smooth = fillOf(alpha, confidence, guide, width, height, reach, DEPTH_FILL.edge, 3, color);
