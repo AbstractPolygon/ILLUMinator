@@ -1,4 +1,4 @@
-// Debug and test switches, in one place.
+// Debug and test switches, in one place. docs/debug-flags.md lists every one the code reads (generated: node scripts/debug-flags.mjs).
 //
 // Nothing here is set by the app itself: a test harness or the browser console sets them (in the worker, usually by prepending a line to worker.js).
 //   * `debugFlags()` is the `__lytro` object: named switches that change how a stage runs (`noGpuBlur`, `legacy`, `printColor`, tuning values such as `viewRing`).
