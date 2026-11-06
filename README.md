@@ -13,7 +13,7 @@ npm test
 
 ## Library
 
-Every photo you open, drop or import is copied into the library, each in a folder of its own with its edits next to it:
+Every photo you open, drop or import is copied into the library, each in its folder with its edits next to it:
 
 ```
 library.json                      photos and albums

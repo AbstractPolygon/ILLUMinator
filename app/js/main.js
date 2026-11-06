@@ -5683,7 +5683,7 @@ async function savePhotoRendered(name, model, k) {
       if (!big) {
         const plain = upscaleBits16(rgb, width, height, W, H, upscaleSettings());
         if (plain) big = { rgb: plain, width: W, height: H };
-        else showNotice('Saved at the picture\'s own size', `The graphics card cannot enlarge a 16-bit picture to ${W}×${H}; it is saved at ${width}×${height}.`);
+        else showNotice('Saved at the picture\'s size', `The graphics card cannot enlarge a 16-bit picture to ${W}×${H}; it is saved at ${width}×${height}.`);
       }
       if (big) ({ rgb, width, height } = big);
     }
@@ -7430,7 +7430,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
     } catch (err) {
       if (err.name === 'SecurityError') {
         // A page embedded in another (a preview frame) is not allowed to use USB.
-        showNotice('This page is not allowed to use USB because it is shown inside another page (a preview or an artifact viewer, even in its own tab). Open Illuminator from its own web address, such as the website\'s Try online link, in Chrome or Edge.');
+        showNotice('This page is not allowed to use USB because it is shown inside another page (a preview or an artifact viewer, even in a separate tab). Open Illuminator from its web address, such as the website\'s Try online link, in Chrome or Edge.');
         startNoticeTimer();
       } else if (err.name === 'NotFoundError') {
         // Also what a closed chooser gives. A first generation camera shows

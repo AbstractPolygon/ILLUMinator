@@ -514,7 +514,7 @@
             <input id="depth-smooth" type="range" min="0" max="100" step="5" value="30" data-default="30">
           </label>
           <label id="lytro-depth-row" class="check" title="Uses the depth map edited in Lytro Desktop, imported with the photo, instead of measuring depth" hidden><input id="lytro-depth" type="checkbox" checked> Lytro Desktop depth map</label>
-          <label id="depth-style-row" title="How the depth map is measured. Automatic: the engine's way for raw camera photos (Classic Desktop), the blend otherwise. Blended: the Illuminator and the Classic Desktop depth together, with a slider for the mix (more fine detail on some photos, slower). Illuminator: Illuminator's own measurement, a plain cost volume. Classic Desktop: only the engine's measurement.">Depth method
+          <label id="depth-style-row" title="How the depth map is measured. Automatic: the engine's way for raw camera photos (Classic Desktop), the blend otherwise. Blended: the Illuminator and the Classic Desktop depth together, with a slider for the mix (more fine detail on some photos, slower). Illuminator: Illuminator's measurement, a plain cost volume. Classic Desktop: only the engine's measurement.">Depth method
             <select id="depth-style">
               <option value="auto" selected>Automatic</option>
               <option value="classic">Illuminator</option>
@@ -525,7 +525,7 @@
           <label id="depth-model-blend-row" title="How much of the depth model's result is used. 0: the measured depth alone. 100: the model's depth (fitted to the measurement) alone. The model gives clean object edges and an answer on glossy or blank surfaces; the measurement keeps the scale" hidden>Model blend <output for="depth-model-blend" data-for="depth-model-blend">70</output>
             <input id="depth-model-blend" type="range" min="0" max="100" step="5" value="70" data-default="70">
           </label>
-          <label id="depth-model-smooth-row" title="The depth model's setting: blurs its depth before it is fitted to the measurement, for gentler depth where the model is noisy or blocky. 0 leaves it as the model made it. Each depth model keeps its own settings" hidden>Model smoothing <output data-for="depth-model-smooth" for="depth-model-smooth">0</output>
+          <label id="depth-model-smooth-row" title="The depth model's setting: blurs its depth before it is fitted to the measurement, for gentler depth where the model is noisy or blocky. 0 leaves it as the model made it. Each depth model keeps its settings" hidden>Model smoothing <output data-for="depth-model-smooth" for="depth-model-smooth">0</output>
             <input id="depth-model-smooth" type="range" min="0" max="100" step="5" value="0" data-default="0">
           </label>
           <label id="depth-model-curve-row" title="The depth model's setting: bends its depth. Below 50 pulls the middle distances toward the far end, above 50 toward the near end. 50 leaves it as it is" hidden>Model curve <output data-for="depth-model-curve" for="depth-model-curve">50</output>
@@ -576,7 +576,7 @@
         <details class="subpanel">
           <summary><h3>Perspective</h3></summary>
           <label title="Drag on the picture to move the viewpoint">Viewpoint <output id="viewpoint">Center</output></label>
-          <label class="check" title="Choose the depth that stays still when the viewpoint moves; otherwise it is the focus plane (or, with the aperture closed, the camera's own focus)"><input id="pivot-on" type="checkbox"> Custom pivot</label>
+          <label class="check" title="Choose the depth that stays still when the viewpoint moves; otherwise it is the focus plane (or, with the aperture closed, the camera's focus)"><input id="pivot-on" type="checkbox"> Custom pivot</label>
           <label title="The depth that stays still when the viewpoint moves">Pivot depth <output data-for="pivot" for="pivot">0</output>
             <input id="pivot" type="range" min="-100" max="100" step="1" value="0" data-default="0" disabled>
           </label>
@@ -825,7 +825,7 @@
                   <option value="4">4× lens grid</option>
                 </select>
               </label>
-              <label title="Where each microlens really is. The lenses sit a little off their regular grid, each by its own amount, and out of focus the errors add up to a pattern at the lens grid's period. Automatic uses the camera's own white images when its calibration has been imported (Settings) and the white image stored in the photo otherwise; Measured from photo measures each lens's center from the white image stored in the photo's file; Camera calibration uses the imported calibration only; Off uses the regular grid">Lens centers
+              <label title="Where each microlens really is. The lenses sit a little off their regular grid, each by a different amount, and out of focus the errors add up to a pattern at the lens grid's period. Automatic uses the camera's white images when its calibration has been imported (Settings) and the white image stored in the photo otherwise; Measured from photo measures each lens's center from the white image stored in the photo's file; Camera calibration uses the imported calibration only; Off uses the regular grid">Lens centers
                 <select id="lens-centres">
                   <option value="auto" selected>Automatic</option>
                   <option value="camera">Camera calibration</option>
@@ -852,7 +852,7 @@
               <option value="fsr">FSR 1 (AMD, crisp edges)</option>
             </select>
           </label>
-          <label id="upscale-lobes-row" title="Lanczos only: how many lobes the filter has. 2 is softer with less ringing at edges, 3 is the usual, 4 is crisper with more ringing. Each method keeps its own settings">Lobes <output data-for="upscale-lobes" for="upscale-lobes">3</output>
+          <label id="upscale-lobes-row" title="Lanczos only: how many lobes the filter has. 2 is softer with less ringing at edges, 3 is the usual, 4 is crisper with more ringing. Each method keeps its settings">Lobes <output data-for="upscale-lobes" for="upscale-lobes">3</output>
             <input id="upscale-lobes" type="range" min="2" max="4" step="1" value="3" data-default="3">
           </label>
           <label id="upscale-denoise-row" title="The downloaded model's setting: smooths noise in the picture before the model enlarges it, so it does not take noise for texture and sharpen it. Keeps strong edges. 0 for none" hidden>Clean up first <output data-for="upscale-denoise" for="upscale-denoise">0</output>
@@ -861,7 +861,7 @@
           <label id="upscale-strength-row" title="The downloaded model's setting: how much of its result is used; the rest is the plain (Lanczos) enlargement. Lower it if the model adds artifacts or an over-processed look" hidden>Model strength <output data-for="upscale-strength" for="upscale-strength">100</output>
             <input id="upscale-strength" type="range" min="0" max="100" step="1" value="100" data-default="100">
           </label>
-          <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none. For FSR 1 it is its RCAS sharpness. Each method keeps its own setting"><span id="upscale-sharpen-label">Sharpen</span> <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
+          <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none. For FSR 1 it is its RCAS sharpness. Each method keeps its setting"><span id="upscale-sharpen-label">Sharpen</span> <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
             <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
           </label>
           <label id="upscale-grain-row" title="The downloaded model's setting: fine film-like grain added to the enlargement, mostly in the mid-tones, because a model's result is smoother than a photograph. 0 for none" hidden>Grain <output data-for="upscale-grain" for="upscale-grain">0</output>
@@ -1072,7 +1072,7 @@
       <menu>
         <label class="check"><input id="update-skip" type="checkbox"> Don't remind me about this version</label>
         <span class="spacer"></span>
-        <button value="close">Later</button>
+        <button value="close" autofocus>Later</button>
       </menu>
     </form>
   </dialog>

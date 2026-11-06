@@ -50,4 +50,4 @@ The camera's hot pixel list is used together with the search that *Remove hot pi
 
 *Import from camera…* (desktop app) lists the photos on a connected Lytro camera, with their thumbnails, and imports the ones you pick (*Select all* and *Select none* are next to each other). The ILLUM shows up as a drive. The first generation Lytro is reached the way Lytro Desktop does it, through its disk, so no driver is needed on Windows; its photos are put together from the camera's raw, metadata and thumbnail files. The same photos also show in the *Camera* section above the library when a camera is plugged in.
 
-First generation photos get Lytro Desktop's own automatic level (an exposure found from the picture and the camera's ISO) and its colour steps: the colour is limited to the sensor's range before the colour matrix, then a contrast curve is applied. *Look → Flat* turns this off.
+First generation photos get Lytro Desktop's automatic level (an exposure found from the picture and the camera's ISO) and its colour steps: the colour is limited to the sensor's range before the colour matrix, then a contrast curve is applied. *Look → Flat* turns this off.
