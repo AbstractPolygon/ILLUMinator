@@ -1183,7 +1183,7 @@ async function runSharp() {
   const photo = state.current && state.current.photo;
   sharp.running = true;
   try {
-    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: SHARP_SCALE, passes: 0, label: 'Sharpening' }, { onProgress: (stage, p) => { if (sharp.token === token) $('frame-label').textContent = `Sharpening ${Math.round((p ?? 0) * 100)}%`; } });
+    const { promise } = engine.job('superRes', 'superres', { ...cameraParams(), scale: SHARP_SCALE, passes: 0, label: 'Sharpening', quiet: true }, { onProgress: (stage, p) => { if (sharp.token === token) $('frame-label').textContent = `Sharpening ${Math.round((p ?? 0) * 100)}%`; } });
     const msg = await promise;
     // A change since (or another photo) makes it stale.
     if (token === sharp.token && msg && (msg.pixels || msg.bitmap) && sharpWanted() && state.current && state.current.photo === photo) {

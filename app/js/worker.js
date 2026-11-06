@@ -931,10 +931,10 @@ async function refocusFrames({ id, job, alphas, u, v, aperture, dof = 0, bokeh }
 // `alpha` with detail where it is in focus and smooth blur elsewhere.
 // `masks`: an animation frame's local adjustment settings (see resolveMasks).
 // `label`: the progress text (the picture's own Detail recovery is not a Full sensor render).
-async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null, color = null, label = 'Rendering from the full sensor' }) {
+async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0, dof = 0, bokeh, passes = 0, masks = null, color = null, quiet = false, label = 'Rendering from the full sensor' }) {
   requireRaw();
   // Setting lytroEngine (on unless set to false): the all in focus picture the way Lytro's engine builds it (lytroEdof), for photos that carry its ray table and white image (raw camera files).
-  if (aperture <= 0 && state.settings.lytroEngine !== false && state.lf.rayWarpBytes && state.lf.readModulation && !alpha) return lytroEdof({ id, job, scale, color, masks });
+  if (aperture <= 0 && state.settings.lytroEngine !== false && state.lf.rayWarpBytes && state.lf.readModulation && !alpha) return lytroEdof({ id, job, scale, color, masks, quiet });
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
   const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
@@ -1048,8 +1048,11 @@ const ENGINE_PLACE = { kx: 0.995, ky: 1.015, dx: -2, dy: -1.5 };
 const D5_GROW = 4;
 const D5_LEVEL = false;
 
-async function lytroEdof({ id, job, scale = 3, color = null, masks = null }) {
+// `quiet`: the background sharp preview of the live view (main.js runSharp). It must not hold up what the user does next, so it never starts
+// the depth measurement (the worker is busy until that ends) and stays away once a graphics card step has fallen back to the CPU (that is slow).
+async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet = false }) {
   requireRaw();
+  if (quiet && (!state.depth || (state.cpuFallbacks && state.cpuFallbacks.size))) return { cancelled: true };
   state.jobs.superres = job;
   const { lf, dev, sampler } = state;
   const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
