@@ -48,3 +48,23 @@ test('depth map contrast reshapes the depth: none leaves it, more pulls the ends
   // more contrast, more of the range flattened at the ends
   assert.ok(full[100] > half[100] || full[100] === half[100]);
 });
+
+import { despeckleDepth } from '../app/js/core/depth.js';
+
+test('despeckle replaces small isolated depth patches and keeps real structure', () => {
+  const w = 80, h = 60;
+  const depth = new Float32Array(w * h).fill(0);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) depth[y * w + x] = 0.1 * (x / w);
+  // a speck: a few pixels far from their surroundings
+  for (let y = 20; y < 23; y++) for (let x = 30; x < 33; x++) depth[y * w + x] = 1;
+  // a real object: a big near block
+  for (let y = 35; y < 55; y++) for (let x = 50; x < 75; x++) depth[y * w + x] = 1;
+  const out = despeckleDepth(depth, w, h);
+  assert.ok(Math.abs(out[21 * w + 31] - 0.04) < 0.05, `speck left: ${out[21 * w + 31]}`);
+  assert.equal(out[45 * w + 60], 1);
+  // untouched elsewhere
+  assert.equal(out[5 * w + 5], depth[5 * w + 5]);
+  // a flat picture comes back as it is
+  const flat = new Float32Array(w * h).fill(2);
+  assert.equal(despeckleDepth(flat, w, h), flat);
+});

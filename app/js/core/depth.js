@@ -1152,6 +1152,7 @@ export function finishDepth({ alpha, cost, meanCost }, width, height, guide, { r
   if (flat) result = segmentDepth(result, confidence, color, width, height, DEPTH_REGIONS);
   // Normal quality: no region cleanup, but the edges still follow the picture's.
   else if (color && DEPTH_REGIONS.guide !== false) result = snapDepthEdges(guidedFilterColor(result, color, width, height, 5, 0.003, DEPTH_REGIONS.gpu), color, width, height, DEPTH_REGIONS.gpu);
+  result = despeckleDepth(result, width, height);
   step(1);
   return { alpha: result, confidence, range: [min, max], flat };
 }
@@ -1322,6 +1323,65 @@ export function shapeDepthContrast(alpha, contrast) {
   for (let i = 0; i < alpha.length; i++) {
     const u = Math.max(0, Math.min(1, (alpha[i] - lo) / span));
     out[i] = lo + (u + contrast * (u * u * (3 - 2 * u) - u)) * span;
+  }
+  return out;
+}
+
+// Small isolated patches of depth far from their surroundings (a speck where a highlight or a bad match left a wrong depth) are replaced by the surroundings' median: a
+// pixel counts when it differs from the (2 * radius + 1) square median by more than `threshold` (a share of the depth range); a connected group of them of at most
+// `maxArea` pixels is a speck. Larger groups are real structure (a near object) and stay.
+export function despeckleDepth(depth, w, h, { radius = 4, threshold = 0.12, maxArea = 80 } = {}) {
+  const n = w * h;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (depth[i] < lo) lo = depth[i];
+    if (depth[i] > hi) hi = depth[i];
+  }
+  const limit = threshold * (hi - lo);
+  if (!(limit > 0)) return depth;
+  // The median of the window around a pixel, worked out only where a cheap test (the mean of eight samples on a ring around it) says the pixel may be off.
+  const med = new Float32Array(n);
+  const win = new Float32Array((2 * radius + 1) ** 2);
+  const at = (x, y) => depth[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
+  const medianAt = (x, y) => {
+    let k = 0;
+    for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) win[k++] = at(x + dx, y + dy);
+    win.sort();
+    return win[k >> 1];
+  };
+  const r = radius;
+  const off = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const ring = (at(x - r, y) + at(x + r, y) + at(x, y - r) + at(x, y + r) + at(x - r, y - r) + at(x + r, y - r) + at(x - r, y + r) + at(x + r, y + r)) / 8;
+      if (Math.abs(depth[i] - ring) <= 0.7 * limit) continue;
+      med[i] = medianAt(x, y);
+      if (Math.abs(depth[i] - med[i]) > limit) off[i] = 1;
+    }
+  }
+  const out = Float32Array.from(depth);
+  const seen = new Uint8Array(n);
+  const stack = [];
+  const group = [];
+  for (let i = 0; i < n; i++) {
+    if (!off[i] || seen[i]) continue;
+    group.length = 0;
+    stack.length = 0;
+    stack.push(i);
+    seen[i] = 1;
+    while (stack.length) {
+      const p = stack.pop();
+      group.push(p);
+      const x = p % w;
+      const y = (p - x) / w;
+      if (x > 0 && off[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; stack.push(p - 1); }
+      if (x + 1 < w && off[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; stack.push(p + 1); }
+      if (y > 0 && off[p - w] && !seen[p - w]) { seen[p - w] = 1; stack.push(p - w); }
+      if (y + 1 < h && off[p + w] && !seen[p + w]) { seen[p + w] = 1; stack.push(p + w); }
+    }
+    if (group.length <= maxArea) for (const q of group) out[q] = med[q];
   }
   return out;
 }
