@@ -6608,12 +6608,7 @@ $('lens-centres').onchange = () => {
   setFullRes(false);
 };
 $('still-scale').addEventListener('change', showPhotoSizes);
-// The lattice filter's controls show only with Detail recovery on; changing one is a new render.
-function showLatticeControls() {
-  $('lattice-controls').hidden = !(+$('still-passes').value > 0);
-}
-$('still-passes').addEventListener('change', showLatticeControls);
-showLatticeControls();
+// The lattice filter's controls (under Scale, in the Full sensor panel, so shown with Full sensor on); changing one is a new render.
 for (const id of ['lattice-on', 'lattice-strength', 'lattice-detect']) {
   $(id).addEventListener('input', () => {
     if ($(id).type === 'range') showSliderValue($(id));
@@ -6886,7 +6881,6 @@ async function applyEdits(info, saved) {
     showAnimationEnabled();
     showVideoCodecs();
     showPhotoFormat();
-    showLatticeControls();
     upscaleShown = null;
     showUpscaleControls(true);
     showObjectSoft();

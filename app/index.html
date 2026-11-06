@@ -815,15 +815,6 @@
               <option value="4">High (4 passes, slower)</option>
             </select>
           </label>
-          <div id="lattice-controls" hidden>
-            <label class="check" title="Takes out the diamond pattern the microlens grid can leave in out-of-focus areas of a picture rendered from the full sensor at 3× and 4× (it shows most once the picture is sharpened). On by default"><input id="lattice-on" type="checkbox" checked> Lattice filter</label>
-            <label title="How hard the filter pulls the pattern down: low leaves some of it, high takes it all out and can soften fine texture at the same frequencies">Lattice strength <output data-for="lattice-strength" for="lattice-strength">75</output>
-              <input id="lattice-strength" type="range" min="10" max="100" step="5" value="75" data-default="75">
-            </label>
-            <label title="How faint a pattern the filter looks for before it acts. Higher finds fainter ones (and acts on more pictures); lower acts only where the pattern is plain">Lattice detection <output data-for="lattice-detect" for="lattice-detect">50</output>
-              <input id="lattice-detect" type="range" min="0" max="100" step="5" value="50" data-default="50">
-            </label>
-          </div>
           <div class="stack">
             <label class="check" title="Rebuilds the picture from every pixel the sensor recorded, on/off (F). Photos: press Render. Videos: every frame is rebuilt this way when exported (much slower)"><input id="fullres-on" type="checkbox"> Full sensor</label>
             <div id="fullres-panel" hidden>
@@ -841,6 +832,13 @@
                   <option value="photo">This photo's white image</option>
                   <option value="off">Off</option>
                 </select>
+              </label>
+              <label class="check" title="Takes out the diamond pattern the microlens grid can leave in out-of-focus areas of a picture rendered from the full sensor at 3× and 4× (it shows most once the picture is sharpened). On by default"><input id="lattice-on" type="checkbox" checked> Lattice filter</label>
+              <label title="How hard the filter pulls the pattern down: low leaves some of it, high takes it all out and can soften fine texture at the same frequencies">Lattice strength <output data-for="lattice-strength" for="lattice-strength">75</output>
+                <input id="lattice-strength" type="range" min="10" max="100" step="5" value="75" data-default="75">
+              </label>
+              <label title="How faint a pattern the filter looks for before it acts. Higher finds fainter ones (and acts on more pictures); lower acts only where the pattern is plain">Lattice detection <output data-for="lattice-detect" for="lattice-detect">50</output>
+                <input id="lattice-detect" type="range" min="0" max="100" step="5" value="50" data-default="50">
               </label>
             </div>
           </div>
