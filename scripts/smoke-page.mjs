@@ -39,6 +39,12 @@ const result = await p.evaluate(async () => {
   log.pickPressed = $('wb-pick') && $('wb-pick').getAttribute('aria-pressed');
   if ($('lut-amount')) { $('lut-amount').value = 40; fire('lut-amount'); }
   if ($('lut-select')) fire('lut-select', 'change');
+  // keyframes and the curves view (no photo: the timeline controls still run their handlers)
+  $('anim-on').checked = true; fire('anim-on', 'change');
+  for (const id of ['tl-zoom-in', 'tl-zoom-out', 'tl-zoom-label', 'tl-key-all', 'tl-delete', 'tl-view-curves', 'tl-view-keys']) if ($(id)) $(id).click();
+  for (const id of ['tl-autokey', 'tl-only-keyed']) if ($(id)) { $(id).checked = !$(id).checked; fire(id, 'change'); }
+  if ($('tl-ease')) fire('tl-ease', 'change');
+  log.timeline = !!$('tl-grid') && $('anim-keys') ? $('anim-keys').value.slice(0, 40) : 'none';
   // frame rate and 3D controls
   $('fps-preset').value = '30'; fire('fps-preset', 'change'); log.fps = $('fps').value; log.customHidden = $('fps-custom').hidden;
   $('fps-preset').value = 'custom'; fire('fps-preset', 'change'); log.customShown = !$('fps-custom').hidden;

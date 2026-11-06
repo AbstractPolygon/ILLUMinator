@@ -1,7 +1,7 @@
 // local adjustments: moved out of main.js. initLocalAdjustments() runs where the section used to, with what it uses from the rest of the page.
 import { parseMasks, MAX_MASKS, defaultMask } from '../core/local.js';
 
-export function initLocalAdjustments({ getAnim, $, applySettingsSoon, scheduleSave, state, clearSelection, saveAnimation, renderTimeline, showMenu, confirmInMenu, editName, canRender, showSliderValue, updateKeyButtons, autoKey }) {
+export function initLocalAdjustments({ $, applySettingsSoon, scheduleSave, state, clearSelection, saveAnimation, renderTimeline, showMenu, confirmInMenu, editName, canRender, showSliderValue, updateKeyButtons, autoKey }) {
   // Masks (core/local.js) kept as JSON in a hidden field, so they are saved
   // with the photo's edits like every other control. The editor shows the
   // selected mask.
@@ -40,10 +40,10 @@ export function initLocalAdjustments({ getAnim, $, applySettingsSoon, scheduleSa
     // Its animation goes with it.
     const prefix = `mask:${list[i].id}:`;
     let keyed = false;
-    for (const k of Object.keys(getAnim().tracks)) {
+    for (const k of Object.keys(state.anim.tracks)) {
       if (!k.startsWith(prefix)) continue;
-      keyed = keyed || getAnim().tracks[k].length > 0;
-      delete getAnim().tracks[k];
+      keyed = keyed || state.anim.tracks[k].length > 0;
+      delete state.anim.tracks[k];
     }
     list.splice(i, 1);
     if (state.maskSel >= i) state.maskSel = Math.max(list.length ? 0 : -1, state.maskSel - 1);
