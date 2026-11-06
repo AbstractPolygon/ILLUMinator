@@ -47,7 +47,8 @@ import { lytroSplat, engineColorScale, engineAperture, engineGrid, buildEngineBa
 import { edgeArtifactReduce, renderSuperRes, superResParams, estimateVignetting, vignettingGainAt, lensTable, estimateFocusOffset, lensIndex } from './core/superres.js';
 import { fixHotPixels, blendedCcm } from './core/raw.js';
 import { awbImage, engineAwb, customGains } from './core/enginewb.js';
-import { parseHotPixels, measureWhite, whiteOffsets } from './core/calibration.js';
+import { parseHotPixels, measureWhite, measureWhiteRaw, whiteOffsets } from './core/calibration.js';
+import { engineLensShift } from './core/lensshift.js';
 import { estimateVeil, subtractVeil } from './core/flare.js';
 import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } from './core/lens.js';
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
@@ -698,6 +699,8 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     state.geoTable = state.lf.geometryBytes && hook('useGeo') ? parseGeometryTable(state.lf.geometryBytes) : null;
     state.rayWarpEdof = null;
     state.modulation = undefined;
+    state.photoWhite = undefined;
+    state.lensShiftFor = null;
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
     state.lf.cam.distortionFit = state.rayWarp && !hook('noTableLens') ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
@@ -1192,6 +1195,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     depth5,
     modulation: dbg.noModulation ? null : state.modulation,
     geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
+    lensShift: exactGeo ? await lensShiftForPhoto(id) : null,
     raw: lf.raw, cam: lf.cam, dev, grid: exactGeo ? engineLatticeIdx(lf) : probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
     // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
     rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
@@ -1421,15 +1425,58 @@ function exactLensOffsets() {
   return table;
 }
 
+// The white image of the open photo's camera in its calibration (matched by the geometry file's SHA-1), or null.
+function cameraWhite() {
+  const { lf } = state;
+  const serial = lf.privateMetadata && lf.privateMetadata.camera && lf.privateMetadata.camera.serialNumber;
+  const cal = serial && calibrations.get(String(serial));
+  const ref = lf.geometryRef && String(lf.geometryRef).replace(/^sha1-/i, '').toLowerCase();
+  return (cal && ref && (cal.whites || []).find((w) => w.gct === ref)) || null;
+}
+
+// The white image stored inside the open photo (the one the engine divides the picture by), measured: each lens's disc centre. Once per photo.
+async function photoWhite() {
+  const { lf } = state;
+  if (state.photoWhite === undefined) {
+    state.photoWhite = null;
+    try {
+      const img = lf.readModulation ? await lf.readModulation() : null;
+      if (img) state.photoWhite = measureWhiteRaw(img, lf.cam, Number.isFinite(img.black) ? img.black : lf.cam.black[0]);
+    } catch {
+      state.photoWhite = null;
+    }
+  }
+  return state.photoWhite;
+}
+
+// Each lens's own centre offset for the engine's ray model (core/lensshift.js), by the setting Lens centres: the camera's calibration white image, the white image stored
+// with the photo, or (Automatic) the camera's when it has been imported and the photo's white image otherwise. Null for none.
+async function lensShiftForPhoto(id) {
+  const { lf } = state;
+  const mode = state.settings.lensCentres || 'auto';
+  if (mode === 'off' || !lf.raw) return null;
+  const ge = engineLatticeIdx(lf);
+  const camera = mode === 'photo' ? null : cameraWhite();
+  const white = camera || (mode === 'camera' ? null : await photoWhite());
+  if (!white) return null;
+  const key = `${mode}:${camera ? 'camera' : 'photo'}`;
+  if (state.lensShiftFor && state.lensShiftFor.key === key && state.lensShiftFor.white === white) return state.lensShiftFor.shift;
+  const shift = engineLensShift(white, lf.grid, lf.cam, ge);
+  state.lensShiftFor = { key, white, shift };
+  if (debugFlags().printGeo) {
+    let ss = 0;
+    if (shift) for (let i = 0; i < shift.du.length; i++) ss += shift.du[i] ** 2 + shift.dv[i] ** 2;
+    console.log('GEO', JSON.stringify({ mode, source: camera ? 'camera' : 'photo', white: !!white, count: shift && shift.count, rms: shift ? Math.sqrt(ss / Math.max(1, shift.count)) : null }));
+  }
+  return shift;
+}
+
 // Lens centers for the open photo from the white image of its camera's
 // calibration (matched by the geometry file's SHA-1), or null.
 function calibratedLensOffsets() {
   const { lf } = state;
   if (!useWhites) return null;
-  const serial = lf.privateMetadata && lf.privateMetadata.camera && lf.privateMetadata.camera.serialNumber;
-  const cal = serial && calibrations.get(String(serial));
-  const ref = lf.geometryRef && String(lf.geometryRef).replace(/^sha1-/i, '').toLowerCase();
-  const white = cal && ref && (cal.whites || []).find((w) => w.gct === ref);
+  const white = cameraWhite();
   if (!white) return null;
   const table = lensTable(lf.grid, lf.cam);
   return whiteOffsets(white, lf.grid, table) > 1000 ? table : null;

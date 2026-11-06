@@ -421,6 +421,9 @@ uniform vec2 uMarch;       // tolA, tolB
 uniform vec2 uRayShift;    // viewpoint shift of every ray (px, lens array axes)
 uniform int uExact;        // the engine's ray model (lytroSplat opts.exact)
 uniform highp sampler2D uGct;
+uniform highp sampler2D uLensShift; // each lens's own centre offset (px, lattice axes), by lens row and column
+uniform ivec4 uLensRC;               // its first row, first column, rows, columns
+uniform int uHasShift;
 uniform vec4 uExactA;      // pitch.y, ratio.x, ratio.y, lambda gain
 uniform vec4 uExactB;      // sampler grid: origin x, origin y, cos, sin
 uniform vec2 uCam;
@@ -543,7 +546,12 @@ void main() {
     vec2 n = (centreIdx + 0.5) / uCam;
     ivec2 gi = clamp(ivec2(floor(vec2(gs) * n + 0.5)), ivec2(0), gs - 1);
     vec2 G = texelFetch(uGct, gi, 0).rg;
-    ev = vec2(u / pitch, v / uExactA.x) - G;
+    vec2 sh = vec2(0.0);
+    if (uHasShift == 1) {
+      ivec2 q = ivec2(bc - uLensRC.y, br - uLensRC.x);
+      if (q.x >= 0 && q.y >= 0 && q.x < uLensRC.w && q.y < uLensRC.z) sh = texelFetch(uLensShift, q, 0).rg;
+    }
+    ev = vec2((u - sh.x) / pitch, (v - sh.y) / uExactA.x) - G;
     float eau = abs(ev.x);
     if (uViewN > 0) {
       for (int k = 0; k < 9; k++) {
@@ -727,6 +735,16 @@ function lensReferences(modulation, cam, dev, g, range) {
 // P: { raw, modulation, cam, dev, grid, sampler: { xMin, yMin }, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale,
 //      W, H, apothem, rise, planeRadius, opts }.
 // Returns the W x H x 4 accumulation, or null when this GPU cannot do it.
+// two arrays as one of pairs
+function interleave(a, b) {
+  const out = new Float32Array(a.length * 2);
+  for (let i = 0; i < a.length; i++) {
+    out[2 * i] = a[i];
+    out[2 * i + 1] = b[i];
+  }
+  return out;
+}
+
 export function lytroSplatGpu(gpu, P, onProgress = null) {
   const gl = gpu.gl;
   if (!gpu.floatBlend || !P.modulation || !P.rayWarp) return null;
@@ -772,6 +790,8 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
   const zTex = keep(upload(gpu, W, H, gl.R32F, gl.RED, gl.FLOAT, P.zMap));
   const ex = !!P.opts.exact && !!P.geoTable;
   const gctTex = keep(ex ? upload(gpu, P.geoTable.w, P.geoTable.h, gl.RG32F, gl.RG, gl.FLOAT, P.geoTable.data, 4) : upload(gpu, 1, 1, gl.RG32F, gl.RG, gl.FLOAT, new Float32Array(2), 4));
+  const shift = ex ? P.lensShift : null;
+  const shiftTex = keep(shift ? upload(gpu, shift.cols, shift.rows, gl.RG32F, gl.RG, gl.FLOAT, interleave(shift.du, shift.dv), 4) : upload(gpu, 1, 1, gl.RG32F, gl.RG, gl.FLOAT, new Float32Array(2), 4));
   const nV = P.views ? P.views.length : 0;
   const HA = H * Math.max(1, nV);
   if (HA > gl.getParameter(gl.MAX_TEXTURE_SIZE)) return null;
@@ -949,6 +969,10 @@ export function lytroSplatGpu(gpu, P, onProgress = null) {
     gl.uniform1i(U.uExact, ex ? 1 : 0);
     gl.uniform1i(U.uGct, 9);
     gpu.bindTex(9, gctTex);
+    gl.uniform1i(U.uLensShift, 11);
+    gpu.bindTex(11, shiftTex);
+    gl.uniform1i(U.uHasShift, shift ? 1 : 0);
+    gl.uniform4i(U.uLensRC, shift ? shift.r0 : 0, shift ? shift.c0 : 0, shift ? shift.rows : 0, shift ? shift.cols : 0);
     if (ex) {
       const sg = P.sampleGrid;
       const pitchY = g.rowStep / 0.8660254037844386;

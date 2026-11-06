@@ -6603,6 +6603,10 @@ $('fullres-on').onchange = () => setFullResMode($('fullres-on').checked);
 $('render-btn').onclick = renderFullRes;
 $('depth-btn').onchange = () => setDepthShown($('depth-btn').checked);
 $('still-scale').onchange = () => setFullRes(false);
+$('lens-centres').onchange = () => {
+  applySettingsSoon();
+  setFullRes(false);
+};
 $('still-scale').addEventListener('change', showPhotoSizes);
 $('still-passes').onchange = () => {
   setFullRes(false);
@@ -6715,6 +6719,7 @@ async function applySettings() {
     depthStyle: $('depth-style').value,
     depthBlend: $('depth-blend').value / 100,
     depthModelBlend: $('depth-model-blend').value / 100,
+    lensCentres: $('lens-centres').value,
     depthModelSmooth: $('depth-model-smooth').value / 100,
     depthModelCurve: $('depth-model-curve').value / 100,
     depthContrast: $('depth-contrast').value / 100,

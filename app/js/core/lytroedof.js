@@ -3,6 +3,7 @@
 // depth, holes are filled, and a depth aware filter bank (the photo's
 // reconstructionFilterRef) reconstructs the picture from the splat.
 
+import { lensShiftAt } from './lensshift.js';
 import { lensWarp } from './lens.js';
 import { blendedCcm } from './raw.js';
 import { FILTER_DESCRIPTORS } from './lytrofilters.js';
@@ -882,7 +883,7 @@ function bisgFilter(dm, raw, cam, dev, W, H, { amount = 0.25, c = 0.7 } = {}) {
 }
 
 // Splats the rays: premultiplied RGBA of W x H (alpha = summed weight).
-export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null, depth5 = null }, opts = SPLAT) {
+export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler, vignetting: vg, depth, scale, lens, W, H, onProgress, rayWarp = null, modulation = null, geoTable = null, depth5 = null, lensShift = null }, opts = SPLAT) {
   const { width } = cam;
   // opts.exact: the engine's ray model as read from its code (stage2 spec): g is the engine's lens lattice (pixel indices, pitch.x / pitch.y from the metadata), every ray's direction is
   // taken off by the geometry table's cell at its disk centre (nearest cell), the window is tested on that direction, the ray table is looked up on it, and the ray is placed in sensor
@@ -902,6 +903,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   const warpOut = [0, 0, 0, 0];
   const warp0 = new Float64Array(4);
   const geoOut = [0, 0];
+  const shiftOut = [0, 0];
   // GeometryErrorTable::CorrectLightfieldPoint takes the cell's (u, v) off every ray's direction. The picture-fitted lens centres already absorb how the table varies
   // from lens to lens but not its mean, which is a viewpoint shift of the whole picture (b4-1: -0.0186, -0.0063 pitches): near objects sit 1 to 3 px off the engine's.
   const rayShift = [0, 0];
@@ -942,7 +944,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   const lo = depthFilter(depth, lw, lh, reach, Math.min);
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
-  const gpuInput = { satOver: null, views: viewHits ? views : null, listedOnly: ex, rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
+  const gpuInput = { lensShift: ex ? lensShift : null, satOver: null, views: viewHits ? views : null, listedOnly: ex, rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
   if (opts.gpu || hook('dumpSplat')) gpuInput.satOver = saturationOverride(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
   if (hook('dumpSplat')) hook('dumpSplat')(gpuInput);
   if (opts.gpu && (!viewHits || (opts.sensorRaster && !opts.noGpuViews)) && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
@@ -972,8 +974,17 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       cxm = x - (cosR * u - sinR * v);
       cym = y - (sinR * u + cosR * v);
       geometryAt(geoTable, (cxm + 0.5) / cam.width - 0.5, (cym + 0.5) / cam.height - 0.5, geoOut);
-      eu = u / g.pitch - geoOut[0];
-      ev = v / pitchY - geoOut[1];
+      // each lens's own centre offset (core/lensshift.js), the part of its place the lattice and the geometry table do not have
+      let su = 0;
+      let sv = 0;
+      if (lensShift) {
+        const lr = Math.round(lensY / g.rowStep);
+        lensShiftAt(lensShift, lr, Math.round((lensX - (lr & 1) * g.pitch * 0.5) / g.pitch), shiftOut);
+        su = shiftOut[0];
+        sv = shiftOut[1];
+      }
+      eu = (u - su) / g.pitch - geoOut[0];
+      ev = (v - sv) / pitchY - geoOut[1];
       if (viewHits) {
         // the depth views: each is a circular window (ShiftedAperture(CircularAperture(r), u, v)) on the direction after the geometry table
         let any = false;

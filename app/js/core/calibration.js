@@ -64,9 +64,15 @@ export function measureWhite(rawBytes, meta) {
   const cam = cameraInfo(md);
   const { width, height } = cam;
   const raw = unpackRaw(rawBytes, width, height, cam.bits);
+  return measureWhiteRaw(raw, cam, cam.black[0]);
+}
+
+// The same for a white image already unpacked (`raw`, width x height sensor values, `cam` the camera info of its photo, `black` its black level): the white image stored
+// inside every photo is one (the engine divides the picture by it), made at the same zoom and focus.
+export function measureWhiteRaw(raw, cam, black) {
+  const { width, height } = cam;
   const grid = gridFromCamera(cam);
   const lc = lensCenters(grid, width, height);
-  const black = cam.black[0];
   const R = grid.pitch * 0.42;
   const off = new Int8Array(lc.rows * lc.cols * 2).fill(-128);
   for (let i = 0; i < lc.rows * lc.cols; i++) {
