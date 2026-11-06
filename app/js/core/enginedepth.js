@@ -384,14 +384,31 @@ export function engineDepthMap(views, w, h, labels, onProgress = () => {}, costF
     }
   }
   if (!cost) cost = engineCostVolume(views, w, h, labels);
+  // The volume may be left on the graphics card (gpu/enginecost.js engineCostVolumeResident: { gpuVolume, toArray(), dispose() }); it is freed once the solver is done
+  // with it, and read back into an array only if the CPU has to take over.
+  const release = () => {
+    if (cost && cost.dispose) cost.dispose();
+  };
   // `solveFn`: aggregation, message passing and finish on the GPU (gpu/depthmatch.js engineSolveGpu); the CPU takes over if it throws
   if (solveFn) {
     try {
       onProgress('smooth', 0.4);
-      return solveFn(cost, views[8], w, h, labels, onProgress);
+      const depth = solveFn(cost, views[8], w, h, labels, onProgress);
+      release();
+      return depth;
     } catch (e) {
       // fall through to the CPU
     }
+  }
+  if (cost && cost.gpuVolume) {
+    let array = null;
+    try {
+      array = cost.toArray();
+    } catch (e) {
+      array = engineCostVolume(views, w, h, labels);
+    }
+    release();
+    cost = array;
   }
   onProgress('aggregate', 0.3);
   const agg = engineAggregate(cost, views[8], w, h, L);

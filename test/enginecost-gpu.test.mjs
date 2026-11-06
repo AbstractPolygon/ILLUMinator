@@ -46,7 +46,7 @@ test('GPU engine cost volume matches the CPU result', async (t) => {
       const W = 61, H = 47;
       const E = await import('/js/core/enginedepth.js');
       const { GpuRenderer } = await import('/js/gpu/renderer.js');
-      const { engineCostVolumeGpu } = await import('/js/gpu/enginecost.js');
+      const { engineCostVolumeGpu, engineCostVolumeResident } = await import('/js/gpu/enginecost.js');
       const { engineSolveGpu } = await import('/js/gpu/depthmatch.js');
       const f = (x, y, c) => 0.5 + 0.25 * Math.sin(0.31 * x + 1.7 * c) * Math.cos(0.23 * y - c) + 0.2 * Math.sin(0.113 * (x + 2 * y) + c);
       const views = [];
@@ -82,13 +82,24 @@ test('GPU engine cost volume matches the CPU result', async (t) => {
       const depthGpu = engineSolveGpu(gr, gpu, views[8], W, H, labels);
       let dWorst = 0, dBad = 0;
       for (let i = 0; i < W * H; i++) { const d = Math.abs(depthCpu[i] - depthGpu[i]); if (d > dWorst) dWorst = d; if (d > 0.05) dBad++; }
-      return { worst, bad, first, zeroCpu, zeroMismatch, dWorst, dBad, error: gl.getError() };
+      // the volume left on the card: the same array when read back, and the solver gives the same depth from it
+      const resident = engineCostVolumeResident(gr, views, W, H, labels);
+      const back = resident.toArray();
+      let residentDiff = 0;
+      for (let i = 0; i < gpu.length; i++) residentDiff = Math.max(residentDiff, Math.abs(gpu[i] - back[i]));
+      const depthResident = engineSolveGpu(gr, resident, views[8], W, H, labels);
+      resident.dispose();
+      let residentDepthDiff = 0;
+      for (let i = 0; i < W * H; i++) residentDepthDiff = Math.max(residentDepthDiff, Math.abs(depthGpu[i] - depthResident[i]));
+      return { worst, bad, first, zeroCpu, zeroMismatch, dWorst, dBad, residentDiff, residentDepthDiff, error: gl.getError() };
     });
     if (!res) return t.skip('No WebGL2 with float targets');
     t.diagnostic(JSON.stringify(res));
     assert.equal(res.error, 0);
     assert.ok(res.worst < 2e-4, `largest difference ${res.worst} ${JSON.stringify(res)}`);
     assert.ok(res.dBad <= 0.01 * 61 * 47, `depth differs at ${res.dBad} pixels, worst ${res.dWorst}`);
+    assert.ok(res.residentDiff < 1e-6, `the volume left on the card differs from the array by ${res.residentDiff}`);
+    assert.ok(res.residentDepthDiff < 1e-4, `the solver gives a different depth from the resident volume: ${res.residentDepthDiff}`);
     assert.ok(res.zeroMismatch <= 2, `zeroed pixels differ: ${res.zeroMismatch} of ${res.zeroCpu}`);
   } finally {
     await browser.close();

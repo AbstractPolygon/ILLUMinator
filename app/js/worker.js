@@ -34,7 +34,7 @@ import { setMemoryLimits } from './core/memorybudget.js';
 import { guideDepthEdges } from './core/depthguide.js';
 import { nrFilterGpu, nrFilterTex } from './gpu/enginenr.js';
 import { engineDepthMap, engineLabels } from './core/enginedepth.js';
-import { engineCostVolumeGpu } from './gpu/enginecost.js';
+import { engineCostVolumeGpu, engineCostVolumeResident } from './gpu/enginecost.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
 import { cameraInfo } from './core/raw.js';
@@ -1835,6 +1835,22 @@ async function measureDepthOnce(id) {
   return true;
 }
 
+// The depth cost volume on the graphics card, left there for the solver (engineCostVolumeResident); as an array (read back after every four labels) if that
+// cannot be done, and the CPU's if neither can.
+function gpuCostVolume(views, w, h, labels) {
+  try {
+    return engineCostVolumeResident(state.gpu, views, w, h, labels);
+  } catch (e) {
+    console.warn('The cost volume could not stay on the GPU:', e && e.message);
+  }
+  try {
+    return engineCostVolumeGpu(state.gpu, views, w, h, labels);
+  } catch (e) {
+    gpuFellBack('The depth cost volume', e);
+    throw e;
+  }
+}
+
 // A GPU step that failed and was done on the CPU instead (much slower): remembered, and told to the user once the depth is measured.
 function gpuFellBack(what, e) {
   (state.cpuFallbacks ||= new Map()).set(what, (e && e.message) || String(e));
@@ -2117,7 +2133,7 @@ function measureLytro(progress) {
     // The engine's own estimator on its views (core/enginedepth.js): in the engine's order, the centre last.
     const colors = viewColors(depthViews(), outW * outH, outW, outH);
     const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
-    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !debugFlags().noGpuCost ? (v, w, h, labels) => { try { return engineCostVolumeGpu(state.gpu, v, w, h, labels); } catch (e) { gpuFellBack('The depth cost volume', e); throw e; } } : null, state.gpu && !debugFlags().noGpuSolve ? (cost, guide, w, h, labels, prog) => { try { return engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog); } catch (e) { gpuFellBack('The depth solver', e); throw e; } } : null);
+    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !debugFlags().noGpuCost ? gpuCostVolume : null, state.gpu && !debugFlags().noGpuSolve ? (cost, guide, w, h, labels, prog) => { try { return engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog); } catch (e) { gpuFellBack('The depth solver', e); throw e; } } : null);
     measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
   }
   if (engineMeasured && measured) {

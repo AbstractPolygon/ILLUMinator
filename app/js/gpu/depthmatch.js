@@ -298,6 +298,22 @@ void main() {
 }`;
 
 // One label's unary cost into its channel of the cost atlas.
+// One label of a resident cost volume (gpu/enginecost.js engineCostVolumeResident) as a one-channel slice, zero where the volume's rules zero the pixel.
+const SLICE = `#version 300 es
+precision highp float;
+precision highp sampler2DArray;
+uniform sampler2DArray uRaw;
+uniform sampler2D uFlag;
+uniform int uLayer;
+uniform int uChan;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 t = texelFetch(uRaw, ivec3(p, uLayer), 0);
+  float v = uChan == 0 ? t.x : uChan == 1 ? t.y : uChan == 2 ? t.z : t.w;
+  outColor = vec4(texelFetch(uFlag, p, 0).x > 0.5 ? 0.0 : v, 0.0, 0.0, 1.0);
+}`;
+
 const PACK = `${HEAD}
 uniform sampler2D uCost;
 uniform sampler2D uAgg;
@@ -590,6 +606,7 @@ function programs(gpu) {
       edge: program(gl, EDGE_WEIGHTS),
       agg: program(gl, AGG),
       pack: program(gl, PACK),
+      slice: program(gl, SLICE),
       sweep: program(gl, SWEEP, SWEEP_VERTEX),
       result: program(gl, RESULT),
       engineResult: program(gl, ENGINE_RESULT),
@@ -812,7 +829,7 @@ function uploadLayer(work, array, layer, data, perPixel) {
 
 
 // The engine's aggregation, message passing and finish on the GPU (core/enginedepth.js engineAggregate + engineTrws + engineFinishDepth), for a cost
-// volume computed elsewhere (gpu/enginecost.js). volume: Float32Array ((y * w + x) * L + l); guide: the centre view, RGB; labels: consecutive whole
+// volume computed elsewhere (gpu/enginecost.js). volume: Float32Array ((y * w + x) * L + l), or the volume left on the card (gpu/enginecost.js engineCostVolumeResident, which the caller disposes); guide: the centre view, RGB; labels: consecutive whole
 // lambdas (a multiple of four of them). Returns the depth map in lambda, like engineDepthMap. Throws when the GPU cannot do it.
 export function engineSolveGpu(gpu, volume, guide, w, h, labels, onProgress = () => {}) {
   const gl = gpu.gl;
@@ -877,10 +894,25 @@ export function engineSolveGpu(gpu, volume, guide, w, h, labels, onProgress = ()
     gl.uniform1f(Q.u.uEdge, 0.2);
     gl.uniform1f(Q.u.uLow, 0.5);
     gpu.draw();
-    const slice = new Float32Array(n);
+    const resident = volume && volume.gpuVolume ? volume : null;
+    if (resident && (resident.w !== w || resident.h !== h || resident.L !== L)) throw new Error('The resident cost volume does not match');
+    const slice = resident ? null : new Float32Array(n);
     for (let k = 0; k < L; k++) {
-      for (let i = 0; i < n; i++) slice[i] = volume[i * L + k];
-      upload2D(work, costTex, slice, 1);
+      if (resident) {
+        // straight from the volume on the card: no read-back, no upload
+        Q = pr.slice;
+        fullscreen(Q, costTex);
+        gl.uniform1i(Q.u.uRaw, 1);
+        gl.uniform1i(Q.u.uFlag, 2);
+        gl.uniform1i(Q.u.uLayer, k >> 2);
+        gl.uniform1i(Q.u.uChan, k & 3);
+        gpu.bindTex(1, resident.raw, gl.TEXTURE_2D_ARRAY);
+        gpu.bindTex(2, resident.flag);
+        gpu.draw();
+      } else {
+        for (let i = 0; i < n; i++) slice[i] = volume[i * L + k];
+        upload2D(work, costTex, slice, 1);
+      }
       let src = costTex;
       for (let round = 0; round < A.rounds; round++) {
         const horizontalFirst = round % 2 === 0;

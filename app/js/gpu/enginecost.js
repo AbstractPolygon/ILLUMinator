@@ -1,8 +1,10 @@
 // The engine depth estimator's data cost volume (core/enginedepth.js engineCostVolume) on the GPU.
 // Per label and pixel: 1.25 x (sum of the 4 largest of min(sad, 0.2) over the eight ring views), sad the L1 distance between the ring view's bilinear
 // sample at (x + lambda u, y + lambda v) and the centre pixel, taps clamped to the picture the way the engine's gather does. Four labels per draw (RGBA).
-// A label whose mean ring colour tops 0.95 in a channel is encoded as -1 - cost; the caller zeroes the whole pixel for those, and for the flat cost
-// curves (those two rules need every label of a pixel, so they stay on the CPU, where they cost a fraction of a second).
+// A label whose mean ring colour tops 0.95 in a channel is encoded as -1 - cost; the whole pixel is zeroed for those, and for the flat cost curves (those two
+// rules need every label of a pixel). engineCostVolumeGpu returns the volume as an array with the rules applied on the CPU; engineCostVolumeResident keeps it on the
+// graphics card (an array texture, one layer per four labels, and a flag per pixel for the rules, applied by the shader that reads a label's slice), which is what
+// engineSolveGpu (gpu/depthmatch.js) takes without any read-back or upload in between.
 import { program } from './renderer.js';
 import { RING_UV, ENGINE_COST } from '../core/enginedepth.js';
 
@@ -65,14 +67,129 @@ void main() {
   outColor = result;
 }`;
 
-// views: nine Float32Array (RGB, w x h; the centre last). Returns the cost volume ((y * w + x) * L + l) like engineCostVolume.
-export function engineCostVolumeGpu(gpu, views, w, h, labels, opts = ENGINE_COST) {
+
+// The two whole-pixel rules of the engine, for every pixel at once: 1 where the volume is zeroed (a blown-out label, or a cost curve whose median is within
+// `uNoisy` of its minimum), else 0. uRaw: one layer per four labels.
+const MAX_LABELS = 64;
+const RULES = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+uniform sampler2DArray uRaw;
+uniform int uGroups;
+uniform int uKth;
+uniform float uNoisy;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  int L = uGroups * 4;
+  float v[${MAX_LABELS}];
+  bool blown = false;
+  for (int g = 0; g < ${MAX_LABELS / 4}; g++) {
+    if (g >= uGroups) break;
+    vec4 t = texelFetch(uRaw, ivec3(p, g), 0);
+    v[4 * g] = t.x;
+    v[4 * g + 1] = t.y;
+    v[4 * g + 2] = t.z;
+    v[4 * g + 3] = t.w;
+    if (min(min(t.x, t.y), min(t.z, t.w)) < 0.0) blown = true;
+  }
+  float zero = 1.0;
+  if (!blown) {
+    for (int i = 1; i < ${MAX_LABELS}; i++) {
+      if (i >= L) break;
+      float x = v[i];
+      int j = i - 1;
+      while (j >= 0 && v[j] > x) {
+        v[j + 1] = v[j];
+        j--;
+      }
+      v[j + 1] = x;
+    }
+    float median = uKth < L - 1 ? v[uKth] : v[L - 1];
+    zero = (median - v[0]) < uNoisy ? 1.0 : 0.0;
+  }
+  outColor = vec4(zero, 0.0, 0.0, 1.0);
+}`;
+
+// views: as engineCostVolumeGpu. Returns the volume on the graphics card: { gpuVolume: true, w, h, L, raw, flag, toArray(), dispose() }. `raw` holds the label costs
+// (a blown-out label as -1 - cost) and `flag` the pixels the rules zero. toArray() is the same array engineCostVolumeGpu returns (for the CPU to take over); the
+// caller disposes the volume.
+export function engineCostVolumeResident(gpu, views, w, h, labels, opts = ENGINE_COST) {
   const gl = gpu.gl;
   const L = labels.length;
+  const G = L / 4;
   if (L % 4) throw new Error('The label count must be a multiple of four');
+  if (L > MAX_LABELS) throw new Error('Too many labels for the GPU volume');
   if (views.length !== 9) throw new Error('The engine cost needs nine views');
   if (!gpu.engineCostProgram) gpu.engineCostProgram = program(gl, SHADER);
+  if (!gpu.engineRulesProgram) gpu.engineRulesProgram = program(gl, RULES);
   const prog = gpu.engineCostProgram;
+  const n = w * h;
+  while (gl.getError() !== gl.NO_ERROR); // an error an earlier step left is not this one's
+  const input = uploadViews(gl, views, w, h);
+  const raw = makeArray(gl, w, h, G);
+  const flag = gpu.texture(w, h, gl.R32F);
+  const dispose = () => {
+    gl.deleteTexture(raw);
+    gl.deleteTexture(flag);
+  };
+  try {
+    gl.useProgram(prog.p);
+    gl.uniform1i(prog.u.uViews, 1);
+    gl.uniform2fv(prog.u.uRing, new Float32Array(RING_UV.flat()));
+    gl.uniform1f(prog.u.uTrunc, opts.truncate);
+    gl.uniform1f(prog.u.uScale, opts.scale);
+    gl.uniform1f(prog.u.uLimit, 8 * opts.blownOut);
+    gpu.bindTex(1, input, gl.TEXTURE_2D_ARRAY);
+    // every group queued back to back: nothing is read until the solver needs it
+    for (let g = 0; g < G; g++) {
+      gpu.target(raw, w, h, g);
+      gl.uniform4f(prog.u.uLabels, labels[4 * g], labels[4 * g + 1], labels[4 * g + 2], labels[4 * g + 3]);
+      gpu.draw();
+    }
+    const rules = gpu.engineRulesProgram;
+    gpu.target(flag, w, h);
+    gl.useProgram(rules.p);
+    gl.uniform1i(rules.u.uRaw, 1);
+    gl.uniform1i(rules.u.uGroups, G);
+    gl.uniform1i(rules.u.uKth, Math.ceil((L - 1) * opts.noisyQuantile));
+    gl.uniform1f(rules.u.uNoisy, opts.noisy);
+    gpu.bindTex(1, raw, gl.TEXTURE_2D_ARRAY);
+    gpu.draw();
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) throw new Error(`The GPU could not build the cost volume (GL error ${error})`);
+  } catch (e) {
+    dispose();
+    throw e;
+  } finally {
+    gl.deleteTexture(input);
+  }
+  return {
+    gpuVolume: true,
+    w,
+    h,
+    L,
+    raw,
+    flag,
+    toArray() {
+      const out = new Float32Array(n * L);
+      const buf = new Float32Array(n * 4);
+      const f = new Float32Array(n * 4);
+      gpu.target(flag, w, h);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, f);
+      for (let g = 0; g < G; g++) {
+        gpu.target(raw, w, h, g);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, buf);
+        for (let i = 0; i < n; i++) if (f[4 * i] < 0.5) for (let j = 0; j < 4; j++) out[i * L + 4 * g + j] = buf[4 * i + j];
+      }
+      return out;
+    },
+    dispose,
+  };
+}
+
+function uploadViews(gl, views, w, h) {
   const n = w * h;
   gl.activeTexture(gl.TEXTURE0 + 15);
   const tex = gl.createTexture();
@@ -90,6 +207,29 @@ export function engineCostVolumeGpu(gpu, views, w, h, labels, opts = ENGINE_COST
     }
     gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, k, w, h, 1, gl.RGBA, gl.FLOAT, rgba);
   }
+  return tex;
+}
+
+function makeArray(gl, w, h, layers) {
+  gl.activeTexture(gl.TEXTURE0 + 15);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, w, h, layers);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  return tex;
+}
+
+// views: nine Float32Array (RGB, w x h; the centre last). Returns the cost volume ((y * w + x) * L + l) like engineCostVolume.
+export function engineCostVolumeGpu(gpu, views, w, h, labels, opts = ENGINE_COST) {
+  const gl = gpu.gl;
+  const L = labels.length;
+  if (L % 4) throw new Error('The label count must be a multiple of four');
+  if (views.length !== 9) throw new Error('The engine cost needs nine views');
+  if (!gpu.engineCostProgram) gpu.engineCostProgram = program(gl, SHADER);
+  const prog = gpu.engineCostProgram;
+  const n = w * h;
+  const tex = uploadViews(gl, views, w, h);
   const target = gpu.texture(w, h, gl.RGBA32F);
   const out = new Float32Array(n * L);
   const buf = new Float32Array(n * 4);
