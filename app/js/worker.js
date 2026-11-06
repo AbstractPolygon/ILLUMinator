@@ -656,6 +656,10 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
   state.depthCacheIn = depthCache;
   state.depthCacheOut = null;
   state.openOut = null;
+  // The depth of each depth method measured so far, by what it was measured with (depthMethodKey): switching back to a method does not measure again. The Illuminator
+  // method's depths kept with the photo are the first entries.
+  state.depthMethods = new Map();
+  for (const e of (depthCache && depthCache.extra) || []) if (JSON.parse(e.key).app === VERSION) state.depthMethods.set(e.key, { raw: { alpha: e.alpha, confidence: e.confidence, range: e.range, flat: e.flat }, parts: null, w: e.w, h: e.h });
   // A Lytro Desktop depth map kept with the photo replaces the measured one.
   state.userDepth = userDepth;
   state.gen++;
@@ -1810,6 +1814,19 @@ async function measureDepthOnce(id) {
     const engineDefault = engineDepthAvailable();
     let style = resolveDepthStyle(state.settings.depthStyle);
     if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !hook('forceStyle')) style = 'classic';
+    // This method measured with these settings before (in this session, or kept with the photo): its depth is used as it was.
+    const methodKey = depthMethodKey(style);
+    const recalled = state.depthMethods && state.depthMethods.get(methodKey);
+    if (recalled && recalled.w === outW && recalled.h === outH) {
+      if (state.settings.depthObjects) await findObjects(id);
+      state.depthParts = recalled.parts || null;
+      state.depthRaw = recalled.raw;
+      state.depthFast = false;
+      applyDepthSmoothing();
+      post({ type: 'depthReady', reapply: true });
+      if (methodDepthModel(state.settings.depthStyle)) await ensureModelDepth(id);
+      return true;
+    }
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     state.depthParts = null;
     state.cpuFallbacks = new Map();
@@ -1865,6 +1882,10 @@ async function measureDepthOnce(id) {
     settleDepth(outW, outH, lap);
     state.depthFast = false;  // a quick measurement made while this one ran is replaced by it
     lap.settle = Date.now() - tSettle;
+    if (state.depthRaw && state.depthMethods) {
+      state.depthMethods.set(depthMethodKey(style), { raw: state.depthRaw, parts: state.depthParts, w: outW, h: outH });
+      if (style === 'classic') postDepthCache();
+    }
     post({ type: 'depthReady' });  // (main.js re-applies a click to focus on it)
     if (methodDepthModel(state.settings.depthStyle)) await ensureModelDepth(id);
     // Where the time went, and a warning when a GPU step fell back to the CPU.
@@ -2108,6 +2129,13 @@ function depthCacheKey() {
   const s = state.settings;
   return JSON.stringify({ app: VERSION, format: DEPTH_CACHE_FORMAT, photo: state.lf && state.lf.photoId, detail: s.detail, hot: s.hotPixels !== false });
 }
+// What a measured depth depends on: the photo, the depth method and the settings that change the measurement (not the smoothing, contrast, blend or the model, which are
+// applied to a measured depth).
+function depthMethodKey(style) {
+  const s = state.settings;
+  return JSON.stringify({ app: VERSION, photo: state.lf && state.lf.photoId, detail: s.detail, hot: s.hotPixels !== false, style, quality: s.depthQuality ?? 'normal', objects: !!s.depthObjects, lytro: !!(state.userDepth && s.lytroDepth !== false), guided: s.depthStyle === 'guided' });
+}
+
 function depthCacheFor(raster) {
   const c = state.depthCacheIn;
   return c && c.alpha.length && raster && c.key === depthCacheKey() && c.w === raster.w && c.h === raster.h ? c : null;
@@ -2131,10 +2159,16 @@ function postDepthCache() {
   const kept = state.depthCacheIn && state.depthCacheIn.alpha.length && state.depthCacheIn.key === depthCacheKey() ? state.depthCacheIn : null;
   const c = state.depthCacheOut || kept;
   const open = state.openOut || undefined;
-  if (!c && !open) return;
+  // the Illuminator method's depths (the engine style's is the main one above), copied for the message
+  const extra = [];
+  for (const [key, e] of state.depthMethods || []) {
+    if (JSON.parse(key).style !== 'classic' || !e.raw.alpha || !e.raw.confidence) continue;
+    extra.push({ key, w: e.w, h: e.h, range: e.raw.range, flat: !!e.raw.flat, alpha: Float32Array.from(e.raw.alpha), confidence: Float32Array.from(e.raw.confidence) });
+  }
+  if (!c && !open && !extra.length) return;
   const alpha = c ? Float32Array.from(c.alpha) : new Float32Array(0);
   const focusOffset = Number.isFinite(state.focusOffset) ? state.focusOffset : c && c.focusOffset;
-  post({ type: 'cache', photoId: state.lf.photoId, cache: { key: c ? c.key : depthCacheKey(), w: c ? c.w : 0, h: c ? c.h : 0, alpha, focusOffset, open } }, [alpha.buffer]);
+  post({ type: 'cache', photoId: state.lf.photoId, cache: { key: c ? c.key : depthCacheKey(), w: c ? c.w : 0, h: c ? c.h : 0, alpha, focusOffset, open, extra } }, [alpha.buffer, ...extra.flatMap((e) => [e.alpha.buffer, e.confidence.buffer])]);
 }
 
 function measureLytro(progress) {

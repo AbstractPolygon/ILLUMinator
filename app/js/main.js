@@ -658,7 +658,7 @@ async function openItem(photo) {
   const depthCache = native ? decodeProcessed(await lib.processed(photo).catch(() => null)) : null;
   const transfer = [bytes];
   if (userDepth) transfer.push(userDepth.data.buffer);
-  if (depthCache) transfer.push(depthCache.alpha.buffer);
+  if (depthCache) transfer.push(depthCache.alpha.buffer, ...depthCache.extra.flatMap((e) => [e.alpha.buffer, e.confidence.buffer]));
   await openWith({ bytes, userDepth, depthCache }, transfer);
   if (state.info && state.current && state.current.photo === photo) lib.setPhotoId(photo, state.info.photoId).catch(() => {});
 }

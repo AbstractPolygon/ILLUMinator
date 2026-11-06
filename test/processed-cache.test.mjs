@@ -37,3 +37,25 @@ test('what opening worked out is kept, with or without the depth', () => {
   assert.deepEqual([...both.alpha], [1, 2, 3, 4]);
   assert.equal(decodeProcessed(buf(encodeProcessed({ key: 'k', w: 0, h: 0, alpha: new Float32Array(0) }))), null, 'nothing kept');
 });
+
+test('the depths of other depth methods are kept beside the main one', () => {
+  const extra = [
+    { key: '{"style":"classic"}', w: 2, h: 2, alpha: Float32Array.of(1, 2, 3, 4), confidence: Float32Array.of(0.1, 0.2, 0.3, 0.4), range: [0.5, 2.5], flat: false },
+    { key: '{"style":"other"}', w: 3, h: 1, alpha: Float32Array.of(5, 6, 7), confidence: Float32Array.of(1, 1, 0), flat: true },
+  ];
+  const back = decodeProcessed(buf(encodeProcessed({ key: 'k', w: 2, h: 1, alpha: Float32Array.of(9, 8), open: { key: 'o' }, extra })));
+  assert.deepEqual([...back.alpha], [9, 8]);
+  assert.equal(back.extra.length, 2);
+  assert.equal(back.extra[0].key, extra[0].key);
+  assert.deepEqual([...back.extra[0].alpha], [1, 2, 3, 4]);
+  assert.deepEqual([...back.extra[0].confidence].map((v) => +v.toFixed(2)), [0.1, 0.2, 0.3, 0.4]);
+  assert.deepEqual(back.extra[0].range, [0.5, 2.5]);
+  assert.equal(back.extra[1].flat, true);
+  assert.deepEqual([...back.extra[1].alpha], [5, 6, 7]);
+  const none = decodeProcessed(buf(encodeProcessed({ key: 'k', w: 1, h: 1, alpha: Float32Array.of(1) })));
+  assert.deepEqual(none.extra, []);
+  const bad = encodeProcessed({ key: 'k', w: 2, h: 1, alpha: Float32Array.of(9, 8), extra });
+  const cut = decodeProcessed(buf(bad.subarray(0, bad.length - 4)));
+  assert.deepEqual([...cut.alpha], [9, 8], 'the main depth survives a cut file');
+  assert.equal(cut.extra.length, 1, 'only the complete extra depths are used');
+});
