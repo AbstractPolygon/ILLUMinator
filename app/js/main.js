@@ -787,7 +787,7 @@ function draw(img) {
   if (cropState.editing) positionCropBox();
   canvas.classList.remove('hidden');
   // What the app shows is enlarged with the Upscaling settings too, as it will be saved or exported (not while dragging, nor the depth map).
-  if (!drag.on && !state.depthShown && state.mode === 'camera') showAtPhotoSize(shownScale(w, h));
+  if (!drag.on && !state.depthShown && !state.skipEnlarge && state.mode === 'camera') showAtPhotoSize(shownScale(w, h));
   scheduleHistogram();
   if (state.wantThumb && state.mode === 'camera') saveThumbnail();
 }
@@ -1513,12 +1513,18 @@ async function renderStill() {
 // aperture, depth of field) from every sensor pixel. The checkbox turns the
 // mode on (Scale appears, Render is enabled); Render makes the still. Any change to
 // the picture returns to the live view until Render is pressed again.
+// Render works for any raw photo in the camera view: at the Photo Size with the chosen Upscaling (a downloaded model enlarges the picture here), or, with Full
+// sensor on, as the full sensor still.
+function updateRenderButton() {
+  $('render-btn').disabled = !(state.info && state.info.hasRaw && state.mode === 'camera');
+}
+
 function setFullResMode(on) {
   if (on && !(state.info && state.info.hasRaw && state.mode === 'camera')) on = false;
   state.fullResMode = on;
   $('fullres-on').checked = on;
   $('fullres-panel').hidden = !on;
-  $('render-btn').disabled = !on;
+  updateRenderButton();
   $('auto-render').disabled = !on;
   showPhotoSizes();
   if (!on) setFullRes(false);
@@ -1545,9 +1551,86 @@ function scheduleAutoRender(delay = AUTO_RENDER_DELAY) {
 $('auto-render').onchange = () => scheduleAutoRender(0);
 
 function renderFullRes() {
-  if (!state.fullResMode) return;
+  if (!state.fullResMode) {
+    renderAtPhotoSize();
+    return;
+  }
   if (state.fullRes) renderStill();
   else setFullRes(true);
+}
+
+// The picture shown at the Photo Size, made with the chosen Upscaling: the plain methods are already what draw() shows; a downloaded model enlarges the picture on
+// show here (it takes a while, so it is made when Render is pressed), blended with the plain enlargement by Model strength. Save writes what is on show.
+let renderingAtSize = false;
+async function renderAtPhotoSize() {
+  if (renderingAtSize || !state.lastImage || state.lastImage.pair || state.mode !== 'camera') return;
+  const k = +$('photo-size').value || 1;
+  if (!(k > 1)) {
+    showNotice('Photo Size is Native', 'Choose a larger Photo Size (Render Settings > Photo) to enlarge the picture.');
+    return;
+  }
+  const model = methodModel($('upscale-method').value);
+  if (!model) {
+    draw(state.lastImage);
+    return;
+  }
+  renderingAtSize = true;
+  try {
+    // the picture at its own size (through crop and rotation), before any enlargement
+    state.skipEnlarge = true;
+    draw(state.lastImage);
+    state.skipEnlarge = false;
+    const w = canvas.width;
+    const h = canvas.height;
+    const base = ctx.getImageData(0, 0, w, h);
+    const rgb = new Uint16Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) {
+      rgb[3 * i] = base.data[4 * i] * 257;
+      rgb[3 * i + 1] = base.data[4 * i + 1] * 257;
+      rgb[3 * i + 2] = base.data[4 * i + 2] * 257;
+    }
+    const W = Math.round(w * k);
+    const H = Math.round(h * k);
+    const grown = await aiUpscale(model, () => readModel(model), rgb, w, h, showProgress);
+    hideProgress();
+    let big = { rgb: grown.rgb, width: grown.width, height: grown.height };
+    if (grown.width !== W) {
+      const sized = upscaleBits16(grown.rgb, grown.width, grown.height, W, H, { method: 'lanczos', sharpen: 0 });
+      if (sized) big = { rgb: sized, width: W, height: H };
+    }
+    big = blendWithPlain(big, rgb, w, h, +$('upscale-strength').value / 100);
+    const out = new ImageData(big.width, big.height);
+    for (let i = 0; i < big.width * big.height; i++) {
+      out.data[4 * i] = big.rgb[3 * i] >> 8;
+      out.data[4 * i + 1] = big.rgb[3 * i + 1] >> 8;
+      out.data[4 * i + 2] = big.rgb[3 * i + 2] >> 8;
+      out.data[4 * i + 3] = 255;
+    }
+    canvas.width = big.width;
+    canvas.height = big.height;
+    ctx.putImageData(out, 0, 0);
+    layoutCanvas();
+    if (state.geom) state.geom = { ...state.geom, inverse: invert(state.geom.matrix.map((v) => v * (big.width / w))) };
+    state.enlarged = true;
+    $('frame-label').textContent = `${canvas.width}×${canvas.height}`;
+  } catch (err) {
+    hideProgress();
+    state.skipEnlarge = false;
+    showNotice('Could not enlarge with the model', `${err && err.message ? err.message : err} The picture is enlarged with Lanczos instead.`);
+    draw(state.lastImage);
+  } finally {
+    renderingAtSize = false;
+  }
+}
+
+// `big` (the model's enlargement, 16-bit RGB) mixed with the plain Lanczos enlargement of `rgb` (w x h) of the same size: strength 1 is the model alone.
+function blendWithPlain(big, rgb, w, h, strength) {
+  if (!(strength < 1)) return big;
+  const plain = upscaleBits16(rgb, w, h, big.width, big.height, { method: 'lanczos', sharpen: 0 });
+  if (!plain) return big;
+  const out = new Uint16Array(big.rgb.length);
+  for (let i = 0; i < out.length; i++) out[i] = plain[i] + (big.rgb[i] - plain[i]) * strength;
+  return { rgb: out, width: big.width, height: big.height };
 }
 
 function setFullRes(on, { restore = true } = {}) {
@@ -1807,6 +1890,7 @@ function setMode(mode) {
   // The Lenslets view compares the sensor with the picture shown before.
   if (mode === 'lenslets' && state.mode === 'camera' && state.lastImage && !state.lastImage.pair) state.lensPicture = state.lastImage;
   state.mode = mode;
+  updateRenderButton();
   updateSpreadOverlay();
   for (const b of document.querySelectorAll('#modes button')) b.classList.toggle('active', b.dataset.mode === mode);
   for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== mode;
@@ -2534,6 +2618,7 @@ async function refreshUpscaleModels() {
   } else if (before) {
     select.value = before;
   }
+  showUpscaleControls();
 }
 refreshUpscaleModels().catch(() => {});
 
@@ -5459,6 +5544,7 @@ async function savePhotoRendered(name, model, k) {
             const sized = upscaleBits16(grown.rgb, grown.width, grown.height, W, H, { method: 'lanczos', sharpen: 0 });
             big = sized ? { rgb: sized, width: W, height: H } : grown;
           }
+          big = blendWithPlain(big, rgb, width, height, +$('upscale-strength').value / 100);
         } catch (err) {
           hideProgress();
           showNotice('Could not enlarge with the model', `${err && err.message ? err.message : err} The picture is enlarged with Lanczos instead.`);
@@ -5553,6 +5639,17 @@ $('video-quality').ondblclick = () => {
   scheduleSave();
 };
 $('upscale-sharpen').oninput = () => showSliderValue($('upscale-sharpen'));
+// Controls that belong to the chosen method: Model strength for the downloaded models.
+function showUpscaleControls() {
+  $('upscale-strength-row').hidden = !methodModel($('upscale-method').value);
+}
+$('upscale-strength').oninput = () => showSliderValue($('upscale-strength'));
+$('upscale-strength').ondblclick = () => {
+  $('upscale-strength').value = $('upscale-strength').dataset.default;
+  showSliderValue($('upscale-strength'));
+  scheduleSave();
+};
+$('upscale-method').addEventListener('change', showUpscaleControls);
 // The picture shown follows the Photo Size, Video Size and Upscaling settings.
 for (const id of ['photo-size', 'video-size', 'upscale-method', 'upscale-sharpen']) {
   $(id).addEventListener('change', () => { if (state.lastImage && !state.lastImage.pair && !state.depthShown) draw(state.lastImage); });
@@ -6592,6 +6689,9 @@ async function applyEdits(info, saved) {
     showAnimationEnabled();
     showVideoCodecs();
     showPhotoFormat();
+    showUpscaleControls();
+    showObjectSoft();
+    showDepthBlend();
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;
     renderMasks();
@@ -6835,7 +6935,7 @@ function showSliderValue(input) {
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
   else if (input.id === 'video-quality') out.textContent = `${v} Mbit/s`;
-  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen'].includes(input.id)) out.textContent = `${v}`;
+  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen', 'upscale-strength'].includes(input.id)) out.textContent = `${v}`;
   else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;

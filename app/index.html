@@ -827,6 +827,9 @@
               <option value="fsr">FSR 1 (AMD, crisp edges)</option>
             </select>
           </label>
+          <label id="upscale-strength-row" title="How much of the downloaded model's result is used; the rest is the plain (Lanczos) enlargement. Lower it if the model adds artifacts or an over-processed look" hidden>Model strength <output data-for="upscale-strength" for="upscale-strength">100</output>
+            <input id="upscale-strength" type="range" min="0" max="100" step="1" value="100" data-default="100">
+          </label>
           <label title="Sharpens enlarged pictures to bring back crispness lost in enlarging; 0 for none">Sharpen <output data-for="upscale-sharpen" for="upscale-sharpen">25</output>
             <input id="upscale-sharpen" type="range" min="0" max="100" step="1" value="25" data-default="25">
           </label>
@@ -892,7 +895,7 @@
         </details>
       </details>
       <div class="render-actions">
-        <button id="render-btn" class="wide" title="Renders the full sensor still (F turns Full sensor on)" disabled>Render</button>
+        <button id="render-btn" class="wide" title="Renders the picture at the Photo Size with the chosen Upscaling (a downloaded model enlarges it here); with Full sensor on, renders the full sensor still (F turns Full sensor on)" disabled>Render</button>
         <label id="auto-render-row" class="check" title="With Full sensor on, renders the full sensor still again by itself after each change"><input id="auto-render" type="checkbox" disabled> Auto render</label>
         <button id="png-btn" class="wide" disabled>Save PNG</button>
         <button id="webm-btn" class="wide">Export video</button>
