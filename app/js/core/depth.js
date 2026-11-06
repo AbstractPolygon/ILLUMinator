@@ -1308,3 +1308,20 @@ export function setDepthStyle(style) {
     DEPTH_COARSE.on = true;
   }
 }
+
+// Depth map contrast (Camera > Depth): the depth the picture is drawn from. The ends of the range are pulled in (up to 28 % of the picture at each end) and an S curve
+// is added, so a narrow span of depth takes the whole range of blur; the shown depth map and the depth of field use the same values. 0 leaves the depth as measured.
+export function shapeDepthContrast(alpha, contrast) {
+  if (!(contrast > 0)) return alpha;
+  const sorted = Float32Array.from(alpha).sort();
+  const cut = 0.28 * Math.min(1, contrast);
+  const lo = sorted[Math.floor((sorted.length - 1) * cut)];
+  const hi = sorted[Math.floor((sorted.length - 1) * (1 - cut))];
+  const span = Math.max(1e-6, hi - lo);
+  const out = new Float32Array(alpha.length);
+  for (let i = 0; i < alpha.length; i++) {
+    const u = Math.max(0, Math.min(1, (alpha[i] - lo) / span));
+    out[i] = lo + (u + contrast * (u * u * (3 - 2 * u) - u)) * span;
+  }
+  return out;
+}

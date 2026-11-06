@@ -1584,13 +1584,10 @@ async function renderDepth() {
   }
 }
 
-// Depth map contrast: only the preview's colors change, so it redraws at once.
-let depthContrastTimer = 0;
+// Depth map contrast reshapes the depth itself (the worker applies it with the other depth settings), so the picture's blur and the shown map change together.
 $('depth-contrast').oninput = () => {
   showSliderValue($('depth-contrast'));
-  if (!state.depthShown) return;
-  clearTimeout(depthContrastTimer);
-  depthContrastTimer = setTimeout(renderDepth, 60);
+  applySettingsSoon();
 };
 $('depth-grey').addEventListener('change', () => {
   if (state.depthShown) renderDepth();
@@ -2112,8 +2109,8 @@ async function applyFocusAt(x, y, opening) {
   cameraChanged({ final: true });
 }
 
-engine.onDepthReady = () => {
-  if (lastClick && lastClick.again) {
+engine.onDepthReady = (msg) => {
+  if (lastClick && (lastClick.again || (msg && msg.reapply))) {
     lastClick.again = false;
     applyFocusAt(lastClick.x, lastClick.y, false);
   }
@@ -6449,6 +6446,7 @@ async function applySettings() {
     depthQuality: $('depth-hq').checked ? 'high' : 'normal',
     depthStyle: $('depth-style').value,
     depthBlend: $('depth-blend').value / 100,
+    depthContrast: $('depth-contrast').value / 100,
     depthObjects: $('depth-objects').checked,
     lytroDepth: $('lytro-depth').checked,
     details: {

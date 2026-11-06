@@ -22,7 +22,7 @@ export class Engine {
       return;
     }
     if (msg.type === 'depthReady') {
-      if (this.onDepthReady) this.onDepthReady();
+      if (this.onDepthReady) this.onDepthReady(msg);
       return;
     }
     const p = this.pending.get(msg.id);

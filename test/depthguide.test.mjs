@@ -27,3 +27,24 @@ test('regions smaller than the minimum keep our depth', () => {
   const out = guideDepthEdges(ours, guide, W, H, { minSize: 4 });
   assert.equal(out[5 * W + 5], ours[5 * W + 5]);
 });
+
+import { shapeDepthContrast } from '../app/js/core/depth.js';
+
+test('depth map contrast reshapes the depth: none leaves it, more pulls the ends in and steepens the middle', () => {
+  const n = 1001;
+  const depth = Float32Array.from({ length: n }, (_, i) => -1 + (2 * i) / (n - 1));
+  assert.equal(shapeDepthContrast(depth, 0), depth);
+  const half = shapeDepthContrast(depth, 0.5);
+  const full = shapeDepthContrast(depth, 1);
+  // monotone, same order
+  for (let i = 1; i < n; i++) assert.ok(half[i] >= half[i - 1] && full[i] >= full[i - 1]);
+  // the ends are flattened (the extreme depths take the same value), the middle is steeper than the original
+  assert.equal(full[0], full[100]);
+  assert.ok(full[n - 1] === full[n - 101]);
+  const slope = (d, i) => (d[i + 10] - d[i]) / 10;
+  assert.ok(slope(full, 500) > slope(depth, 500) * 1.4, `${slope(full, 500)} vs ${slope(depth, 500)}`);
+  // the middle stays in the middle
+  assert.ok(Math.abs(full[500]) < 1e-3);
+  // more contrast, more of the range flattened at the ends
+  assert.ok(full[100] > half[100] || full[100] === half[100]);
+});

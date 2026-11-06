@@ -22,7 +22,7 @@ import { combineDepth } from './core/depthcombine.js';
 import { VERSION } from './version.js';
 import { removePeriodicPattern } from './core/notch.js';
 import { snapDepthEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
-import { setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
+import { shapeDepthContrast, setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
 import { makeLook, whiteBalanceGains, DEFAULT_KELVIN, solveWhiteBalance, autoWhiteBalance } from './core/color.js';
@@ -1453,6 +1453,7 @@ async function settings({ id, settings: s }) {
   const hotChanged = s.hotPixels !== undefined && s.hotPixels !== (state.settings.hotPixels ?? true);
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
+  const contrastChanged = s.depthContrast !== undefined && s.depthContrast !== (state.settings.depthContrast ?? 0);
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
   const styleChanged = s.depthStyle !== undefined && (s.depthStyle === 'guided') !== (state.settings.depthStyle === 'guided') || (s.depthStyle !== undefined && resolveDepthStyle(s.depthStyle) !== resolveDepthStyle(state.settings.depthStyle));
   const objectsChanged = s.depthObjects !== undefined && !!s.depthObjects !== !!state.settings.depthObjects;
@@ -1470,7 +1471,11 @@ async function settings({ id, settings: s }) {
     const { classic, match, outW, outH } = state.depthParts;
     state.depthRaw = { ...state.depthRaw, alpha: combineDepth(classic, match, outW, outH, undefined, state.settings.depthBlend ?? 0.5) };
     settleDepth(outW, outH);
-  } else if (smoothingChanged && !detailChanged) applyDepthSmoothing();
+  } else if ((smoothingChanged || contrastChanged) && !detailChanged) {
+    applyDepthSmoothing();
+    // (main.js applies a click to focus again on the changed depth)
+    if (state.depth && !state.pp) post({ type: 'depthReady', reapply: true });
+  }
   // A depth mask needs the depth map.
   if (state.lf && state.lf.raw && !state.depth && parseMasks(s.local && s.local.masks).some((m) => m.kind === 'depth')) await ensureDepth(id);
   if (state.pp) {
@@ -2353,7 +2358,8 @@ function applyDepthSmoothing() {
   const field = rayWarpField(outW, outH);
   // Kept without the shift as well: the engine's own picture reads Lytro's depth as it is (lytroEdof).
   state.depthPlain = smoothed;
-  state.depth = { ...raw, alpha: shift || field ? Float32Array.from(smoothed, (x, i) => x + shift + (field ? field[i] : 0)) : smoothed };
+  const placed = shift || field ? Float32Array.from(smoothed, (x, i) => x + shift + (field ? field[i] : 0)) : smoothed;
+  state.depth = { ...raw, alpha: shapeDepthContrast(placed, state.settings.depthContrast ?? 0) };
   state.depthSmoothingApplied = amount;
   state.gen++;
   if (state.gpu) state.gpu.setDepth(state.depth.alpha, outW, outH);
@@ -2381,6 +2387,8 @@ async function depthMap({ id, grey = false, contrast = 0 }) {
   const sorted = Float32Array.from(alpha).sort();
   // Contrast pulls the ends of the range in (2% and 98% of the picture, up to
   // 30% and 70%) and adds an S curve, so a narrow span of depth fills the colors.
+  // Raw photos: the contrast is already in the depth (shapeDepth); a processed file's depth map is shaped here.
+  if (!state.pp) contrast = 0;
   const cut = 0.02 + 0.28 * Math.max(0, Math.min(1, contrast));
   const lo = sorted[Math.floor((sorted.length - 1) * cut)];
   const hi = sorted[Math.floor((sorted.length - 1) * (1 - cut))];
