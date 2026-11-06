@@ -5,7 +5,6 @@ import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './co
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { decodePngGray, parseDepthRange, stackDepth } from './core/userdepth.js';
 import { upscaleImage, upscaleBits16 } from './gpu/upscale.js';
-import { vrSupported, showInVr } from './vr.js';
 import { VIDEO_FORMATS, VIDEO_CODECS, videoType, chooseVideoType, videoBitrate, videoFrame } from './core/video-format.js';
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
 import { connectWebUsb, downloadPicture } from './camera/webusb.js';
@@ -20,20 +19,24 @@ import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFi
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
-import { parsePoints, formatPoints } from './core/curve.js';
 import { parseMasks, defaultMask, MAX_MASKS } from './core/local.js';
-import { parseCube, encodeLut, decodeLut } from './core/lut.js';
 import { ARCHIVE_SUFFIX } from './library/archive.js';
 import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, setKey, sample, hasKeys, cubicBezier, frameCount, valueAt, segmentBezier, isMaskTrack, isSettingTrack } from './core/keyframes.js';
 
 // Frames a second of animations: for playback, keyframe times and video
 // (the Frame rate setting).
 let KEY_FPS = DEFAULT_FPS;
-import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, flipVerticalOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
 import { hook, setHook } from './core/debugflags.js';
-import { colorSettings as buildColorSettings, renderSettings as buildRenderSettings, FRINGES, CURVE_REGIONS } from './settingsmap.js';
-import { releaseHighlights } from './core/releasenotes.js';
+import { colorSettings as buildColorSettings, renderSettings as buildRenderSettings, FRINGES } from './settingsmap.js';
+import { initStereo } from './ui/stereo.js';
+import { initFrameRate } from './ui/framerate.js';
+import { initUpdates, updateCheckOn } from './ui/updates.js';
+import { initLut } from './ui/lut.js';
+import { initWhiteBalancePicker } from './ui/whitebalance.js';
+import { initColorMatrix } from './ui/colormatrix.js';
+import { initToneCurve } from './ui/tonecurve.js';
+import { initNumberFields } from './ui/numberfields.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -3218,24 +3221,8 @@ document.addEventListener('keydown', (e) => {
   }
 }, true);
 
-// ---------------------------------------------------------------- color matrix
-
-// Camera: the matrix in the photo's metadata; None: camera RGB as is;
-// Custom: editable, starting from the camera's.
-function showColorMatrix() {
-  $('ccm-grid').hidden = $('ccm-mode').value !== 'custom';
-}
-
-$('ccm-mode').onchange = () => {
-  if ($('ccm-mode').value === 'custom') {
-    const cam = state.info && state.info.cam && state.info.cam.ccm;
-    const m = cam || [1, 0, 0, 0, 1, 0, 0, 0, 1];
-    m.forEach((v, i) => { $(`ccm-${i}`).value = +v.toFixed(3); });
-  }
-  showColorMatrix();
-  applySettings();
-};
-for (let i = 0; i < 9; i++) $(`ccm-${i}`).addEventListener('input', () => applySettingsSoon());
+// color matrix: ui/colormatrix.js
+const { showColorMatrix } = initColorMatrix({ $, state, applySettings: (...a) => applySettings(...a), applySettingsSoon: (...a) => applySettingsSoon(...a) });
 
 // ---------------------------------------------------------------- local adjustments
 
@@ -5229,186 +5216,11 @@ function boxSelectCurves(e, r) {
   window.addEventListener('pointerup', up);
 }
 
-// ---------------------------------------------------------------- frame rate
+// frame rate: ui/framerate.js
+const { showFrameRate } = initFrameRate({ $, state, getKeyFps: () => KEY_FPS, setKeyFps: (v) => { KEY_FPS = v; }, scheduleSave: (...a) => scheduleSave(...a), animationSettingsChanged: (...a) => animationSettingsChanged(...a), showAnimationLength: (...a) => showAnimationLength(...a), renderTimeline: (...a) => renderTimeline(...a), updateFrameLabel: (...a) => updateFrameLabel(...a) });
 
-const FPS_PRESETS = ['23.976', '24', '25', '29.97', '30', '48', '50', '59.94', '60'];
-
-// Shows the frame rate setting (#fps) in the preset list, or as custom.
-function showFrameRate() {
-  const fps = Math.min(240, Math.max(1, +$('fps').value || DEFAULT_FPS));
-  const preset = FPS_PRESETS.find((p) => Math.abs(+p - fps) < 1e-3);
-  if (!state.customFps || !preset) $('fps-preset').value = preset || 'custom';
-  $('fps-custom').hidden = $('fps-preset').value !== 'custom';
-  KEY_FPS = fps;
-  state.fps = fps;
-}
-
-function setFrameRate(fps) {
-  // A viewpoint path or focus sweep keeps its length in seconds.
-  const seconds = +$('frames').value / KEY_FPS;
-  $('fps').value = String(+(+fps).toFixed(3));
-  showFrameRate();
-  $('frames').value = Math.max(2, Math.round(seconds * KEY_FPS));
-  scheduleSave();
-  animationSettingsChanged();
-  showAnimationLength();
-  renderTimeline();
-  updateFrameLabel();
-}
-
-$('fps-preset').onchange = () => {
-  const v = $('fps-preset').value;
-  state.customFps = v === 'custom';
-  if (state.customFps) {
-    $('fps-custom').hidden = false;
-    $('fps').focus();
-    return;
-  }
-  setFrameRate(+v);
-};
-$('fps').onchange = () => setFrameRate(Math.min(240, Math.max(1, +$('fps').value || DEFAULT_FPS)));
-
-// ---------------------------------------------------------------- 3D
-
-// Show 3D: the live picture in the chosen 3D type.
-function stereoShown() {
-  return $('stereo-on').checked && !!(state.info && state.info.hasRaw);
-}
-
-function eyeOffset() {
-  return (state.info.radius || 4.5) * (+$('stereo-baseline').value / 100);
-}
-
-// One eye's render settings. At a wide aperture every view would use the
-// whole lens and both eyes would match, so each eye looks through its own
-// smaller part of the aperture.
-function eyeParams(p, u) {
-  return { ...p, u, aperture: Math.min(p.aperture || 1, 0.5) };
-}
-
-// The live 3D picture in the chosen 3D type: an anaglyph, or both eyes
-// side by side (drawn by drawPair).
-async function stereoPreview(p) {
-  const b = eyeOffset();
-  const imgs = [];
-  for (const u of [p.u - b, p.u + b]) {
-    const msg = await engine.request('view', eyeParams(p, u), { onProgress: showProgress });
-    if (!msg || !(msg.pixels || msg.bitmap)) return null;
-    imgs.push(toImageData(msg));
-  }
-  const [L, R] = imgs.map((img) => {
-    if (img instanceof ImageData) return img;
-    const c = Object.assign(document.createElement('canvas'), { width: img.width, height: img.height });
-    const g = c.getContext('2d');
-    g.drawImage(img, 0, 0);
-    return g.getImageData(0, 0, img.width, img.height);
-  });
-  const mode = $('stereo-mode').value;
-  if (mode !== 'anaglyph') return { pair: [L, R], mode, width: L.width, height: L.height };
-  const out = new ImageData(new Uint8ClampedArray(R.data), R.width, R.height);
-  for (let i = 0; i < out.data.length; i += 4) out.data[i] = 0.299 * L.data[i] + 0.587 * L.data[i + 1] + 0.114 * L.data[i + 2];
-  return out;
-}
-
-$('stereo-on').onchange = () => {
-  if (state.showingFrames) backToCamera();
-  setFullRes(false, { restore: false });
-  refresh();
-};
-$('stereo-mode').addEventListener('change', () => {
-  if (stereoShown()) refresh();
-});
-$('stereo-baseline').addEventListener('input', () => {
-  if (stereoShown()) refresh();
-});
-
-// A stereo pair from two viewpoints across the lens aperture: anaglyph
-// (red / cyan glasses), side by side (parallel viewing) or cross-eyed.
-// Crop, rotation and the pivot apply to both eyes alike.
-// Both eyes of the current picture as canvases [left, right], each through
-// the crop and rotation (and the pivot, for its own viewpoint).
-async function stereoPair() {
-  const p = cameraParams();
-  const b = eyeOffset();
-  const eyes = [p.u - b, p.u + b];
-  const shots = [];
-  for (const u of eyes) {
-    showProgress('Rendering 3D', shots.length / 2);
-    const msg = await engine.request('view', eyeParams(p, u), { onProgress: () => {} });
-    shots.push(toImageData(msg));
-  }
-  const pivots = withPivotZoom(eyes.map((u) => pivotFor(u, p.v, p.alpha, eyeParams(p, u).aperture)));
-  const base = { orientation: +$('orientation').value || 1, angle: +$('straighten').value, crop: cropValues() };
-  return shots.map((img, i) => {
-    const g = geometry(img.width, img.height, { ...base, ...(pivots[i] || {}) });
-    const c = Object.assign(document.createElement('canvas'), { width: g.width, height: g.height });
-    drawGeometry(c.getContext('2d'), img, g);
-    return c;
-  });
-}
-
-// File name tag for a 3D type: VR players recognize side by side files by
-// "_3D_SBS" in the name.
-function stereoTag(mode) {
-  return mode === 'vr' ? '_3D_SBS' : `-3d-${mode}`;
-}
-
-// A stereo pair from two viewpoints across the lens aperture: anaglyph
-// (red / cyan glasses), side by side (parallel viewing or a VR headset) or
-// cross-eyed. Crop, rotation and the pivot apply to both eyes alike.
-async function saveStereo() {
-  if (!canRender() || !state.info.hasRaw) return;
-  $('stereo-btn').disabled = true;
-  try {
-    const [L, R] = await stereoPair();
-    const mode = $('stereo-mode').value;
-    let out;
-    if (mode === 'anaglyph') {
-      // Red from the left eye, green and blue from the right.
-      out = Object.assign(document.createElement('canvas'), { width: L.width, height: L.height });
-      const o = out.getContext('2d');
-      const l = L.getContext('2d').getImageData(0, 0, L.width, L.height);
-      const r = R.getContext('2d').getImageData(0, 0, R.width, R.height);
-      for (let i = 0; i < l.data.length; i += 4) {
-        r.data[i] = 0.299 * l.data[i] + 0.587 * l.data[i + 1] + 0.114 * l.data[i + 2];
-      }
-      o.putImageData(r, 0, 0);
-    } else {
-      const [first, second] = mode === 'cross' ? [R, L] : [L, R];
-      out = Object.assign(document.createElement('canvas'), { width: L.width * 2, height: L.height });
-      const o = out.getContext('2d');
-      o.drawImage(first, 0, 0);
-      o.drawImage(second, L.width, 0);
-    }
-    savePhoto(out, `${baseName()}${stereoTag(mode)}`);
-  } catch (err) {
-    showError(err);
-  } finally {
-    hideProgress();
-    $('stereo-btn').disabled = !canRender();
-    refresh();
-  }
-}
-
-// View in VR (browsers with WebXR, such as the Meta Quest Browser): the 3D
-// picture on a large screen in front of you, each eye seeing its own view.
-async function viewInVr() {
-  if (!canRender() || !state.info.hasRaw) return;
-  try {
-    const [L, R] = await stereoPair();
-    hideProgress();
-    await showInVr(L, R);
-  } catch (err) {
-    hideProgress();
-    showError(err);
-  }
-}
-$('vr-btn').onclick = viewInVr;
-vrSupported().then((ok) => {
-  $('vr-btn').hidden = !ok;
-});
-$('stereo-btn').onclick = saveStereo;
-$('stereo-baseline').oninput = () => showSliderValue($('stereo-baseline'));
+// 3D: ui/stereo.js
+const { stereoShown, eyeOffset, eyeParams, stereoPreview, stereoTag } = initStereo({ $, state, engine, showProgress: (...a) => showProgress(...a), backToCamera: (...a) => backToCamera(...a), setFullRes: (...a) => setFullRes(...a), refresh: (...a) => refresh(...a), cameraParams: (...a) => cameraParams(...a), withPivotZoom: (...a) => withPivotZoom(...a), pivotFor: (...a) => pivotFor(...a), cropValues: (...a) => cropValues(...a), drawGeometry: (...a) => drawGeometry(...a), canRender: (...a) => canRender(...a), savePhoto: (...a) => savePhoto(...a), baseName: (...a) => baseName(...a), showError: (...a) => showError(...a), hideProgress: (...a) => hideProgress(...a), showSliderValue: (...a) => showSliderValue(...a) });
 
 // ---------------------------------------------------------------- living filters
 
@@ -5473,87 +5285,14 @@ $('mask-filter').onchange = () => {
   renderTimeline();
 };
 
-// ---------------------------------------------------------------- number fields
+// number fields: ui/numberfields.js
+initNumberFields();
 
-// Number fields get plain up/down arrows in place of the browser's spinner
-// (which draws a box behind them).
-const CHEVRON = (d) => `<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-function addSteppers(input) {
-  const wrap = Object.assign(document.createElement('span'), { className: 'num' });
-  input.replaceWith(wrap);
-  const arrows = Object.assign(document.createElement('span'), { className: 'num-arrows' });
-  for (const [dir, d, label] of [[1, 'M1 5l4-4 4 4', 'Increase'], [-1, 'M1 1l4 4 4-4', 'Decrease']]) {
-    const b = Object.assign(document.createElement('button'), { type: 'button', tabIndex: -1, innerHTML: CHEVRON(d) });
-    b.setAttribute('aria-label', label);
-    b.onclick = () => {
-      if (input.disabled) return;
-      if (dir > 0) input.stepUp();
-      else input.stepDown();
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    arrows.append(b);
-  }
-  wrap.append(input, arrows);
-}
-for (const input of document.querySelectorAll('input[type=number]')) addSteppers(input);
+// tone curve: ui/tonecurve.js
+const { curve } = initToneCurve({ $, applySettingsSoon: (...a) => applySettingsSoon(...a), scheduleSave: (...a) => scheduleSave(...a), showSliderValue: (...a) => showSliderValue(...a) });
 
-// ---------------------------------------------------------------- tone curve
-
-function curveRegions() {
-  return CURVE_REGIONS.map((k) => $(`curve-${k}`).value / 100);
-}
-
-const curve = curveEditor($('curve-canvas'), {
-  getPoints: () => parsePoints($('curve-points').value),
-  getRegions: curveRegions,
-  setPoints: (pts, final) => {
-    $('curve-points').value = formatPoints(pts);
-    applySettingsSoon();
-    if (final) scheduleSave();
-  },
-});
-for (const k of CURVE_REGIONS) $(`curve-${k}`).addEventListener('input', () => curve.draw());
-$('curve-reset').onclick = () => {
-  $('curve-points').value = '0,0;1,1';
-  for (const k of CURVE_REGIONS) {
-    $(`curve-${k}`).value = 0;
-    showSliderValue($(`curve-${k}`));
-  }
-  curve.draw();
-  applySettingsSoon();
-  scheduleSave();
-};
-
-// ---------------------------------------------------------------- white balance eyedropper
-
-// Click the eyedropper, then something in the photo that should be neutral:
-// the worker finds the temperature and tint that make it so.
-function setPicking(on) {
-  state.picking = on && canRender() && state.mode === 'camera';
-  $('wb-pick').setAttribute('aria-pressed', String(state.picking));
-  canvas.classList.toggle('picking', state.picking);
-}
-
-async function pickWhiteBalance(event) {
-  const [x, y] = viewPoint(event);
-  setPicking(false);
-  try {
-    const res = await engine.request('whiteBalanceAt', { x, y });
-    if (!res || !res.kelvin) return;
-    $('awb').checked = false;
-    $('wb-temperature').value = res.kelvin;
-    $('wb-tint').value = res.tint;
-    showSliderValue($('wb-temperature'));
-    showSliderValue($('wb-tint'));
-    await applySettings();
-    scheduleSave();
-  } catch (err) {
-    showError(err);
-  }
-}
-
-$('wb-pick').onclick = () => setPicking(!state.picking);
+// white balance eyedropper: ui/whitebalance.js
+const { setPicking, pickWhiteBalance } = initWhiteBalancePicker({ state, canRender: (...a) => canRender(...a), $, canvas, viewPoint: (...a) => viewPoint(...a), engine, showSliderValue: (...a) => showSliderValue(...a), applySettings: (...a) => applySettings(...a), scheduleSave: (...a) => scheduleSave(...a), showError: (...a) => showError(...a) });
 
 // ---------------------------------------------------------------- export
 
@@ -7392,269 +7131,9 @@ $('camera-choose').onclick = () => importFromCameraFolder();
 // Test hook: ?sample opens the synthetic sample on load.
 if (new URLSearchParams(location.search).has('sample')) $('sample-btn').click();
 
-// ---------------------------------------------------------------- LUT
+// LUT: ui/lut.js
+const { sendLut } = initLut({ $, engine, showProgress: (...a) => showProgress(...a), hideProgress: (...a) => hideProgress(...a), canRender: (...a) => canRender(...a), showNotice: (...a) => showNotice(...a), startNoticeTimer: (...a) => startNoticeTimer(...a), showError: (...a) => showError(...a), scheduleSave: (...a) => scheduleSave(...a), applySettingsSoon: (...a) => applySettingsSoon(...a), TRASH_ICON, showSliderValue: (...a) => showSliderValue(...a) });
 
-// Process > LUT: a .cube color lookup table, kept with the photo's edits
-// (core/lut.js) and applied as the last step of the look.
-let lutSent = null;
-
-function showLut() {
-  let saved = null;
-  try {
-    saved = $('lut-data').value ? JSON.parse($('lut-data').value) : null;
-  } catch {
-    saved = null;
-  }
-  // The dropdown shows the LUT in use: a film look by name, an imported
-  // one as such, or None.
-  const film = saved && saved.film && filmLuts.index ? filmLuts.index.luts.findIndex((l) => l.name === saved.name) : -1;
-  const imported = $('lut-film').querySelector('option[value="imported"]');
-  imported.hidden = !(saved && film < 0);
-  imported.textContent = saved ? `Imported: ${saved.name}` : '';
-  $('lut-film').value = film >= 0 ? String(film) : saved ? 'imported' : '';
-  $('lut-name').textContent = saved ? saved.name : 'None';
-  $('lut-name').title = saved ? `${saved.name} (${saved.size}×${saved.size}×${saved.size})` : '';
-  $('lut-remove').hidden = !saved;
-  $('lut-amount').disabled = !saved;
-  return saved;
-}
-
-// The worker gets the LUT only when it changes: it is large.
-async function sendLut() {
-  const text = $('lut-data').value;
-  if (text === lutSent) return;
-  lutSent = text;
-  const saved = showLut();
-  await engine.request('setLut', { lut: saved ? decodeLut(saved) : null });
-}
-
-// Film looks bundled with the app (app/luts, built by
-// scripts/build-film-luts.mjs): the list loads at start, the LUTs themselves
-// (one file) the first time one is chosen.
-const filmLuts = { index: null, data: null };
-
-async function loadFilmIndex() {
-  try {
-    const res = await fetch('luts/film-luts.json');
-    if (!res.ok) return;
-    filmLuts.index = await res.json();
-  } catch {
-    return;
-  }
-  const groups = filmLuts.index.categories.map((cat) => {
-    const group = Object.assign(document.createElement('optgroup'), { label: cat });
-    filmLuts.index.luts.forEach((l, i) => {
-      if (l.category === cat) group.append(Object.assign(document.createElement('option'), { value: String(i), textContent: l.name }));
-    });
-    return group;
-  });
-  $('lut-film').append(...groups);
-  showLut();
-}
-
-async function filmLut(i) {
-  const entry = filmLuts.index.luts[i];
-  if (!filmLuts.data) {
-    showProgress('Loading film looks', 0);
-    try {
-      filmLuts.data = await (await fetch('luts/film-luts.bin')).arrayBuffer();
-    } finally {
-      hideProgress();
-    }
-  }
-  const n = entry.size ** 3 * 3;
-  const q = new Uint16Array(filmLuts.data, entry.offset, n);
-  const data = new Float32Array(n);
-  for (let k = 0; k < n; k++) data[k] = q[k] / 65535;
-  return { title: entry.name, size: entry.size, min: [0, 0, 0], max: [1, 1, 1], data };
-}
-
-$('lut-film').onchange = async () => {
-  const i = $('lut-film').value;
-  if (i === 'imported') return;
-  if (i === '') {
-    $('lut-remove').click();
-    return;
-  }
-  if (!filmLuts.index) return;
-  if (!canRender()) {
-    showLut();
-    showNotice('Open a photo first: a LUT is kept with the photo.');
-    startNoticeTimer();
-    return;
-  }
-  try {
-    const lut = await filmLut(+i);
-    $('lut-data').value = JSON.stringify({ ...encodeLut(lut, lut.title), film: true });
-  } catch (err) {
-    showError(err);
-    showLut();
-    return;
-  }
-  showLut();
-  scheduleSave();
-  applySettingsSoon();
-};
-loadFilmIndex();
-
-$('lut-remove').innerHTML = TRASH_ICON;
-$('lut-import').onclick = () => {
-  if (!canRender()) {
-    showNotice('Open a photo first: a LUT is kept with the photo.');
-    startNoticeTimer();
-    return;
-  }
-  $('lut-file').click();
-};
-$('lut-file').onchange = async () => {
-  const file = $('lut-file').files[0];
-  $('lut-file').value = '';
-  if (!file) return;
-  try {
-    const lut = parseCube(await file.text());
-    $('lut-data').value = JSON.stringify(encodeLut(lut, file.name.replace(/\.cube$/i, '')));
-  } catch (err) {
-    showNotice(`Could not use ${file.name}: ${err.message}`);
-    startNoticeTimer();
-    return;
-  }
-  showLut();
-  scheduleSave();
-  applySettingsSoon();
-};
-$('lut-remove').onclick = () => {
-  $('lut-data').value = '';
-  showLut();
-  scheduleSave();
-  applySettingsSoon();
-};
-$('lut-amount').addEventListener('input', () => {
-  showSliderValue($('lut-amount'));
-  applySettingsSoon();
-});
-$('lut-amount').addEventListener('change', () => scheduleSave());
-showLut();
-
-// ---------------------------------------------------------------- updates
-
-// Desktop app: on startup, the newest release on GitHub is compared with
-// this version; when it is newer, a popup lists that release's files with
-// direct download links, this computer's first. "Don't remind me" skips
-// that version.
-const RELEASES_API = 'https://api.github.com/repos/AbstractPolygon/Illuminator/releases/latest';
-const BUILDS = [
-  { re: /-win-x64\.exe$/, os: 'win', arch: 'x64', name: 'Windows', detail: 'Intel and AMD' },
-  { re: /-win-arm64\.exe$/, os: 'win', arch: 'arm64', name: 'Windows', detail: 'ARM, such as Snapdragon' },
-  { re: /-mac-arm64\.dmg$/, os: 'mac', arch: 'arm64', name: 'macOS', detail: 'Apple Silicon' },
-  { re: /-mac-x64\.dmg$/, os: 'mac', arch: 'x64', name: 'macOS', detail: 'Intel' },
-  { re: /-linux-amd64\.deb$/, os: 'linux', arch: 'x64', name: 'Linux', detail: '.deb for Debian and Ubuntu' },
-  { re: /-linux-x86_64\.AppImage$/, os: 'linux', arch: 'x64', name: 'Linux', detail: 'AppImage for other distributions' },
-];
-
-export function newerVersion(a, b) {
-  const pa = String(a).split('.').map(Number);
-  const pb = String(b).split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
-    if (x !== y) return x > y;
-  }
-  return false;
-}
-
-function thisOs() {
-  const p = `${navigator.userAgentData?.platform || navigator.platform || ''} ${navigator.userAgent}`.toLowerCase();
-  return p.includes('win') ? 'win' : p.includes('mac') ? 'mac' : p.includes('linux') ? 'linux' : '';
-}
-
-// manual: from Help > Check for Updates, which says what it found; the automatic checks (at start, then every few hours) stay silent unless there is a new release.
-function updateCheckOn() {
-  try {
-    return localStorage.getItem('illuminator.checkUpdates') !== '0';
-  } catch {
-    return true;
-  }
-}
-
-async function checkForUpdate(manual = false) {
-  if (!window.lytroNative || (!manual && !updateCheckOn())) return;
-  let release;
-  try {
-    const r = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });
-    if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
-    release = await r.json();
-  } catch (e) {
-    if (manual) showNotice('Could not check for a new release', `${e && e.message ? e.message : e}. Check the internet connection and try again.`);
-    return;
-  }
-  const latest = String(release.tag_name || '').replace(/^v/, '');
-  if (!newerVersion(latest, VERSION)) {
-    if (manual) showNotice('Illuminator is up to date', `Version ${VERSION} is the latest release.`);
-    return;
-  }
-  // "Don't remind me" only stops the pop-up at start: the Update available!
-  // message in the toolbar stays, and opens the same pop-up.
-  let skipped = false;
-  try {
-    skipped = localStorage.getItem('illuminator.skipVersion') === latest;
-  } catch {
-    // No storage: ask every time.
-  }
-  const os = thisOs();
-  const arch = window.lytroNative.arch || '';
-  const files = (release.assets || [])
-    .map((a) => ({ a, b: BUILDS.find((b) => b.re.test(a.name)) }))
-    // Only this computer's platform and this app's architecture (all of them
-    // when they cannot be told: an app built before the architecture was passed on).
-    .filter((x) => x.b && (!os || x.b.os === os) && (!arch || x.b.arch === arch));
-  if (!files.length) {
-    if (manual) showNotice(`Illuminator ${latest} is available`, 'No download for this computer is attached to the release yet. Try again later.');
-    return;
-  }
-  $('update-title').textContent = `Illuminator ${latest} is available`;
-  $('update-note').replaceChildren(
-    `A new release is available (current: ${VERSION} | available: ${latest}).`,
-    document.createElement('br'),
-    'Download and install for the latest features.',
-  );
-  // The release's short "What's new" list (core/releasenotes.js), shown above the downloads.
-  const news = releaseHighlights(release.body);
-  $('update-news').replaceChildren(...news.map(({ lead, text }) => {
-    const li = document.createElement('li');
-    if (lead) li.append(Object.assign(document.createElement('strong'), { textContent: lead }), ' ');
-    li.append(text);
-    return li;
-  }));
-  $('update-news-head').hidden = $('update-news').hidden = !news.length;
-  $('update-links').replaceChildren(...files.map(({ a, b }) => {
-    const li = document.createElement('li');
-    if (b.os === os) li.className = 'mine';
-    const name = Object.assign(document.createElement('span'), { className: 'name', textContent: b.name });
-    const detail = Object.assign(document.createElement('span'), { className: 'size', textContent: `${b.arch} · ${b.detail}` });
-    const spacer = Object.assign(document.createElement('span'), { className: 'spacer' });
-    li.append(name, detail);
-    const button = Object.assign(document.createElement('a'), { className: 'download-btn', href: a.browser_download_url, target: '_blank', rel: 'noopener', textContent: `Download (${Math.round(a.size / 1e6)} MB)` });
-    li.append(spacer, button);
-    return li;
-  }));
-  $('update-skip').checked = false;
-  $('update-dialog').onclose = () => {
-    try {
-      if ($('update-skip').checked) localStorage.setItem('illuminator.skipVersion', latest);
-    } catch {
-      // Ignore: the reminder comes back next time.
-    }
-  };
-  const open = () => {
-    $('update-skip').checked = false;
-    if (!$('update-dialog').open) $('update-dialog').showModal();
-  };
-  $('update-btn').textContent = `Update available! ${latest}`;
-  $('update-btn').onclick = open;
-  $('update-btn').hidden = false;
-  if (!skipped || manual) open();
-}
-setTimeout(checkForUpdate, 3000);
-// A long session hears about a release too.
-setInterval(checkForUpdate, 6 * 3600 * 1000);
-checkForUpdateNow = () => checkForUpdate(true);
+// updates: ui/updates.js
+const { checkNow } = initUpdates({ showNotice: (...a) => showNotice(...a), $ });
+checkForUpdateNow = checkNow;
