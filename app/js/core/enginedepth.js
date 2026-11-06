@@ -418,3 +418,79 @@ export function engineDepthMap(views, w, h, labels, onProgress = () => {}, costF
   onProgress('finish', 0.95);
   return engineFinishDepth(labels, best, beliefs, w, h, L);
 }
+
+// The engine zeroes the cost of every pixel whose views are blown out (a mean ring colour above `blownOut` in a channel), so what the solver leaves there is the label
+// of nowhere in particular: a speck, or a black splotch over a whole highlight. Those pixels (and a margin of `grow` around them, where the ring views reach into the
+// highlight) take the depth of the nearest reliable pixels instead, from rings of growing size. `rgb`: the centre view (RGB, w x h, full scale 1). Returns `lam` itself
+// when nothing is blown out.
+export function fillBlownDepth(lam, rgb, w, h, { blownOut = ENGINE_COST.blownOut, grow = 2 } = {}) {
+  const n = w * h;
+  const blown = new Uint8Array(n);
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    if (Math.max(rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2]) > blownOut) {
+      blown[i] = 1;
+      any = true;
+    }
+  }
+  if (!any) return lam;
+  // the margin: a box dilation
+  const bad = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!blown[y * w + x]) continue;
+      for (let dy = -grow; dy <= grow; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -grow; dx <= grow; dx++) {
+          const xx = x + dx;
+          if (xx >= 0 && xx < w) bad[yy * w + xx] = 1;
+        }
+      }
+    }
+  }
+  const out = Float32Array.from(lam);
+  let known = new Float32Array(n);
+  for (let i = 0; i < n; i++) known[i] = bad[i] ? 0 : 1;
+  let missing = 0;
+  for (let i = 0; i < n; i++) if (bad[i]) missing++;
+  const box = (src, r) => {
+    // separable box sums by running totals
+    const tmp = new Float64Array(n);
+    const res = new Float64Array(n);
+    for (let y = 0; y < h; y++) {
+      let acc = 0;
+      for (let x = -r; x <= r; x++) if (x >= 0 && x < w) acc += src[y * w + x];
+      for (let x = 0; x < w; x++) {
+        tmp[y * w + x] = acc;
+        if (x + r + 1 < w) acc += src[y * w + x + r + 1];
+        if (x - r >= 0) acc -= src[y * w + x - r];
+      }
+    }
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let y = -r; y <= r; y++) if (y >= 0 && y < h) acc += tmp[y * w + x];
+      for (let y = 0; y < h; y++) {
+        res[y * w + x] = acc;
+        if (y + r + 1 < h) acc += tmp[(y + r + 1) * w + x];
+        if (y - r >= 0) acc -= tmp[(y - r) * w + x];
+      }
+    }
+    return res;
+  };
+  for (let r = 2; r <= 2 * Math.max(w, h) && missing > 0; r *= 2) {
+    const num = new Float64Array(n);
+    for (let i = 0; i < n; i++) num[i] = known[i] ? out[i] : 0;
+    const sumV = box(num, r);
+    const sumK = box(known, r);
+    const area = (2 * r + 1) ** 2;
+    const fillNow = [];
+    for (let i = 0; i < n; i++) if (!known[i] && sumK[i] > 0.04 * area) fillNow.push(i);
+    for (const i of fillNow) out[i] = sumV[i] / sumK[i];
+    for (const i of fillNow) {
+      known[i] = 1;
+      missing--;
+    }
+  }
+  return out;
+}

@@ -33,7 +33,7 @@ import { engineModulationGpu, engineModulationGpuAvailable } from './gpu/enginem
 import { setMemoryLimits } from './core/memorybudget.js';
 import { guideDepthEdges } from './core/depthguide.js';
 import { nrFilterGpu, nrFilterTex } from './gpu/enginenr.js';
-import { engineDepthMap, engineLabels } from './core/enginedepth.js';
+import { engineDepthMap, engineLabels, fillBlownDepth } from './core/enginedepth.js';
 import { engineCostVolumeGpu, engineCostVolumeResident } from './gpu/enginecost.js';
 import { mergeViews, mergeSigma } from './core/mvdenoise.js';
 import { ProcessedPicture, decodeDepth } from './core/processed.js';
@@ -2140,7 +2140,9 @@ function measureLytro(progress) {
     const colors = viewColors(depthViews(), outW * outH, outW, outH);
     const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
     const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !debugFlags().noGpuCost ? gpuCostVolume : null, state.gpu && !debugFlags().noGpuSolve ? (cost, guide, w, h, labels, prog) => { try { return engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog); } catch (e) { gpuFellBack('The depth solver', e); throw e; } } : null);
-    measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
+    // pixels of blown-out highlights have no cost to solve from: they take their surroundings' depth (core/enginedepth.js fillBlownDepth)
+    const filled = fillBlownDepth(lam, ordered[8], outW, outH);
+    measured = { alpha: Float32Array.from(filled, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
   }
   if (engineMeasured && measured) {
     state.depthCacheOut = { key: depthCacheKey(), w: raster.w, h: raster.h, alpha: measured.alpha };

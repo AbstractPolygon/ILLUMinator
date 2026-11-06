@@ -442,9 +442,34 @@ void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec3 c = texelFetch(uSrc, p, 0).rgb;
   ivec2 dsz = textureSize(uDepth, 0);
-  ivec2 dp = clamp(ivec2((vec2(p) + 0.5) * uDepthScale), ivec2(0), dsz - 1);
-  vec2 n = (vec2(p) + 0.5) / vec2(textureSize(uSrc, 0));
-  float d = texelFetch(uDepth, dp, 0).r - (uFocus + dot(uTilt, n - uPoint));
+  ivec2 isz = textureSize(uSrc, 0);
+  vec2 n = (vec2(p) + 0.5) / vec2(isz);
+  float depthHere;
+  if (uDepthScale.x < 0.999 || uDepthScale.y < 0.999) {
+    // The depth map is coarser than the picture: the four depth pixels around this one, weighted by distance and by how much their picture colour is like this
+    // pixel's, so depth steps stay on the picture's edges instead of showing as blocks.
+    vec2 q = (vec2(p) + 0.5) * uDepthScale - 0.5;
+    ivec2 q0 = ivec2(floor(q));
+    vec2 f = q - vec2(q0);
+    float ws = 0.0;
+    float ds = 0.0;
+    float lum = 0.05 + max(max(c.r, c.g), c.b);
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        ivec2 t = clamp(q0 + ivec2(i, j), ivec2(0), dsz - 1);
+        vec3 sc = texelFetch(uSrc, clamp(ivec2((vec2(t) + 0.5) / uDepthScale), ivec2(0), isz - 1), 0).rgb;
+        float dc = length(sc - c) / lum;
+        float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y) * (0.02 + exp(-dc * dc / 0.045));
+        ws += w;
+        ds += w * texelFetch(uDepth, t, 0).r;
+      }
+    }
+    depthHere = ds / ws;
+  } else {
+    ivec2 dp = clamp(ivec2((vec2(p) + 0.5) * uDepthScale), ivec2(0), dsz - 1);
+    depthHere = texelFetch(uDepth, dp, 0).r;
+  }
+  float d = depthHere - (uFocus + dot(uTilt, n - uPoint));
   // Past the sharp range blur builds up gradually over uSmooth (see
   // softEdge in core/dof.js).
   float e = max(abs(d) - uSpread, 0.0);
