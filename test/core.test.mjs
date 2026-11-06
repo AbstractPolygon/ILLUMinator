@@ -111,6 +111,26 @@ test('cameraInfo reads ILLUM mosaic and microlens geometry', () => {
   assert.equal(cam.black[0], 64);
 });
 
+// Real files say where the mosaic starts: "gr" in an ILLUM's metadata, "b" in a first generation camera's (checked on sample files). When the file says nothing, the
+// camera's own layout is used; a value that is not a layout is ignored. (The ILLUM's Android kernel names its preview sensor SBGGR10, but that is the camera
+// application's viewfinder path, not the light field sensor, so it is not a source for this.)
+test('cameraInfo falls back to the camera\'s own mosaic when the file has none', () => {
+  const illum = { image: { width: 7728, height: 5368, pixelPacking: { bitsPerPixel: 10 } } };
+  const first = { image: { width: 3280, height: 3280, pixelPacking: { bitsPerPixel: 12 } } };
+  assert.equal(cameraInfo(illum).upperLeft, 'gr');
+  assert.deepEqual(cameraInfo(illum).cfa, [[1, 0], [2, 1]]);
+  assert.equal(cameraInfo(first).upperLeft, 'b');
+  assert.deepEqual(cameraInfo(first).cfa, [[2, 1], [1, 0]]);
+  // the file's value wins, wherever the metadata keeps it
+  assert.equal(cameraInfo({ ...illum, image: { ...illum.image, mosaic: { upperLeftPixel: 'b' } } }).upperLeft, 'b');
+  assert.equal(cameraInfo({ ...illum, devices: { sensor: { mosaic: { upperLeftPixel: 'r' } } } }).upperLeft, 'r');
+  // not a layout: the camera's own
+  assert.equal(cameraInfo({ ...illum, image: { ...illum.image, mosaic: { upperLeftPixel: 'bggr' } } }).upperLeft, 'gr');
+  // no metadata at all, only the size the file's raw part has
+  assert.equal(cameraInfo(null, { width: 7728, height: 5368, bits: 10 }).upperLeft, 'gr');
+  assert.equal(cameraInfo(null, { width: 3280, height: 3280, bits: 12 }).upperLeft, 'b');
+});
+
 // One shared synthetic capture keeps the suite fast.
 const synthetic = (async () => {
   const bytes = await makeSyntheticLfr({ width: 1400, height: 1000, rotation: 0.0008, offsetX: 4.2, offsetY: -3.1 });
