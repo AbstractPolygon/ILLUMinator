@@ -85,3 +85,33 @@ test('more peaks than one pass takes are removed by repeating it', () => {
   assert.ok(removed.length > 10, `removed ${removed.length}`);
   assert.ok(error(again.rgb, again.base) < error(once.rgb, once.base), 'repeating leaves less of the pattern');
 });
+
+import { removeLatticeByTiles } from '../app/js/core/notch.js';
+
+test('a lattice whose frequency drifts across the picture is taken out tile by tile, smooth detail stays', () => {
+  const { rgb, base } = picture(false);
+  // a pattern whose frequency drifts from 0.27 to 0.31 along x, as the lens lattice does where the depth changes
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const phase = 2 * Math.PI * (0.27 * y + 0.12 * x + 0.00006 * x * y);
+      const p = 0.015 * Math.sin(phase) + 0.008 * Math.sin(phase * 1.05 + 1);
+      const q = (base[y * W + x] + p) ** 2;
+      rgb.set([q, q, q], 3 * (y * W + x));
+    }
+  }
+  const error = () => {
+    let e = 0;
+    for (let i = 0; i < W * H; i++) e += (Math.sqrt(rgb[3 * i]) - base[i]) ** 2;
+    return e;
+  };
+  const before = error();
+  const seeds = removeLatticeByTiles(rgb, W, H);
+  assert.ok(seeds >= 1, 'finds the pattern');
+  const after = error();
+  assert.ok(after < before * 0.4, `left ${after / before}`);
+  // no pattern, nothing done
+  const clean = picture(false);
+  const copy = Float32Array.from(clean.rgb);
+  assert.equal(removeLatticeByTiles(clean.rgb, W, H), 0);
+  assert.deepEqual(clean.rgb, copy);
+});

@@ -308,3 +308,117 @@ export function removePeriodicPatternRepeatedly(rgb, W, H, options = {}, passes 
   }
   return all;
 }
+
+// The lattice pattern's leftovers, taken out tile by tile in the frequency domain. Where the lens grid's sampling does not meet at the picture's depth (a blurred background at
+// 3x) the pattern is not a few sharp peaks but a family of close ones whose frequency drifts from place to place, and removePeriodicPattern leaves most of its energy. Here
+// each 128 x 128 tile (half overlapping, Hann windowed) is transformed and, in the ring of frequencies where the picture as a whole has its periodic peaks (the radius of the
+// peaks findPeriodicPeaks finds, give or take 0.05 cycles per pixel), every bin that stands out above the bins around it is pulled down to `ratio` times their level. Smooth
+// detail has a smooth spectrum and is left alone; a lattice is a set of spikes. Works like removePeriodicPattern: on the square root of the luma, the color scaled by the
+// change; in place. Returns the number of peaks that set the ring (0: no pattern, nothing done).
+export function removeLatticeByTiles(rgb, W, H, { ratio = 0.8, tile = 128, prominence = 6, maxSeeds = 48, margin = 0.05, around = 4 } = {}) {
+  if (W < 2 * tile || H < 2 * tile) return 0;
+  const n = W * H;
+  const Y = new Float32Array(n);
+  for (let i = 0; i < n; i++) Y[i] = Math.sqrt(Math.max(0, 0.2126 * rgb[3 * i] + 0.7152 * rgb[3 * i + 1] + 0.0722 * rgb[3 * i + 2]));
+  const seeds = findPeriodicPeaks(Y, W, H, { prominence, maxPeaks: maxSeeds, tiles: 80 }).filter((p) => Math.hypot(p.fx, p.fy) > 0.08);
+  if (!seeds.length) return 0;
+  const T = tile;
+  const step = T / 2;
+  const radii = seeds.map((p) => Math.hypot(p.fx, p.fy));
+  const rLo = Math.max(0.08, Math.min(...radii) - margin);
+  const rHi = Math.min(0.5, Math.max(...radii) + margin);
+  const hann = Float64Array.from({ length: T }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / T));
+  const re = new Float64Array(T * T);
+  const im = new Float64Array(T * T);
+  const mag = new Float64Array(T * T);
+  const rowRe = new Float64Array(T);
+  const rowIm = new Float64Array(T);
+  const out = new Float64Array(n);
+  const weight = new Float64Array(n);
+  const wrap = (v) => ((v % T) + T) % T;
+  // the bins in the ring (half of them: each is clipped with its mirror image), and for each the bins around it that give the level
+  const ringBins = [];
+  for (let v = 0; v <= T / 2; v++) {
+    for (let u = -T / 2; u < T / 2; u++) {
+      if (v === 0 && u <= 0) continue;
+      const r = Math.hypot(u, v) / T;
+      if (r < rLo || r > rHi) continue;
+      const neighbours = [];
+      for (let d = -around; d <= around; d++) {
+        neighbours.push(wrap(v - around) * T + wrap(u + d), wrap(v + around) * T + wrap(u + d));
+        if (Math.abs(d) < around) neighbours.push(wrap(v + d) * T + wrap(u - around), wrap(v + d) * T + wrap(u + around));
+      }
+      ringBins.push({ bin: wrap(v) * T + wrap(u), mirror: wrap(-v) * T + wrap(-u), neighbours });
+    }
+  }
+  const levels = new Float64Array(64);
+  for (let ty = -step; ty < H; ty += step) {
+    for (let tx = -step; tx < W; tx += step) {
+      let mean = 0;
+      for (let y = 0; y < T; y++) {
+        const yy = Math.min(H - 1, Math.max(0, ty + y));
+        for (let x = 0; x < T; x++) mean += Y[yy * W + Math.min(W - 1, Math.max(0, tx + x))];
+      }
+      mean /= T * T;
+      for (let y = 0; y < T; y++) {
+        const yy = Math.min(H - 1, Math.max(0, ty + y));
+        for (let x = 0; x < T; x++) {
+          re[y * T + x] = (Y[yy * W + Math.min(W - 1, Math.max(0, tx + x))] - mean) * hann[x] * hann[y];
+          im[y * T + x] = 0;
+        }
+      }
+      for (let y = 0; y < T; y++) {
+        for (let x = 0; x < T; x++) { rowRe[x] = re[y * T + x]; rowIm[x] = im[y * T + x]; }
+        fft(rowRe, rowIm, T);
+        for (let x = 0; x < T; x++) { re[y * T + x] = rowRe[x]; im[y * T + x] = rowIm[x]; }
+      }
+      for (let x = 0; x < T; x++) {
+        for (let y = 0; y < T; y++) { rowRe[y] = re[y * T + x]; rowIm[y] = im[y * T + x]; }
+        fft(rowRe, rowIm, T);
+        for (let y = 0; y < T; y++) { re[y * T + x] = rowRe[y]; im[y * T + x] = rowIm[y]; }
+      }
+      for (let i = 0; i < T * T; i++) mag[i] = Math.hypot(re[i], im[i]);
+      for (const { bin, mirror, neighbours } of ringBins) {
+        const m = neighbours.length;
+        for (let k = 0; k < m; k++) levels[k] = mag[neighbours[k]];
+        const part = levels.subarray(0, m);
+        part.sort();
+        const limit = ratio * part[m >> 1];
+        if (mag[bin] > limit && mag[bin] > 0) {
+          const k = limit / mag[bin];
+          re[bin] *= k;
+          im[bin] *= k;
+          re[mirror] *= k;
+          im[mirror] *= k;
+        }
+      }
+      for (let x = 0; x < T; x++) {
+        for (let y = 0; y < T; y++) { rowRe[y] = re[y * T + x]; rowIm[y] = im[y * T + x]; }
+        fft(rowRe, rowIm, T, true);
+        for (let y = 0; y < T; y++) { re[y * T + x] = rowRe[y]; im[y * T + x] = rowIm[y]; }
+      }
+      for (let y = 0; y < T; y++) {
+        for (let x = 0; x < T; x++) { rowRe[x] = re[y * T + x]; rowIm[x] = im[y * T + x]; }
+        fft(rowRe, rowIm, T, true);
+        const yy = ty + y;
+        if (yy < 0 || yy >= H) continue;
+        for (let x = 0; x < T; x++) {
+          const xx = tx + x;
+          if (xx < 0 || xx >= W) continue;
+          out[yy * W + xx] += rowRe[x] / (T * T) + mean * hann[x] * hann[y];
+          weight[yy * W + xx] += hann[x] * hann[y];
+        }
+      }
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    if (!(weight[i] > 1e-3)) continue;
+    if (Y[i] > 1e-4) {
+      const k = Math.max(0.25, Math.min(4, (Math.max(0, out[i] / weight[i]) / Y[i]) ** 2));
+      rgb[3 * i] *= k;
+      rgb[3 * i + 1] *= k;
+      rgb[3 * i + 2] *= k;
+    }
+  }
+  return seeds.length;
+}

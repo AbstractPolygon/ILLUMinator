@@ -20,7 +20,7 @@ import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
 import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { VERSION } from './version.js';
-import { removePeriodicPattern, removePeriodicPatternRepeatedly } from './core/notch.js';
+import { removePeriodicPattern, removePeriodicPatternRepeatedly, removeLatticeByTiles } from './core/notch.js';
 import { snapDepthEdges, snapToObjects, softenObjectEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
 import { methodDepthModel, readDepthModel } from './core/depthmodels.js';
 import { runDepthModel, fitModelDepth, shapeModelDepth, fuseModelDepth } from './core/depthmodel.js';
@@ -1268,7 +1268,11 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     }
   }
   // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 28 at 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings.
-  if (scale >= 3 && !debugFlags().noNotch) removePeriodicPatternRepeatedly(out, W, H, { prominence: 6 });
+  if (scale >= 3 && !debugFlags().noNotch) {
+    // the lattice's sharp peaks, and what a drifting frequency leaves of it (core/notch.js)
+    removeLatticeByTiles(out, W, H);
+    removePeriodicPatternRepeatedly(out, W, H, { prominence: 6 });
+  }
   if (hook('edofLinear')) hook('edofLinear')(out, W, H);
   setHook('lytroStats', sp.stats);
   const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
