@@ -1,7 +1,7 @@
-// Per-lens centre corrections for the engine's ray model. The lens lattice (and the geometry table's smooth cell offsets) put every microlens at a regular place; the lenses
+// Per-lens center corrections for the engine's ray model. The lens lattice (and the geometry table's smooth cell offsets) put every microlens at a regular place; the lenses
 // themselves are a little off it, each by its own amount (a few tenths of a sensor pixel). A ray taken through a lens at its lattice place then has the wrong direction, and
-// out of focus, where the lenses' views differ most, the errors add up to a pattern at the lens grid's period (the diamond lattice at 3x). The lens's real centre is the
-// centre of its disc in a white image (an evenly lit white surface seen through the lens): the camera's white images from its calibration, or the one stored inside the photo.
+// out of focus, where the lenses' views differ most, the errors add up to a pattern at the lens grid's period (the diamond lattice at 3x). The lens's real center is the
+// center of its disc in a white image (an evenly lit white surface seen through the lens): the camera's white images from its calibration, or the one stored inside the photo.
 
 import { lensTable, lensIndex } from './superres.js';
 import { lensRange, toLocal } from './lenslet.js';
@@ -53,7 +53,7 @@ export function removeSmoothOffsets(table, radius = 5) {
 }
 
 // The offsets of the lenses of the engine's lattice `ge` ({ ox, oy, pitch, rowStep, rotation }, sensor pixel indices) for a photo with lens grid `appGrid`, from the white image
-// `white` (core/calibration.js measureWhite / measureWhiteRaw). Returns { r0, c0, rows, cols, du, dv, count } with (du, dv) each lens's centre offset in sensor pixels along the
+// `white` (core/calibration.js measureWhite / measureWhiteRaw). Returns { r0, c0, rows, cols, du, dv, count } with (du, dv) each lens's center offset in sensor pixels along the
 // lattice's own axes, indexed by (row - r0) * cols + (column - c0) of the lattice; null when too few lenses could be measured.
 export function engineLensShift(white, appGrid, cam, ge, { smooth = 5, minLenses = 1000 } = {}) {
   const table = lensTable(appGrid, cam);

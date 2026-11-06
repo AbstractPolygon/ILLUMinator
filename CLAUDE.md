@@ -14,3 +14,4 @@
 - **Comparison images** (website gallery, comparison page) are rendered with the app's defaults, so multi-view noise
   reduction stays on.
 - When the stop hook reports uncommitted changes, commit and push to `main`.
+- **American spelling in all text** (UI labels, tooltips, wiki, website, plan pages): center, color, gray, behavior, and so on.

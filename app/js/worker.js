@@ -1271,7 +1271,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
       for (let p = 0; p < W * H; p++) out[3 * p + c] = plane[p];
     }
   }
-  // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 28 at 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings.
+  // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 54 at 3x and 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings. The same detection and strength defaults (50, 75) take the pattern down to ~1% of its band energy at both scales.
   if (scale >= 3 && !debugFlags().noNotch && state.settings.latticeOn !== false) {
     // the lattice's sharp peaks, and what a drifting frequency leaves of it (core/notch.js); Render settings > Quality > Lattice strength and detection
     const strength = state.settings.latticeStrength ?? 0.75;
@@ -1451,7 +1451,7 @@ async function photoWhite() {
   return state.photoWhite;
 }
 
-// Each lens's own centre offset for the engine's ray model (core/lensshift.js), by the setting Lens centres: the camera's calibration white image, the white image stored
+// Each lens's own center offset for the engine's ray model (core/lensshift.js), by the setting Lens centres: the camera's calibration white image, the white image stored
 // with the photo, or (Automatic) the camera's when it has been imported and the photo's white image otherwise. Null for none.
 async function lensShiftForPhoto(id) {
   const { lf } = state;
