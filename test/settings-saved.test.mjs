@@ -32,11 +32,13 @@ test('no control is saved twice', () => {
   assert.deepEqual(dup, []);
 });
 
-test('every control main.js looks up by name exists in the page', () => {
+test('every control the page code looks up by name exists in the page', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const js = fs.readFileSync(path.join(root, 'app/js/main.js'), 'utf8');
-  const used = new Set([...js.matchAll(/\$\('([A-Za-z0-9_-]+)'\)/g)].map((m) => m[1]));
+  const dir = path.join(root, 'app/js/ui');
+  const files = [path.join(root, 'app/js/main.js'), ...fs.readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => path.join(dir, f))];
+  const used = new Set();
+  for (const f of files) for (const m of fs.readFileSync(f, 'utf8').matchAll(/\$\('([A-Za-z0-9_-]+)'\)/g)) used.add(m[1]);
   assert.ok(used.size > 200);
   const missing = [...used].filter((id) => !ids.has(id));
-  assert.deepEqual(missing, [], `main.js uses ids that index.html does not have (a typo, or a control that was removed): ${missing.join(', ')}`);
+  assert.deepEqual(missing, [], `main.js or app/js/ui uses ids that index.html does not have (a typo, or a control that was removed): ${missing.join(', ')}`);
 });

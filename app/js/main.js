@@ -1,19 +1,18 @@
 import { VERSION } from './version.js';
 import { readEdits, writeEdits, editsStore, EDITS_FORMAT, EDITS_VERSION } from './edits.js';
 import { Engine, toImageData } from './engine.js';
-import { blobReader, readThumbnail, readPhotoSummary, openContainer } from './core/lfp.js';
+import { blobReader, readPhotoSummary, openContainer } from './core/lfp.js';
 import { findRecipe, recipeToEdits } from './core/recipe.js';
 import { decodePngGray, parseDepthRange, stackDepth } from './core/userdepth.js';
 import { upscaleBits16 } from './gpu/upscale.js';
 import { importCalibration, listCalibrations, loadCalibration, removeCalibration } from './core/calibration.js';
-import { connectWebUsb, downloadPicture } from './camera/webusb.js';
 import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
 import { hashKey, stillKeyText } from './core/still-cache.js';
 import { UPSCALE_MODELS, modelMethod, methodModel, modelState, downloadModel, removeModel, readModel } from './core/upscalemodels.js';
 import { aiUpscale, aiUpscaleAvailable, denoiseRgb16, addGrain16 } from './core/aiupscale.js';
 import { DEPTH_MODELS, depthModelMethod, methodDepthModel, depthModelState, downloadDepthModel, removeDepthModel } from './core/depthmodels.js';
 import { setMemoryLimits, fitsMemory, memoryProblem, superResVram } from './core/memorybudget.js';
-import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
+import { openFiles, openCalibrationFile, pickFolder, isLightFieldName, findSidecar, download, native, CAMERA_IMPORT, LYTRO_USB_VENDOR, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
 import { openStorage, memoryStorage } from './library/storage.js';
 import { groupPhotos } from './library/scan.js';
@@ -34,6 +33,8 @@ import { initLivingFilters } from './ui/livingfilters.js';
 import { initKeyframes } from './ui/keyframes.js';
 import { initCurvesView } from './ui/curvesview.js';
 import { initExport } from './ui/export.js';
+import { initCameraImport } from './ui/cameraimport.js';
+import { initCameraSection } from './ui/camerasection.js';
 import { initLut } from './ui/lut.js';
 import { initWhiteBalancePicker } from './ui/whitebalance.js';
 import { initColorMatrix } from './ui/colormatrix.js';
@@ -76,6 +77,13 @@ const state = {
   anim: emptyAnimation(), // the keyframes of the animation (core/keyframes.js)
   keySel: null, // { k, t }: the main selected keyframe
   upscaleShown: null, // the upscaling method whose settings the sliders hold
+  lib: null, // the photo library (library/library.js), once opened
+  cameraSection: {}, // what the camera section of the sidebar shows
+  rememberedFailed: false, // the remembered camera folder could not be read
+  webUsbConn: null, // the connected camera over WebUSB
+  webUsbDevice: null,
+  webUsbReport: '',
+  askCameraPermission: async () => false, // set when the desktop app can watch for a camera
 };
 // Lenslets mode view: `z` screen pixels per sensor pixel, (x, y) the sensor
 // point at the middle of the viewer.
@@ -105,7 +113,6 @@ function showError(err) {
 
 // The photo library (library/library.js): every photo opened, dropped or
 // imported is copied into it, in a folder of its own.
-let lib = null;
 let libReady = null;
 let calReady = Promise.resolve();
 const thumbs = new Map(); // photo id -> object URL (null while loading)
@@ -116,14 +123,14 @@ async function openLibrary() {
   thumbs.clear();
   const readSummary = (f) => readPhotoSummary(blobReader(f));
   try {
-    lib = await new Library(await openStorage(), { readSummary }).load();
+    state.lib = await new Library(await openStorage(), { readSummary }).load();
   } catch (err) {
     console.warn('Could not open the library; photos are kept for this session only', err);
-    lib = await new Library(memoryStorage(), { readSummary }).load();
+    state.lib = await new Library(memoryStorage(), { readSummary }).load();
   }
-  if (state.album && !lib.album(state.album)) state.album = null;
+  if (state.album && !state.lib.album(state.album)) state.album = null;
   renderLibrary();
-  return lib;
+  return state.lib;
 }
 
 async function asBlob(f) {
@@ -135,7 +142,7 @@ function thumbFor(photo) {
   if (thumbs.has(photo.id)) return thumbs.get(photo.id);
   thumbs.set(photo.id, null);
   if (photo.thumb) {
-    lib.thumbnail(photo).then(asBlob).then((blob) => {
+    state.lib.thumbnail(photo).then(asBlob).then((blob) => {
       if (!blob || thumbs.get(photo.id) !== null) return;
       thumbs.set(photo.id, URL.createObjectURL(blob));
       renderLibrary();
@@ -149,7 +156,7 @@ function thumbFor(photo) {
 function saveThumbnail() {
   state.wantThumb = false;
   const photo = state.current && state.current.photo;
-  if (!photo || !lib || !canvas.width) return;
+  if (!photo || !state.lib || !canvas.width) return;
   const s = Math.min(1, 320 / Math.max(canvas.width, canvas.height));
   const c = document.createElement('canvas');
   c.width = Math.round(canvas.width * s);
@@ -157,7 +164,7 @@ function saveThumbnail() {
   c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
   c.toBlob((blob) => {
     if (!blob) return;
-    lib.saveThumbnail(photo, blob).then(() => {
+    state.lib.saveThumbnail(photo, blob).then(() => {
       const old = thumbs.get(photo.id);
       if (old) URL.revokeObjectURL(old);
       thumbs.set(photo.id, URL.createObjectURL(blob));
@@ -171,14 +178,12 @@ const EMPTY_LIBRARY = CAMERA_IMPORT
   : 'Open .LFR / .LFP files, drop them here, or import from Lytro Desktop.';
 
 // The Camera section's state (see setCameraSection).
-let cameraSection = {};
 const cameraThumbs = new Map();
-let rememberedFailed = false;
 
 function renderLibrary() {
   renderAlbums();
-  const album = lib && state.album ? lib.album(state.album) : null;
-  const photos = lib ? lib.list(state.album) : [];
+  const album = state.lib && state.album ? state.lib.album(state.album) : null;
+  const photos = state.lib ? state.lib.list(state.album) : [];
   $('photos-title').textContent = album ? album.name : 'All photos';
   const current = state.current && state.current.photo;
   $('library-list').replaceChildren(...photos.map((photo) => {
@@ -208,24 +213,24 @@ function renderLibrary() {
     };
     return li;
   }));
-  if (state.cameraView && !cameraSection.note && !cameraSection.cam) state.cameraView = false;
+  if (state.cameraView && !state.cameraSection.note && !state.cameraSection.cam) state.cameraView = false;
   renderCameraSection();
   if (state.cameraView) renderCameraGrid();
   else renderGrid(photos, album);
   const empty = $('library-empty');
   empty.hidden = photos.length > 0;
   if (album) empty.textContent = 'No photos in this album yet. Drag photos onto the album, or use ••• on a photo.';
-  else if (lib && !lib.persistent) empty.textContent = `${EMPTY_LIBRARY} This browser cannot store a library, so photos are kept until the page is closed.`;
+  else if (state.lib && !state.lib.persistent) empty.textContent = `${EMPTY_LIBRARY} This browser cannot store a library, so photos are kept until the page is closed.`;
   else empty.textContent = EMPTY_LIBRARY;
 }
 
 function renderAlbums() {
   const list = $('album-list');
-  if (!lib) {
+  if (!state.lib) {
     list.replaceChildren();
     return;
   }
-  const rows = [{ id: null, name: 'All photos', count: lib.photos.length }, ...lib.albums.map((a) => ({ id: a.id, name: a.name, count: a.photos.length }))];
+  const rows = [{ id: null, name: 'All photos', count: state.lib.photos.length }, ...state.lib.albums.map((a) => ({ id: a.id, name: a.name, count: a.photos.length }))];
   list.replaceChildren(...rows.map((row) => {
     const li = document.createElement('li');
     li.classList.toggle('current', !state.cameraView && state.album === row.id);
@@ -259,7 +264,7 @@ function renderAlbums() {
         if (!id) return;
         e.preventDefault();
         e.stopPropagation();
-        await lib.addToAlbum(row.id, [id]);
+        await state.lib.addToAlbum(row.id, [id]);
         renderLibrary();
       };
     }
@@ -385,13 +390,13 @@ function editName(li, value, onDone, label = 'Album name') {
 }
 
 function newAlbum(photoIds = []) {
-  if (!lib) return;
+  if (!state.lib) return;
   const li = document.createElement('li');
   $('album-list').append(li);
   editName(li, '', async (name) => {
     if (name) {
-      const album = await lib.createAlbum(name);
-      if (photoIds.length) await lib.addToAlbum(album.id, photoIds);
+      const album = await state.lib.createAlbum(name);
+      if (photoIds.length) await state.lib.addToAlbum(album.id, photoIds);
       else {
         state.album = album.id;
         state.cameraView = false;
@@ -506,7 +511,7 @@ async function copySettings(photo) {
     flushSave();
     edits = currentEdits();
   } else {
-    edits = await lib.loadEdits(photo);
+    edits = await state.lib.loadEdits(photo);
     if (edits && edits.reset) edits = null;
   }
   copiedSettings = { id: photo.id, name: photo.name, edits: edits ? JSON.parse(JSON.stringify(edits)) : null };
@@ -515,7 +520,7 @@ async function pasteSettings(photo) {
   if (!copiedSettings) return;
   const open = state.current && state.current.photo === photo && state.info;
   const { view, focusPoint, ...rest } = copiedSettings.edits || { format: EDITS_FORMAT, version: EDITS_VERSION };
-  const mine = open ? { view: { ...state.camera }, focusPoint: { ...state.focusPoint } } : (await lib.loadEdits(photo)) || {};
+  const mine = open ? { view: { ...state.camera }, focusPoint: { ...state.focusPoint } } : (await state.lib.loadEdits(photo)) || {};
   const edits = { ...rest, photo: { id: photo.id, name: photo.name }, view: mine.view, focusPoint: mine.focusPoint, modified: new Date().toISOString() };
   if (!copiedSettings.edits) {
     // Copied from a photo never edited: its defaults.
@@ -527,7 +532,7 @@ async function pasteSettings(photo) {
     // One undo step, saved like any change.
     scheduleSave();
   } else {
-    await lib.saveEdits(photo, edits);
+    await state.lib.saveEdits(photo, edits);
   }
 }
 
@@ -551,36 +556,36 @@ function photoMenu(photo, button, at = null) {
   }
   items.push('-');
   items.push({ heading: 'Albums' });
-  for (const a of lib.albums) {
+  for (const a of state.lib.albums) {
     const inside = a.photos.includes(photo.id);
     items.push({
       label: a.name,
       checked: inside,
       action: async () => {
-        if (inside) await lib.removeFromAlbum(a.id, [photo.id]);
-        else await lib.addToAlbum(a.id, [photo.id]);
+        if (inside) await state.lib.removeFromAlbum(a.id, [photo.id]);
+        else await state.lib.addToAlbum(a.id, [photo.id]);
         renderLibrary();
       },
     });
   }
   items.push({ label: 'New album…', action: () => newAlbum([photo.id]) });
   items.push('-');
-  const where = lib.store.kind === 'folder'
+  const where = state.lib.store.kind === 'folder'
     ? 'Its folder (the photo and its edits) is moved to the trash.'
     : 'The photo and its edits are deleted from this browser’s storage.';
   items.push({
-    label: lib.persistent ? 'Delete from library…' : 'Remove from list',
+    label: state.lib.persistent ? 'Delete from library…' : 'Remove from list',
     danger: true,
     action: () => {
       const remove = async () => {
-        await lib.remove([photo.id]);
+        await state.lib.remove([photo.id]);
         const url = thumbs.get(photo.id);
         if (url) URL.revokeObjectURL(url);
         thumbs.delete(photo.id);
         if (state.current && state.current.photo === photo) closePhoto();
         renderLibrary();
       };
-      if (!lib.persistent) return remove();
+      if (!state.lib.persistent) return remove();
       return confirmInMenu(`Delete ${photo.name} from the library? ${where}`, 'Delete', remove);
     },
   });
@@ -588,13 +593,13 @@ function photoMenu(photo, button, at = null) {
 }
 
 function albumMenu(id, li, button) {
-  const album = lib.album(id);
+  const album = state.lib.album(id);
   if (!album) return;
   showMenu(button, [
     {
       label: 'Rename…',
       action: () => editName(li, album.name, async (name) => {
-        if (name) await lib.renameAlbum(id, name);
+        if (name) await state.lib.renameAlbum(id, name);
         renderLibrary();
       }),
     },
@@ -606,7 +611,7 @@ function albumMenu(id, li, button) {
       label: 'Delete album…',
       danger: true,
       action: () => confirmInMenu(`Delete the album “${album.name}”? Its photos stay in the library.`, 'Delete', async () => {
-        await lib.deleteAlbum(id);
+        await state.lib.deleteAlbum(id);
         if (state.album === id) state.album = null;
         renderLibrary();
       }),
@@ -620,9 +625,9 @@ async function importPhotos(entries, { album = state.album, replace = false } = 
   await libReady;
   if (!entries.length) return [];
   let added = [];
-  const before = new Map(lib.photos.map((p) => [p.id, p.added]));
+  const before = new Map(state.lib.photos.map((p) => [p.id, p.added]));
   try {
-    added = await lib.add(entries, {
+    added = await state.lib.add(entries, {
       replace,
       onProgress: (e, i, n) => {
         if (e) showProgress(n > 1 ? `Adding ${e.name} to the library (${i + 1} of ${n})` : `Adding ${e.name} to the library`, i / n);
@@ -638,7 +643,7 @@ async function importPhotos(entries, { album = state.album, replace = false } = 
     }
     const open = state.current && state.current.photo;
     if (open && replaced.includes(open)) openItem(open);
-    if (album && lib.album(album)) await lib.addToAlbum(album, added.map((p) => p.id));
+    if (album && state.lib.album(album)) await state.lib.addToAlbum(album, added.map((p) => p.id));
   } catch (err) {
     showError(err);
   } finally {
@@ -653,12 +658,12 @@ async function importPhotos(entries, { album = state.album, replace = false } = 
 async function openItem(photo) {
   closeMenu();
   await calReady;
-  const file = await lib.file(photo).catch(() => null);
+  const file = await state.lib.file(photo).catch(() => null);
   if (!file) {
     showError(new Error(`${photo.name} is missing from the library folder.`));
     return;
   }
-  const sidecar = await lib.sidecar(photo).catch(() => null);
+  const sidecar = await state.lib.sidecar(photo).catch(() => null);
   state.current = { photo, name: photo.name, file, sidecar };
   state.wantThumb = !photo.thumb;
   if (state.grid) showGrid(false);
@@ -666,12 +671,12 @@ async function openItem(photo) {
   const bytes = await file.arrayBuffer();
   const userDepth = await readUserDepth(photo);
   // Desktop app: the processed version kept next to the photo, so the depth is not measured again (core/processed-cache.js).
-  const depthCache = native ? decodeProcessed(await lib.processed(photo).catch(() => null)) : null;
+  const depthCache = native ? decodeProcessed(await state.lib.processed(photo).catch(() => null)) : null;
   const transfer = [bytes];
   if (userDepth) transfer.push(userDepth.data.buffer);
   if (depthCache) transfer.push(depthCache.alpha.buffer, ...depthCache.extra.flatMap((e) => [e.alpha.buffer, e.confidence.buffer]));
   await openWith({ bytes, userDepth, depthCache }, transfer);
-  if (state.info && state.current && state.current.photo === photo) lib.setPhotoId(photo, state.info.photoId).catch(() => {});
+  if (state.info && state.current && state.current.photo === photo) state.lib.setPhotoId(photo, state.info.photoId).catch(() => {});
 }
 
 // The worker measured something worth keeping (the depth, the focus offset): saved next to the photo, a moment after the last change.
@@ -681,7 +686,7 @@ engine.onCache = (msg) => {
   const photo = state.current.photo;
   clearTimeout(processedTimer);
   processedTimer = setTimeout(() => {
-    lib.saveProcessed(photo, encodeProcessed(msg.cache)).catch((err) => console.warn('Could not save the processed version', err));
+    state.lib.saveProcessed(photo, encodeProcessed(msg.cache)).catch((err) => console.warn('Could not save the processed version', err));
   }, 1500);
 };
 
@@ -690,9 +695,9 @@ engine.onCache = (msg) => {
 // edited one if there is one, else the one Lytro computed (in stack.lfp).
 async function readUserDepth(photo) {
   try {
-    const files = await lib.userDepth(photo);
+    const files = await state.lib.userDepth(photo);
     if (!files) {
-      const stack = await lib.stack(photo);
+      const stack = await state.lib.stack(photo);
       return stack ? await stackDepth(new Uint8Array(await stack.arrayBuffer())) : null;
     }
     const range = parseDepthRange(new TextDecoder().decode(await files.range.arrayBuffer()));
@@ -1438,7 +1443,7 @@ function backToCamera() {
 
 // The saved render (desktop app, a library photo) of these settings: the hash naming it, or null where renders are not kept.
 function stillHash(scale, passes) {
-  if (!native || !lib || !state.current || !state.current.photo) return null;
+  if (!native || !state.lib || !state.current || !state.current.photo) return null;
   return hashKey(stillKeyText({
     edits: currentEdits(), camera: cameraParams(), scale, passes, frame: state.stillFrame, photoId: state.current.photo.photoId || state.current.photo.id, version: VERSION,
   }));
@@ -1482,7 +1487,7 @@ async function renderStill() {
     const photo = state.current && state.current.photo;
     // The same render was made before: show it.
     if (hash) {
-      const file = await lib.still(photo, hash);
+      const file = await state.lib.still(photo, hash);
       const img = file && (await stillFromFile(file));
       if (img && state.fullRes && state.current && state.current.photo === photo) {
         state.still = img;
@@ -1511,7 +1516,7 @@ async function renderStill() {
       // Kept next to the photo for next time (not waited for).
       if (hash) {
         const shown = state.still;
-        stillPng(shown).then((blob) => lib.saveStill(photo, hash, blob)).catch((err) => console.warn('Could not keep the full sensor render', err));
+        stillPng(shown).then((blob) => state.lib.saveStill(photo, hash, blob)).catch((err) => console.warn('Could not keep the full sensor render', err));
       }
     }
   } catch (err) {
@@ -2481,7 +2486,7 @@ $('tilt-on').onchange = () => {
 // Settings window (gear at the right of the top bar).
 async function showLibraryLocation() {
   await libReady;
-  const kind = lib.store.kind;
+  const kind = state.lib.store.kind;
   $('library-path').classList.toggle('mono', kind === 'folder');
   $('library-choose').hidden = kind !== 'folder';
   if (kind === 'folder') {
@@ -2515,7 +2520,7 @@ async function importFolder() {
   }
   await libReady;
   const albumName = picked.name.replace(/\.lytrolibrary$/i, '');
-  const album = lib.albums.find((a) => a.name === albumName) || (await lib.createAlbum(albumName));
+  const album = state.lib.albums.find((a) => a.name === albumName) || (await state.lib.createAlbum(albumName));
   // Photos imported before with the same names are replaced by these.
   const added = await importPhotos(entries, { album: album.id, replace: true });
   state.album = album.id;
@@ -2551,9 +2556,9 @@ const lensSource = () => {
 // Kept calibration goes to the render worker, keyed by camera serial number.
 async function sendCalibrations() {
   await libReady;
-  const kept = await listCalibrations(lib.store).catch(() => []);
+  const kept = await listCalibrations(state.lib.store).catch(() => []);
   const list = [];
-  for (const k of kept) list.push(await loadCalibration(lib.store, k.serial).catch(() => null));
+  for (const k of kept) list.push(await loadCalibration(state.lib.store, k.serial).catch(() => null));
   await engine.request('setCalibrations', { list: list.filter(Boolean), useWhites: lensSource() === 'calibration' });
   return kept;
 }
@@ -2571,7 +2576,7 @@ async function showCalibrations() {
     del.className = 'link';
     del.textContent = 'Remove';
     del.onclick = async () => {
-      await removeCalibration(lib.store, k.serial);
+      await removeCalibration(state.lib.store, k.serial);
       $('cal-note').textContent = `Removed the calibration for camera ${k.serial}.`;
       showCalibrations();
     };
@@ -2586,7 +2591,7 @@ async function addCalibration(source) {
   await libReady;
   $('cal-note').textContent = 'Reading calibration data…';
   try {
-    const info = await importCalibration(source, lib.store, {
+    const info = await importCalibration(source, state.lib.store, {
       onProgress: (p, name) => { $('cal-note').textContent = `Reading ${name}…`; },
       // The white images are measured in the render worker.
       measure: (bytes, meta) => engine.request('measureWhite', { bytes: bytes.buffer, meta }, { transfer: [bytes.buffer] }),
@@ -3260,415 +3265,18 @@ const { setPicking, pickWhiteBalance } = initWhiteBalancePicker({ state, canRend
 // export: ui/export.js
 const { baseName, shownScale, showAtPhotoSize, savePhoto, showPhotoFormat, savePng, showVideoCodecs, readParams, showUpscaleControls, frameList, exportVideo } = initExport({ state, $, canvas, ctx, layoutCanvas: (...a) => layoutCanvas(...a), showsCamera: (...a) => showsCamera(...a), stereoShown, showNotice: (...a) => showNotice(...a), engine, cameraParams: (...a) => cameraParams(...a), showProgress: (...a) => showProgress(...a), hideProgress: (...a) => hideProgress(...a), modelUpscaleParams: (...a) => modelUpscaleParams(...a), finishModelEnlargement: (...a) => finishModelEnlargement(...a), showError: (...a) => showError(...a), showSliderValue: (...a) => showSliderValue(...a), scheduleSave: (...a) => scheduleSave(...a), draw: (...a) => draw(...a), cropValues: (...a) => cropValues(...a), animationRequest: (...a) => animationRequest(...a), eyeOffset, eyeParams, ensureAnimation: (...a) => ensureAnimation(...a), drawGeometry: (...a) => drawGeometry(...a), stereoTag });
 
-// ---------------------------------------------------------------- camera import
+// camera import: ui/cameraimport.js
+const { showCameraDialog, openWebUsbCamera, importFromCameraFolder, importFromConnectedCamera } = initCameraImport({ $, state, setCameraSection: (...a) => setCameraSection(...a), showError: (...a) => showError(...a), webCameraLabel: (...a) => webCameraLabel(...a), importCameraFiles: (...a) => importCameraFiles(...a), openItem: (...a) => openItem(...a) });
 
-// Shows the photos found on a camera with thumbnails; `onImport(picked)`
-// runs when the user confirms. thumb(file) -> Promise<{ mime, bytes } | null>.
-function showCameraDialog({ files, thumb, onImport }) {
-  const grid = $('camera-grid');
-  grid.replaceChildren(...files.map((f, i) => {
-    const label = document.createElement('label');
-    const ph = document.createElement('div');
-    ph.className = 'noimg';
-    const name = document.createElement('div');
-    name.className = 'name';
-    const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: true, value: i });
-    name.append(cb, document.createTextNode(`${f.name} · ${(f.size / 1e6).toFixed(0)} MB`));
-    label.append(ph, name);
-    thumb(f).then((t) => {
-      if (!t) return;
-      const img = Object.assign(document.createElement('img'), { src: URL.createObjectURL(new Blob([t.bytes], { type: t.mime })), alt: '' });
-      ph.replaceWith(img);
-    }).catch(() => {});
-    return label;
-  }));
-  $('camera-import').disabled = !files.length;
-  if (!$('camera-dialog').open) $('camera-dialog').showModal();
-  $('camera-dialog').onclose = () => {
-    if ($('camera-dialog').returnValue !== 'import') return;
-    onImport([...grid.querySelectorAll('input:checked')].map((cb) => files[+cb.value]));
-  };
-}
-
-// Browser: the camera is a removable drive; the user picks it (or DCIM).
-// `known`: the folder's listing when it is already read (the remembered one).
-// Browser: the camera read over WebUSB, when it has an interface a page can use
-// (the ILLUM's vendor interface). null when not connected.
-let webUsbConn = null;
-let webUsbDevice = null;
-let webUsbReport = '';
-
-// Connects to the chosen camera and lists its photos in the Camera section.
-// Returns true when it worked; otherwise the reason is in the Camera section
-// and in the console, and `webUsbReport` has what the camera answered.
-async function openWebUsbCamera(device) {
-  if (webUsbConn && webUsbDevice === device) return true;
-  if (webUsbConn) {
-    await webUsbConn.close().catch(() => {});
-    webUsbConn = null;
-  }
-  setCameraSection({ note: 'Reading the camera…' });
-  try {
-    webUsbConn = await connectWebUsb(device, (line) => console.log('camera:', line));
-    webUsbDevice = device;
-    webUsbReport = webUsbConn.report;
-    const { info, pictures } = webUsbConn;
-    const files = pictures.map((p) => ({ id: p.id, name: p.name, folder: p.folder, size: 0, picture: p }));
-    setCameraSection({ cam: { kind: 'webusb', id: `webusb:${info.serial || device.serialNumber || 'camera'}`, label: `Lytro camera${info.serial ? ` ${info.serial}` : ''} (USB)`, files } });
-    return true;
-  } catch (err) {
-    webUsbReport = err.report || '';
-    console.warn('camera:', err.message, webUsbReport);
-    setCameraSection({ note: err.message, show: true });
-    return false;
-  }
-}
-
-async function importFromCameraFolder(known = null) {
-  let result;
-  try {
-    result = known || (await pickCameraFolder());
-  } catch (err) {
-    if (err.name !== 'AbortError') showError(err);
-    return;
-  }
-  const { files, source } = result;
-  if (result.dir) {
-    rememberedFailed = false;
-    rememberCameraFolder(result.dir);
-  }
-  if (files.length) setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: webCameraLabel(source), files } });
-  $('camera-choose').hidden = false;
-  $('camera-select-row').hidden = true;
-  $('camera-dest').hidden = true;
-  $('camera-dialog-source').textContent = files.length
-    ? `${files.length} light field photo(s) found on ${source}.`
-    : `No .LFR files found on ${source}. Open the camera's drive and choose its DCIM folder.`;
-  showCameraDialog({
-    files,
-    thumb: (f) => readThumbnail(blobReader(f.file)),
-    onImport: async (picked) => {
-      const added = await importCameraFiles({ kind: 'web' }, picked);
-      if (added.length) openItem(added[0]);
-    },
-  });
-}
-
-// Desktop app: cameras are detected over USB; photos are copied into the
-// import folder, then opened from there.
-// `preferId` picks that camera first (the one just plugged in).
-async function importFromConnectedCamera(preferId) {
-  const cameras = await native.listCameras();
-  $('camera-choose').hidden = true;
-  // Opened by a plug-in, but the camera has gone again: stay quiet.
-  if (preferId && !cameras.some((c) => c.id === preferId)) return;
-  const select = $('camera-select');
-  $('camera-dest').hidden = false;
-  if (!cameras.length) {
-    $('camera-select-row').hidden = true;
-    $('camera-dialog-source').textContent = 'No Lytro camera found. Connect it with its USB cable and switch it on: it appears as a drive with a DCIM folder. ' +
-      '(Cameras with USB debugging enabled are also found if adb is installed.)';
-    showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
-    return;
-  }
-  select.replaceChildren(...cameras.map((c, i) => Object.assign(document.createElement('option'), { value: i, textContent: c.label })));
-  $('camera-select-row').hidden = cameras.length < 2;
-  const preferred = cameras.findIndex((c) => c.id === preferId);
-  if (preferred >= 0) select.value = String(preferred);
-  const show = () => {
-    const cam = cameras[+select.value || 0];
-    $('camera-dialog-source').textContent = `${cam.files.length} light field photo(s) on ${cam.label}.`;
-    showCameraDialog({
-      files: cam.files,
-      thumb: (f) => native.cameraThumbnail(cam.id, f.id),
-      onImport: async (picked) => {
-        const added = await importCameraFiles(cam, picked);
-        if (added.length) openItem(added[0]);
-      },
-    });
-  };
-  select.onchange = show;
-  show();
-}
-
-// ---------------------------------------------------------------- camera section
-
-// The Camera section above the library: the connected camera's photos.
-// { cam: { kind: 'drive' | 'adb' | 'web', id, label, files }, note, show }
-// (`show`: the Show photos… button, to choose or allow reading the drive in
-// a browser). Clicking a photo imports it (once) and opens it.
-
-function setCameraSection(next) {
-  const was = cameraSection.cam;
-  cameraSection = next;
-  if (!next.cam || (was && was.id !== next.cam.id)) {
-    for (const url of cameraThumbs.values()) URL.revokeObjectURL(url);
-    cameraThumbs.clear();
-  }
-  // The camera's photos just arrived while the library grid is showing:
-  // show them.
-  if (next.cam && !was && state.grid) state.cameraView = true;
-  renderLibrary();
-}
-
-// The library photo this camera file was imported as, if any.
-function importedAs(f) {
-  return lib ? lib.photos.find((p) => p.name === f.name && p.size === f.size) || null : null;
-}
-
-function cameraThumb(cam, f) {
-  if (cam.kind === 'web') return readThumbnail(blobReader(f.file));
-  if (cam.kind === 'drive' || cam.kind === 'lytro') return native.cameraThumbnail(cam.id, f.id);
-  return Promise.resolve(null);
-}
-
-// The Camera row in the sidebar: like an album, it shows the camera's
-// photos in the grid.
-function renderCameraSection() {
-  const { cam, note = '', show = false } = cameraSection;
-  $('camera-section').hidden = !cam && !note;
-  $('camera-section-note').textContent = cam ? '' : note;
-  $('camera-section-note').hidden = !!cam || !note;
-  $('camera-show').hidden = !show || !!cam;
-  $('camera-show').textContent = rememberedFailed ? 'Choose DCIM folder…' : 'Show photos…';
-  const rows = cam || note ? [{ name: cam ? cam.label : 'Lytro camera', count: cam ? cam.files.length : '' }] : [];
-  $('camera-rows').replaceChildren(...rows.map((row) => {
-    const li = document.createElement('li');
-    li.classList.toggle('current', !!state.cameraView);
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'album', title: 'Show the photos on the camera' });
-    b.append(
-      Object.assign(document.createElement('span'), { className: 'name', textContent: row.name }),
-      Object.assign(document.createElement('span'), { className: 'count', textContent: row.count }),
-    );
-    b.onclick = () => {
-      state.cameraView = true;
-      showGrid(true);
-    };
-    li.append(b);
-    return li;
-  }));
-}
-
-// The camera's photos as thumbnails in the grid: clicking one imports it
-// (once) and opens it; ✓ marks photos already in the library.
-function renderCameraGrid() {
-  if (!state.grid) return;
-  const { cam } = cameraSection;
-  const files = cam ? cam.files : [];
-  $('grid-title').textContent = cam ? cam.label : 'Lytro camera';
-  $('grid-count').textContent = cam ? `${files.length} photo${files.length === 1 ? '' : 's'} on the camera` : '';
-  $('grid-import-all').hidden = !files.length || files.every(importedAs);
-  $('photo-grid').replaceChildren(...files.map((f) => {
-    const tile = document.createElement('div');
-    const inLib = importedAs(f);
-    tile.className = inLib ? 'tile imported' : 'tile';
-    tile.tabIndex = 0;
-    tile.setAttribute('role', 'button');
-    tile.setAttribute('aria-label', inLib ? `Open ${f.name}` : `Import and open ${f.name}`);
-    tile.title = inLib ? `${f.name} (in the library)` : `${f.name} · ${(f.size / 1e6).toFixed(0)} MB`;
-    const frame = Object.assign(document.createElement('div'), { className: 'frame' });
-    const key = `${cam.id}|${f.id || f.path}`;
-    if (cameraThumbs.has(key)) frame.append(Object.assign(document.createElement('img'), { src: cameraThumbs.get(key), alt: '' }));
-    else {
-      cameraThumb(cam, f).then((t) => {
-        if (!t || cameraSection.cam !== cam) return;
-        const url = URL.createObjectURL(new Blob([t.bytes], { type: t.mime }));
-        cameraThumbs.set(key, url);
-        frame.append(Object.assign(document.createElement('img'), { src: url, alt: '' }));
-      }).catch(() => {});
-    }
-    const name = Object.assign(document.createElement('div'), { className: 'name', textContent: f.name });
-    tile.append(frame, name);
-    const open = async () => {
-      const photo = importedAs(f) || (await importCameraFiles(cam, [f]))[0];
-      if (photo) openItem(photo);
-    };
-    tile.onclick = open;
-    tile.onkeydown = (e) => {
-      if (e.target === tile && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        open();
-      }
-    };
-    return tile;
-  }));
-  // A browser reads the camera only from a drive the user chooses.
-  $('grid-camera-choose-row').hidden = !!cam || native !== null;
-  $('grid-empty').hidden = files.length > 0;
-  $('grid-empty').textContent = cam
-    ? `No photos found on ${cam.label}.`
-    : native ? 'Looking for the photos on the camera…'
-    : 'To see the photos on the camera, open the camera\'s drive in the folder picker and choose its DCIM folder. (Browsers read a camera only through a folder you choose, and do not let a page choose a whole drive.) It is remembered for next time.';
-}
-
-// Imports photos from a camera into the library: a camera drive (desktop
-// or browser) is read directly; a camera reached over adb is copied to the
-// library's staging folder first. Returns the added photos.
-async function importCameraFiles(cam, picked) {
-  if (!picked.length) return [];
-  let entries;
-  if (cam.kind === 'web') {
-    entries = picked.map((f) => ({ path: f.path, file: f.file }));
-  } else if (cam.kind === 'drive') {
-    entries = picked.map((f) => ({ path: `${f.folder}/${f.name}`, file: new NativeFile({ path: f.id, name: f.name, size: f.size }) }));
-  } else if (cam.kind === 'webusb') {
-    // Over WebUSB, in the page: each picture is read off the camera.
-    entries = [];
-    try {
-      for (let i = 0; i < picked.length; i++) {
-        showProgress(`Copying ${picked[i].name} from the camera (${i + 1} of ${picked.length})`, i / picked.length);
-        const got = await downloadPicture(webUsbConn.camera, picked[i].picture, webUsbConn.product);
-        entries.push({ path: got.name, file: new File([got.data], got.name) });
-      }
-    } catch (err) {
-      showError(err);
-      return [];
-    } finally {
-      hideProgress();
-    }
-  } else {
-    const stop = native.onImportProgress((p) => showProgress(`Copying ${p.file} from the camera (${Math.min(p.index + 1, p.count)} of ${p.count})`, p.total ? p.bytes / p.total : 0));
-    try {
-      const files = await native.importFromCamera(cam.id, picked.map((f) => f.id));
-      entries = files.map((f) => ({ path: f.name, file: new NativeFile(f) }));
-    } catch (err) {
-      showError(err);
-      return [];
-    } finally {
-      stop();
-      hideProgress();
-    }
-  }
-  const added = await importPhotos(groupPhotos(entries));
-  if (cam.kind === 'adb') lib.store.remove('.incoming').catch(() => {});
-  return added;
-}
-
-// The name shown for a camera folder chosen in a browser: its DCIM folder
-// (what browsers let a page choose) reads as the camera.
-function webCameraLabel(source) {
-  return /^dcim$/i.test(source) ? 'Lytro camera' : source;
-}
-
-// Browser: lists a camera drive (a folder handle) in the Camera section.
-// False when it has no photos or cannot be read (not mounted yet, gone).
-async function showWebCamera(dir) {
-  try {
-    const { source, files } = await listCameraFolder(dir);
-    if (!files.length) return false;
-    setCameraSection({ cam: { kind: 'web', id: `web:${source}`, label: webCameraLabel(source), files } });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function showCameraPhotos() {
-  // First the drive chosen last time (asking to read it again), then, if
-  // that fails, a fresh choice.
-  if (!rememberedFailed) {
-    const dir = await recallCameraFolder();
-    if (dir && dir.requestPermission) {
-      const ok = (await dir.requestPermission({ mode: 'read' }).catch(() => 'denied')) === 'granted';
-      if (ok && (await showWebCamera(dir))) return;
-      rememberedFailed = true;
-      renderCameraSection();
-      return;
-    }
-  }
-  let result;
-  try {
-    result = await pickCameraFolder();
-  } catch (err) {
-    if (err.name !== 'AbortError') showError(err);
-    return;
-  }
-  if (result.dir) {
-    rememberedFailed = false;
-    rememberCameraFolder(result.dir);
-  }
-  if (result.dir && (await showWebCamera(result.dir))) return;
-  setCameraSection({ ...cameraSection, cam: { kind: 'web', id: `web:${result.source}`, label: webCameraLabel(result.source), files: result.files } });
-}
-
-$('camera-show').onclick = () => {
-  state.cameraView = true;
-  showGrid(true);
-  showCameraPhotos();
-};
-$('grid-camera-choose').onclick = showCameraPhotos;
-
-$('grid-import-all').onclick = async () => {
-  const { cam } = cameraSection;
-  if (!cam) return;
-  const added = await importCameraFiles(cam, cam.files.filter((f) => !importedAs(f)));
-  if (added.length) openItem(added[0]);
-};
-
-// Browser: the USB chooser is the permission to connect to a camera; it is
-// asked first (the browser offers cameras it may use, such as an ILLUM), then
-// the camera's drive is read through a folder the user chooses.
-let askCameraPermission = async () => false;
-async function importFromCamera() {
-  if (native) return importFromConnectedCamera(null);
-  // The drive chosen last time, if the browser lets the page read it again
-  // (one click allows it): no folder to pick.
-  const remembered = await recallCameraFolder();
-  if (remembered && remembered.requestPermission) {
-    try {
-      if ((await remembered.requestPermission({ mode: 'read' })) === 'granted') {
-        const listed = await listCameraFolder(remembered);
-        if (listed.files.length) return importFromCameraFolder({ ...listed, dir: remembered });
-      }
-    } catch {
-      // The drive is not there now: choose it again below.
-    }
-  }
-  if (!navigator.usb) return importFromCameraFolder();
-  // Choosing the folder needs its own click, so the dialog comes next.
-  const allowed = await askCameraPermission();
-  if (webUsbConn) {
-    // Read over USB: the dialog lists the photos on the camera.
-    const cam = cameraSection.cam;
-    $('camera-choose').hidden = true;
-    $('camera-select-row').hidden = true;
-    $('camera-dest').hidden = true;
-    $('camera-dialog-source').textContent = `${cam.files.length} light field photo(s) on ${cam.label}.`;
-    showCameraDialog({
-      files: cam.files,
-      thumb: async () => null,
-      onImport: async (picked) => {
-        const added = await importCameraFiles(cam, picked);
-        if (added.length) openItem(added[0]);
-      },
-    });
-    return;
-  }
-  $('camera-select-row').hidden = true;
-  $('camera-dest').hidden = true;
-  $('camera-choose').hidden = false;
-  $('camera-dialog-source').textContent = webUsbReport
-    // What the camera answered over USB, to read and select here.
-    ? `The camera was found but could not be read over USB. ${cameraSection.note || ''}\n\n${webUsbReport}\n\nYou can still choose its drive's DCIM folder to list its photos.`
-    : allowed
-      ? 'Camera allowed. Now choose its drive\'s DCIM folder to list its photos.'
-      : 'Switch the camera on and connect its USB cable, then choose its drive\'s DCIM folder to list its photos.';
-  showCameraDialog({ files: [], thumb: async () => null, onImport: () => {} });
-}
-
-$('camera-select-all').onclick = () => {
-  $('camera-grid').querySelectorAll('input').forEach((b) => { b.checked = true; });
-};
-$('camera-select-none').onclick = () => {
-  $('camera-grid').querySelectorAll('input').forEach((b) => { b.checked = false; });
-};
+// camera section: ui/camerasection.js
+const { setCameraSection, renderCameraSection, renderCameraGrid, importCameraFiles, webCameraLabel, showWebCamera, importFromCamera } = initCameraSection({ state, cameraThumbs, renderLibrary: (...a) => renderLibrary(...a), $, showGrid: (...a) => showGrid(...a), openItem: (...a) => openItem(...a), showProgress: (...a) => showProgress(...a), showError: (...a) => showError(...a), hideProgress: (...a) => hideProgress(...a), importPhotos: (...a) => importPhotos(...a), importFromConnectedCamera, importFromCameraFolder, showCameraDialog });
 
 // ---------------------------------------------------------------- wiring
 
 // An album as an archive (library/archive.js), to add to another library:
 // the browser version's to the desktop app's, say.
 async function exportAlbum(id) {
-  const album = lib.album(id);
+  const album = state.lib.album(id);
   if (!album) return;
   if (!album.photos.length) {
     showNotice(`“${album.name}” has no photos to export.`);
@@ -3677,7 +3285,7 @@ async function exportAlbum(id) {
   }
   try {
     showProgress(`Exporting “${album.name}”`, 0);
-    const blob = await lib.exportAlbum(id, { onProgress: (p) => showProgress(`Exporting “${album.name}”`, p) });
+    const blob = await state.lib.exportAlbum(id, { onProgress: (p) => showProgress(`Exporting “${album.name}”`, p) });
     download(blob, `${album.name.replace(/[\\/:*?"<>|]+/g, '_') || 'Album'}${ARCHIVE_SUFFIX}`);
   } catch (err) {
     showError(err);
@@ -3691,7 +3299,7 @@ async function exportAlbum(id) {
 async function importAlbumArchive(file) {
   await libReady;
   try {
-    const { album, photos } = await lib.importAlbum(file, {
+    const { album, photos } = await state.lib.importAlbum(file, {
       onProgress: (e, i, n) => {
         if (e) showProgress(`Importing ${e.name} (${i + 1} of ${n})`, i / n);
       },
@@ -4035,7 +3643,7 @@ function photoKey(info) {
 // open photo starts over at once.
 async function resetPhotoSettings(photo) {
   clearTimeout(saveTimer);
-  await lib.saveEdits(photo, { format: EDITS_FORMAT, version: EDITS_VERSION, reset: true, photo: { id: photo.id, name: photo.name } });
+  await state.lib.saveEdits(photo, { format: EDITS_FORMAT, version: EDITS_VERSION, reset: true, photo: { id: photo.id, name: photo.name } });
   if (state.current && state.current.photo === photo && state.info) {
     if (state.playing) setPlaying(false);
     await restoreEdits(state.info);
@@ -4049,7 +3657,7 @@ async function restoreEdits(info) {
   const photo = state.current && state.current.photo;
   // Library photos keep their edits in their folder; earlier versions kept
   // them in the app's storage, which is still read for those photos.
-  let saved = photo ? await lib.loadEdits(photo) : null;
+  let saved = photo ? await state.lib.loadEdits(photo) : null;
   if (!saved && state.editsKey) saved = await editsStore.load(state.editsKey);
   const reset = !!(saved && saved.reset);
   if (reset) saved = null;
@@ -4210,7 +3818,7 @@ function scheduleSave() {
       focusPoint: state.focusPoint,
     });
     recordHistory(edits);
-    if (photo) lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
+    if (photo) state.lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
     else editsStore.save(key, edits);
   }, 500);
 }
@@ -4254,7 +3862,7 @@ function flushSave() {
   const photo = state.current && state.current.photo;
   const edits = readEdits(document, { photo: { id: key, name: state.current ? state.current.name : null }, view: state.camera, focusPoint: state.focusPoint });
   recordHistory(edits);
-  if (photo) lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
+  if (photo) state.lib.saveEdits(photo, edits).catch((err) => console.warn('Could not save edits', err));
   else if (key) editsStore.save(key, edits);
 }
 let historyBusy = false;
@@ -4564,13 +4172,13 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
   };
   const arrived = async () => {
     showUsbStatus();
-    if (cameraSection.cam) return;
+    if (state.cameraSection.cam) return;
     setCameraSection({ note: 'Lytro camera connected.', show: true });
     // The drive chosen last time, if the browser still lets the page read
     // it: list it (it can take a few seconds to mount).
     const dir = await recallCameraFolder();
     if (!dir || !dir.queryPermission || (await dir.queryPermission({ mode: 'read' }).catch(() => 'denied')) !== 'granted') return;
-    for (let i = 0; i < 10 && connected && !cameraSection.cam; i++) {
+    for (let i = 0; i < 10 && connected && !state.cameraSection.cam; i++) {
       if (await showWebCamera(dir)) return;
       await new Promise((r) => setTimeout(r, 1500));
     }
@@ -4582,9 +4190,9 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
   });
   navigator.usb.addEventListener('disconnect', (e) => {
     if (!isLytro(e.device)) return;
-    if (webUsbDevice === e.device) {
-      webUsbConn = null;
-      webUsbDevice = null;
+    if (state.webUsbDevice === e.device) {
+      state.webUsbConn = null;
+      state.webUsbDevice = null;
     }
     connected = Math.max(0, connected - 1);
     showUsbStatus();
@@ -4602,7 +4210,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
       arrived();
     } else showUsbStatus();
   }).catch(() => showUsbStatus());
-  askCameraPermission = async () => {
+  state.askCameraPermission = async () => {
     try {
       const device = await navigator.usb.requestDevice({ filters: [{ vendorId: LYTRO_USB_VENDOR }] });
       allowed = true;
@@ -4621,7 +4229,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
         arrived();
       }
       showUsbStatus();
-      showNotice(webUsbReport ? `The camera was found but could not be read over USB. ${cameraSection.note || ''} ${webUsbReport.replace(/\n/g, ' · ')}` : 'Illuminator will now notice when this camera is plugged in.');
+      showNotice(state.webUsbReport ? `The camera was found but could not be read over USB. ${state.cameraSection.note || ''} ${state.webUsbReport.replace(/\n/g, ' · ')}` : 'Illuminator will now notice when this camera is plugged in.');
       startNoticeTimer();
       return true;
     } catch (err) {
@@ -4639,7 +4247,7 @@ if (!native && navigator.usb && CAMERA_IMPORT) {
     }
     return false;
   };
-  $('usb-watch-btn').onclick = () => askCameraPermission();
+  $('usb-watch-btn').onclick = () => state.askCameraPermission();
 }
 $('camera-choose').onclick = () => importFromCameraFolder();
 
