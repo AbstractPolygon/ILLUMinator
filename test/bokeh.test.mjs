@@ -48,13 +48,22 @@ test('refocus prefers views that did not clip', async () => {
   assert.ok(out[0] > 1.5, `got ${out[0]}`);
 });
 
-test('spread blur softens the sharp range too', () => {
-  const w = 21, h = 21;
-  const rgb = new Float32Array(w * h * 3).fill(0.1);
-  rgb.set([1, 1, 1], (10 * w + 10) * 3);
-  const depth = new Float32Array(w * h).fill(0); // all in focus
-  const sharp = applyDepthOfField(rgb, w, h, depth, w, h, 0, 1, 14, { spread: 0.5 });
-  const soft = applyDepthOfField(rgb, w, h, depth, w, h, 0, 1, 14, { spread: 0.5, blur: 3 });
-  assert.equal(sharp[(10 * w + 10) * 3], 1);
-  assert.ok(soft[(10 * w + 10) * 3] < 0.9);
+test('spread blur feathers the blur radius map and leaves the sharp range sharp', () => {
+  const w = 41, h = 9;
+  const rgb = new Float32Array(w * h * 3);
+  for (let i = 0; i < w * h; i++) rgb.fill(0.1 + 0.8 * ((i % w) % 2), i * 3, i * 3 + 3);   // fine stripes: blur shows as lost contrast
+  // the left half of the picture is in focus (depth 0), the right half far behind it
+  const depth = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 20; x < w; x++) depth[y * w + x] = 1.2;
+  const contrast = (img, x) => { let m = 0; for (let y = 0; y < h; y++) m += Math.abs(img[(y * w + x) * 3] - img[(y * w + x + 1) * 3]); return m / h; };
+  const hard = applyDepthOfField(rgb, w, h, depth, w, h, 0, 1, 4, { spread: 0.5 });
+  const feathered = applyDepthOfField(rgb, w, h, depth, w, h, 0, 1, 4, { spread: 0.5, feather: 8 });
+  // far from the edge nothing changes: the sharp side stays sharp, the blurred side is as blurred
+  assert.ok(Math.abs(contrast(hard, 2) - contrast(feathered, 2)) < 1e-6);
+  assert.ok(Math.abs(contrast(hard, 38) - contrast(feathered, 38)) < 0.02);
+  // at the edge the sharp-to-blur change is gradual: a step with the hard map, a ramp when feathered
+  const step = (img) => Math.abs(contrast(img, 17) - contrast(img, 23));
+  const ramp = (img, x) => contrast(img, x);
+  assert.ok(ramp(feathered, 17) < ramp(hard, 17) - 0.05, 'blur starts inside the sharp range');
+  assert.ok(ramp(feathered, 23) > ramp(hard, 23) + 0.0 || step(feathered) <= step(hard));
 });

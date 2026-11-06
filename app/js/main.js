@@ -931,9 +931,8 @@ function focusField(v = {}) {
     spread: 1.6 * (v.spread ?? +$('spread').value) / 100,
     // Width of the soft edge of the sharp range, in the same units.
     smooth: 0.8 * (v.spreadSmooth ?? +$('spread-smooth').value) / 100,
-    // Blur of the sharp range itself, as a blur radius in the units of the
-    // depth of field strength (pixels = blur x the image's pixels per unit;
-    // full Blur is the camera's own f/2 blur three focus units away).
+    // Feathering of the spread in the picture: the blur radius map is smoothed over this many units of the depth of field strength (pixels = blur x
+    // the image's pixels per unit; full Blur is the camera's own f/2 blur three focus units away).
     blur: (3 * (state.info ? state.info.radius : 4.5) / 14) * (v.spreadBlur ?? +$('spread-blur').value) / 100,
     tilt: [tilt * Math.cos(angle), tilt * Math.sin(angle)],
     point: [v.pointX ?? state.focusPoint.x, v.pointY ?? state.focusPoint.y],

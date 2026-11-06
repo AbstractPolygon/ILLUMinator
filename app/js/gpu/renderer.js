@@ -433,7 +433,6 @@ uniform vec2 uPoint;        // the tilted focus plane turns around this point
 uniform float uSpread;      // depth range on each side of the focus kept sharp
 uniform float uSmooth;      // width of the soft edge after the sharp range
 uniform float uStrength;    // blur radius in pixels per unit of focus difference
-uniform float uBlur;        // blur radius (pixels) added everywhere, the sharp range included
 uniform float uClip;
 uniform float uHighlights;
 uniform sampler2D uSharp;   // the focus mask (FOCUS_SCORE), 0..1: kept sharp where it is 1
@@ -451,7 +450,7 @@ void main() {
   float e = max(abs(d) - uSpread, 0.0);
   if (uSmooth > 0.0) e = e < uSmooth ? e * e / (2.0 * uSmooth) : e - 0.5 * uSmooth;
   float keep = uSharpOn == 1 ? texture(uSharp, n).r : 0.0;
-  d = (d < 0.0 ? -1.0 : 1.0) * (uStrength * e * (1.0 - keep) + uBlur);
+  d = (d < 0.0 ? -1.0 : 1.0) * (uStrength * e * (1.0 - keep));
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float knee = 0.8 * uClip;
   float t = clamp((y - knee) / (uClip - knee), 0.0, 1.0);
@@ -460,6 +459,31 @@ void main() {
   c *= 1.0 + (exp2(7.0 * uHighlights) - 1.0) * t * t;
   // Signed radius: positive behind the focus plane, negative in front.
   outColor = vec4(c, d);
+}`;
+
+// Depth of field, step 1b: the blur radius (alpha) smoothed along one axis, the color untouched: the Blur slider under Focus Spread feathers where the
+// sharp range turns into blur (core/dof.js smoothMap).
+const DOF_FEATHER = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSrc;
+uniform ivec2 uDir;
+uniform int uRadius;
+uniform float uSigma;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  vec4 c = texelFetch(uSrc, p, 0);
+  float a = 0.0;
+  float ws = 0.0;
+  for (int i = -40; i <= 40; i++) {
+    if (abs(i) > uRadius) continue;
+    float w = exp(-0.5 * float(i * i) / (uSigma * uSigma));
+    a += w * texelFetch(uSrc, clamp(p + uDir * i, ivec2(0), size - 1), 0).a;
+    ws += w;
+  }
+  outColor = vec4(c.rgb, a / ws);
 }`;
 
 const MAX_TAPS = 512;
@@ -2436,6 +2460,7 @@ export class GpuRenderer {
       refocus: program(gl, REFOCUS_PASS),
       chroma: program(gl, CHROMA_PASS),
       dofPrep: program(gl, DOF_PREP),
+      dofFeather: program(gl, DOF_FEATHER),
       focusScore: program(gl, FOCUS_SCORE),
       focusMask: program(gl, FOCUS_MASK),
       focusSpread: program(gl, FOCUS_SPREAD),
@@ -3336,7 +3361,7 @@ export class GpuRenderer {
     return mask;
   }
 
-  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, blur = 0, draft = false, sharp = null }) {
+  depthOfField(src, w, h, { focus, strength, shape = 'smooth', blades = 6, oval = 0, rotation = 0, onion = 0, highlights = 0, clip = 1, tilt = [0, 0], point = [0.5, 0.5], spread = 0, smooth = 0, feather = 0, draft = false, sharp = null }) {
     const gl = this.gl;
     const prep = this.mipmapped(w, h, 'dofPrep');
     const out = this.scratch(w, h, 'dofOut');
@@ -3354,7 +3379,6 @@ export class GpuRenderer {
     gl.uniform1f(P.u.uSpread, spread);
     gl.uniform1f(P.u.uSmooth, smooth);
     gl.uniform1f(P.u.uStrength, strength);
-    gl.uniform1f(P.u.uBlur, blur);
     gl.uniform1f(P.u.uClip, clip);
     gl.uniform1f(P.u.uHighlights, highlights);
     gl.uniform1i(P.u.uSharp, 5);
@@ -3362,12 +3386,30 @@ export class GpuRenderer {
     gl.uniform1i(P.u.uSharpOn, sharp ? 1 : 0);
     this.draw();
 
+    if (feather > 0) {
+      const sigma = Math.max(0.3, feather / 2);
+      const tmp = this.scratch(w, h, 'dofFeather');
+      P = this.programs.dofFeather;
+      gl.useProgram(P.p);
+      gl.uniform1i(P.u.uSrc, 1);
+      gl.uniform1f(P.u.uSigma, sigma);
+      gl.uniform1i(P.u.uRadius, Math.min(40, Math.ceil(2.5 * sigma)));
+      this.target(tmp, w, h);
+      this.bindTex(1, prep);
+      gl.uniform2i(P.u.uDir, 1, 0);
+      this.draw();
+      this.target(prep, w, h);
+      this.bindTex(1, tmp);
+      gl.uniform2i(P.u.uDir, 0, 1);
+      this.draw();
+    }
+
     gl.bindTexture(gl.TEXTURE_2D, prep);
     gl.generateMipmap(gl.TEXTURE_2D);
 
     const [lo, hi] = this.depthRange;
     const reach = Math.abs(tilt[0]) + Math.abs(tilt[1]);
-    const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread) + blur);
+    const maxR = Math.min(64, strength * Math.max(0, Math.max(Math.abs(hi - focus), Math.abs(lo - focus)) + reach - spread));
     const taps = Math.max(32, Math.min(draft ? 160 : MAX_TAPS, Math.round(maxR * maxR * 1.2)));
     const kernel = bokehKernel({ shape, blades, oval, rotation, onion });
     const shapeId = kernel.kind;

@@ -187,6 +187,33 @@ function boostHighlights(rgb, clip, amount) {
   return out;
 }
 
+// A one-channel map smoothed by a Gaussian of `sigma` pixels (separable, edge pixels repeated). Used for the blur radius map (focus spread feathering).
+export function smoothMap(map, w, h, feather) {
+  const sigma = Math.max(0.3, feather / 2);
+  const reach = Math.ceil(2.5 * sigma);
+  const kernel = new Float32Array(2 * reach + 1);
+  let sum = 0;
+  for (let i = -reach; i <= reach; i++) sum += kernel[i + reach] = Math.exp(-0.5 * (i * i) / (sigma * sigma));
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+  const tmp = new Float32Array(map.length);
+  const out = new Float32Array(map.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let i = -reach; i <= reach; i++) acc += kernel[i + reach] * map[y * w + Math.min(w - 1, Math.max(0, x + i))];
+      tmp[y * w + x] = acc;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let i = -reach; i <= reach; i++) acc += kernel[i + reach] * tmp[Math.min(h - 1, Math.max(0, y + i)) * w + x];
+      out[y * w + x] = acc;
+    }
+  }
+  return out;
+}
+
 // rgb: linear RGB (w x h). depth: per-pixel focus values (dw x dh, may be a
 // lower resolution than rgb). focus: the focus value kept sharp.
 // strength: blur radius in pixels of `rgb` is strength * |depth - focus| *
@@ -194,8 +221,10 @@ function boostHighlights(rgb, clip, amount) {
 // oval (0..1), rotation (degrees) and onion (0..1) (see bokehKernel),
 // highlights (0..1), clip (the developed level where highlights clip), and
 // the focus field: spread (depth kept sharp on each side of the focus),
-// smooth (width of the soft edge where blur starts after the spread), blur
-// (pixels of blur added everywhere, the sharp range included),
+// smooth (width of the soft edge where blur starts after the spread), feather
+// (pixels: the blur radius map is smoothed over this distance, so the sharp
+// range turns into blur gradually across the picture; the picture itself is
+// not blurred by it),
 // tilt ([x, y] focus change across the picture) turning around point
 // Focus distance past the sharp range -> amount of blur. With `smooth` the
 // blur starts gradually (a quadratic ease over that width) instead of at
@@ -208,11 +237,11 @@ export function softEdge(excess, smooth) {
 
 // ([x, y], normalized).
 export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxPerUnit = 14, options = {}) {
-  if (!(strength > 0) && !(options.blur > 0)) return rgb;
-  const { blur: blurPx = 0, highlights = 0, clip = 1, spread = 0, smooth = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
+  if (!(strength > 0)) return rgb;
+  const { feather = 0, highlights = 0, clip = 1, spread = 0, smooth = 0, tilt = [0, 0], point = [0.5, 0.5] } = options;
   const kernel = bokehKernel(options);
   const src = boostHighlights(rgb, clip, highlights);
-  const maxR = Math.max(1, strength * 1.6 * pxPerUnit + blurPx);
+  const maxR = Math.max(1, strength * 1.6 * pxPerUnit);
   const radii = [0];
   for (let r = 1; r < maxR * 1.5; r *= kernel.kind ? Math.SQRT2 : 2) radii.push(r);
   if (radii.length < 2) radii.push(1);
@@ -220,13 +249,21 @@ export function applyDepthOfField(rgb, w, h, depth, dw, dh, focus, strength, pxP
   const out = new Float32Array(rgb.length);
   const sx = dw / w;
   const sy = dh / h;
+  // The blur radius of every pixel, then smoothed over `feather` pixels.
+  let radius = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {
     const dy = Math.min(dh - 1, Math.floor((y + 0.5) * sy));
     const rowFocus = focus + tilt[1] * ((y + 0.5) / h - point[1]);
     for (let x = 0; x < w; x++) {
       const d = depth[dy * dw + Math.min(dw - 1, Math.floor((x + 0.5) * sx))];
       const f = rowFocus + tilt[0] * ((x + 0.5) / w - point[0]);
-      const r = strength * softEdge(Math.abs(d - f) - spread, smooth) * pxPerUnit + blurPx;
+      radius[y * w + x] = strength * softEdge(Math.abs(d - f) - spread, smooth) * pxPerUnit;
+    }
+  }
+  if (feather > 0) radius = smoothMap(radius, w, h, feather);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const r = radius[y * w + x];
       let k = 0;
       while (k < radii.length - 2 && radii[k + 1] < r) k++;
       const t = Math.max(0, Math.min(1, (r - radii[k]) / (radii[k + 1] - radii[k] || 1)));

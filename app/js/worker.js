@@ -416,7 +416,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
 // before the color pass, so color changes can redraw it (see view()).
 async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, mode = undefined, color = null, distortionCorrected = false }, message) {
   const gpu = state.gpu;
-  if ((dof > 0 || bokeh.blur > 0) && (await ensureViewDepth(id))) {
+  if (dof > 0 && (await ensureViewDepth(id))) {
     // Whatever really is at the focus depth stays sharp, also where the depth map has it wrong (thin near objects, such as the wires of a fence): see GpuRenderer.focusMask.
     // (not with a tilted focus plane, whose depth differs across the picture)
     const tilted = bokeh.tilt && (bokeh.tilt[0] || bokeh.tilt[1]);
@@ -435,7 +435,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
       point: bokeh.point,
       spread: bokeh.spread,
       smooth: bokeh.smooth,
-      blur: (bokeh.blur || 0) * pxPerUnit,
+      feather: (bokeh.blur || 0) * pxPerUnit,
       clip: state.dev.clip,
       draft,
     });
@@ -895,12 +895,12 @@ function apertureOptions({ u = 0, v = 0, aperture = 1 }) {
 // `bokeh` is { shape: 'smooth' | 'circle' | 'blades', blades, oval, rotation,
 // onion, highlights: 0..1 } (see core/dof.js).
 async function withDepthOfField(id, rgb, w, h, alpha, dof, scale = 1, bokeh = {}) {
-  if (!(dof > 0 || bokeh.blur > 0)) return rgb;
+  if (!(dof > 0)) return rgb;
   if (!(await ensureViewDepth(id))) return rgb;
   const { outW, outH } = state.sampler;
   return applyDepthOfField(rgb, w, h, state.depth.alpha, outW, outH, alpha, dof, 14 * scale * state.settings.detail, {
     shape: bokeh.shape, blades: bokeh.blades, oval: bokeh.oval, rotation: bokeh.rotation, onion: bokeh.onion, highlights: bokeh.highlights, clip: state.dev.clip, tilt: bokeh.tilt, point: bokeh.point, spread: bokeh.spread,
-    smooth: bokeh.smooth, blur: (bokeh.blur || 0) * 14 * scale * state.settings.detail,
+    smooth: bokeh.smooth, feather: (bokeh.blur || 0) * 14 * scale * state.settings.detail,
   });
 }
 

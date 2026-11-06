@@ -20,7 +20,7 @@ The light field controls. Each can be animated: the <img src="images/key-prev.pn
 - *Focus Point:* where you last clicked; spread and tilt are centered there.
 - *Spread:* a range of depth kept sharp on each side of the focus.
 - *Smoothing:* softens the edges of that range, so blur builds up gradually.
-- *Blur:* blurs the sharp range itself as well; Smoothing's gradual blur still builds up on top of it past the range.
+- *Blur:* feathers the spread in the picture: the map of how much each pixel is blurred is smoothed across the picture, so where the sharp range meets blurred areas the change is gradual (and depth map errors show less). It does not blur the picture itself; Smoothing works on depth, Blur on the picture's area.
 - *Show spread:* tints what lies outside it, blue nearer and orange farther.
 
 ## Tilt
