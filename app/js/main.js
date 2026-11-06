@@ -14,6 +14,7 @@ import { hashKey, stillKeyText } from './core/still-cache.js';
 import { encodePng16 } from './core/png16.js';
 import { UPSCALE_MODELS, modelMethod, methodModel, modelState, downloadModel, removeModel, readModel } from './core/upscalemodels.js';
 import { aiUpscale, aiUpscaleAvailable } from './core/aiupscale.js';
+import { DEPTH_MODELS, depthModelMethod, methodDepthModel, depthModelState, downloadDepthModel, removeDepthModel } from './core/depthmodels.js';
 import { setMemoryLimits, fitsMemory, memoryProblem, superResVram, exportRam } from './core/memorybudget.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
 import { Library } from './library/library.js';
@@ -1902,7 +1903,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-style', 'depth-blend', 'depth-objects', 'depth-objects-soft', 'lytro-depth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-style', 'depth-blend', 'depth-model-blend', 'depth-objects', 'depth-objects-soft', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', 'tilt-show', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
@@ -2327,7 +2328,14 @@ $('depth-smooth').onchange = () => {};
 // Normal or high quality depth: the depth map is measured again.
 $('depth-hq').onchange = () => applySettingsSoon();
 // The mix of the two depth measurements, shown for Blended only; the worker recombines without measuring again.
-const showDepthBlend = () => { $('depth-blend-row').hidden = $('depth-style').value !== 'combined'; };
+const showDepthBlend = () => {
+  $('depth-blend-row').hidden = $('depth-style').value !== 'combined';
+  $('depth-model-blend-row').hidden = !methodDepthModel($('depth-style').value);
+};
+$('depth-model-blend').oninput = () => {
+  showSliderValue($('depth-model-blend'));
+  applySettingsSoon();
+};
 $('depth-style').onchange = () => { showDepthBlend(); applySettingsSoon(); };
 $('depth-blend').oninput = () => {
   showSliderValue($('depth-blend'));
@@ -2549,6 +2557,70 @@ let modelBusy = false;
 const updatingModels = new Set();
 // (the desktop app only: the web version has no upscaling models, in Settings or in the Method list)
 $('models-setting').hidden = !native;
+// Depth models (Settings > Depth models): a downloaded model is a choice under Camera > Depth > Depth method.
+let depthModelBusy = false;
+$('depth-models-setting').hidden = !native;
+async function refreshDepthModels() {
+  if (!native) return;
+  const select = $('depth-style');
+  const before = select.value;
+  const list = $('depth-models-list');
+  if (!list.children.length) {
+    for (const m of DEPTH_MODELS) {
+      const row = document.createElement('label');
+      row.className = 'check model-row';
+      const box = Object.assign(document.createElement('input'), { type: 'checkbox' });
+      box.dataset.model = m.id;
+      const text = document.createElement('span');
+      text.textContent = `${m.name}, ${m.note} (${Math.round(m.size / 1e6)} MB)`;
+      const status = Object.assign(document.createElement('span'), { className: 'hint model-state' });
+      row.append(box, text, status);
+      list.append(row);
+      box.onchange = async () => {
+        if (depthModelBusy) {
+          box.checked = !box.checked;
+          return;
+        }
+        depthModelBusy = true;
+        box.disabled = true;
+        try {
+          if (box.checked) {
+            status.textContent = 'Downloading… 0%';
+            await downloadDepthModel(m, (p) => { status.textContent = `Downloading… ${Math.round(p * 100)}%`; });
+          } else {
+            await removeDepthModel(m);
+          }
+          status.textContent = '';
+        } catch (err) {
+          box.checked = false;
+          status.textContent = err && err.message ? err.message : String(err);
+        }
+        depthModelBusy = false;
+        await refreshDepthModels();
+      };
+    }
+  }
+  for (const m of DEPTH_MODELS) {
+    const have = (await depthModelState(m)) === 'ready';
+    const box = list.querySelector(`input[data-model="${m.id}"]`);
+    box.checked = have;
+    box.disabled = false;
+    const value = depthModelMethod(m.id);
+    const option = [...select.options].find((o) => o.value === value);
+    if (have && !option) select.append(new Option(`${m.name} (model)`, value));
+    else if (!have && option) option.remove();
+  }
+  // a model that was the method and is gone: back to Automatic
+  if (before && ![...select.options].some((o) => o.value === before)) {
+    select.value = 'auto';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (before) {
+    select.value = before;
+  }
+  showDepthBlend();
+}
+refreshDepthModels().catch(() => {});
+
 async function refreshUpscaleModels() {
   if (!native) return;
   const select = $('upscale-method');
@@ -6549,6 +6621,7 @@ async function applySettings() {
     depthQuality: $('depth-hq').checked ? 'high' : 'normal',
     depthStyle: $('depth-style').value,
     depthBlend: $('depth-blend').value / 100,
+    depthModelBlend: $('depth-model-blend').value / 100,
     depthContrast: $('depth-contrast').value / 100,
     depthObjects: $('depth-objects').checked,
     depthObjectSoft: $('depth-objects-soft').value / 100,

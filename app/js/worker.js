@@ -22,6 +22,8 @@ import { combineDepth } from './core/depthcombine.js';
 import { VERSION } from './version.js';
 import { removePeriodicPattern } from './core/notch.js';
 import { snapDepthEdges, snapToObjects, softenObjectEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
+import { methodDepthModel, readDepthModel } from './core/depthmodels.js';
+import { runDepthModel, fitModelDepth, fuseModelDepth } from './core/depthmodel.js';
 import { shapeDepthContrast, setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -575,6 +577,7 @@ function rebuildSampler() {
   state.lensOffsets = lf.raw ? (exactOffsets ? null : calibratedLensOffsets()) : null;
   state.depth = null;
   state.depthRaw = null;
+  state.modelDepth = null;
   state.focusOffset = undefined;
   state.objects = null;
   if (state.gpu) {
@@ -1446,7 +1449,31 @@ function useHotPixelFix(on) {
 
 // The depth method a setting stands for: 'auto' (or none) is the engine's own way where its tables are there, the blend otherwise.
 function resolveDepthStyle(v) {
+  // a depth model works on top of the automatic method's measurement
+  if (methodDepthModel(v)) v = 'auto';
   return v && v !== 'auto' && v !== 'guided' ? v : (engineDepthAvailable() ? 'match' : 'combined');
+}
+
+// A depth model (Camera > Depth > Depth method, once downloaded in Settings): its relative depth for the picture, fitted to the measurement, mixed in by Model blend. The
+// model runs once per photo and model; the blend (and the smoothing, contrast and the rest) is applied with applyDepthSmoothing.
+async function ensureModelDepth(id) {
+  const model = methodDepthModel(state.settings.depthStyle);
+  if (!model || !state.depthRaw || state.pp || !state.sampler) return;
+  const sampler = state.sampler;
+  if (!(state.modelDepth && state.modelDepth.id === model.id && state.modelDepth.sampler === sampler)) {
+    const { outW, outH } = sampler;
+    try {
+      const rel = await runDepthModel(model, readDepthModel, centerView(), outW, outH, (stage, p) => post({ id, type: 'progress', stage, progress: p }));
+      if (state.sampler !== sampler || !state.depthRaw) return;
+      state.modelDepth = { id: model.id, sampler, rel, fit: fitModelDepth(rel, state.depthRaw.alpha, state.depthRaw.confidence, outW, outH) };
+    } catch (e) {
+      state.modelDepth = null;
+      post({ id, type: 'notice', message: `The depth model could not run: ${(e && e.message) || e}` });
+      return;
+    }
+  }
+  applyDepthSmoothing();
+  post({ type: 'depthReady', reapply: true });
 }
 
 async function settings({ id, settings: s }) {
@@ -1454,6 +1481,9 @@ async function settings({ id, settings: s }) {
   const detailChanged = s.detail !== undefined && s.detail !== state.settings.detail;
   const smoothingChanged = s.depthSmoothing !== undefined && s.depthSmoothing !== state.settings.depthSmoothing;
   const contrastChanged = s.depthContrast !== undefined && s.depthContrast !== (state.settings.depthContrast ?? 0);
+  const modelOf = (v) => (methodDepthModel(v) ? v : null);
+  const modelChanged = s.depthStyle !== undefined && modelOf(s.depthStyle) !== modelOf(state.settings.depthStyle);
+  const modelBlendChanged = s.depthModelBlend !== undefined && s.depthModelBlend !== (state.settings.depthModelBlend ?? 0.7);
   const objectSoftChanged = s.depthObjectSoft !== undefined && s.depthObjectSoft !== (state.settings.depthObjectSoft ?? 0.3);
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
   const styleChanged = s.depthStyle !== undefined && (s.depthStyle === 'guided') !== (state.settings.depthStyle === 'guided') || (s.depthStyle !== undefined && resolveDepthStyle(s.depthStyle) !== resolveDepthStyle(state.settings.depthStyle));
@@ -1472,7 +1502,14 @@ async function settings({ id, settings: s }) {
     const { classic, match, outW, outH } = state.depthParts;
     state.depthRaw = { ...state.depthRaw, alpha: combineDepth(classic, match, outW, outH, undefined, state.settings.depthBlend ?? 0.5) };
     settleDepth(outW, outH);
-  } else if ((smoothingChanged || contrastChanged || objectSoftChanged) && !detailChanged) {
+  } else if (modelChanged && state.depthRaw && !detailChanged) {
+    if (methodDepthModel(state.settings.depthStyle)) await ensureModelDepth(id);
+    else {
+      state.modelDepth = null;
+      applyDepthSmoothing();
+      post({ type: 'depthReady', reapply: true });
+    }
+  } else if ((smoothingChanged || contrastChanged || objectSoftChanged || modelBlendChanged) && !detailChanged) {
     applyDepthSmoothing();
     // (main.js applies a click to focus again on the changed depth)
     if (state.depth && !state.pp) post({ type: 'depthReady', reapply: true });
@@ -1829,6 +1866,7 @@ async function measureDepthOnce(id) {
     state.depthFast = false;  // a quick measurement made while this one ran is replaced by it
     lap.settle = Date.now() - tSettle;
     post({ type: 'depthReady' });  // (main.js re-applies a click to focus on it)
+    if (methodDepthModel(state.settings.depthStyle)) await ensureModelDepth(id);
     // Where the time went, and a warning when a GPU step fell back to the CPU.
     console.info(`Depth measured in ${((Date.now() - tDepth) / 1000).toFixed(1)} s (${style}; ${state.gpu ? `GPU ${state.gpu.name || ''}${hardwareGpu() ? '' : ' (software)'}` : 'no GPU'}): ${JSON.stringify(lap)}`);
     if (state.cpuFallbacks && state.cpuFallbacks.size) {
@@ -2370,6 +2408,8 @@ function applyDepthSmoothing() {
   // Object edges: the steps at the outlines made a ramp (Camera > Depth > Object edges, Smooth edges).
   const soft = (state.settings.depthObjectSoft ?? 0.3) * OBJECT_SOFT_MAX;
   if (state.settings.depthObjects && soft > 0 && state.objects && state.objects.w === outW && state.objects.h === outH) smoothed = softenObjectEdges(smoothed, state.objects.labels, outW, outH, soft);
+  const model = methodDepthModel(state.settings.depthStyle);
+  if (model && state.modelDepth && state.modelDepth.id === model.id && state.modelDepth.sampler === state.sampler) smoothed = fuseModelDepth(smoothed, state.modelDepth.rel, state.modelDepth.fit, state.settings.depthModelBlend ?? 0.7);
   // Moved by the focus offset found for this photo (see superRes).
   const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA + rayWarpShift();
   const field = rayWarpField(outW, outH);

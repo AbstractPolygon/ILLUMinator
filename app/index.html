@@ -522,7 +522,10 @@
               <option value="combined">Blended</option>
             </select>
           </label>
-          <label id="depth-blend-row" title="How the two depth measurements are mixed. 0: Illuminator's depth alone. 100: the Classic Desktop depth alone. 50: the default mix, Classic Desktop up close and Illuminator's in the distance" hidden>Blend <output for="depth-blend" data-for="depth-blend">50</output>
+          <label id="depth-model-blend-row" title="How much of the depth model's result is used. 0: the measured depth alone. 100: the model's depth (fitted to the measurement) alone. The model gives clean object edges and an answer on glossy or blank surfaces; the measurement keeps the scale" hidden>Model blend <output for="depth-model-blend" data-for="depth-model-blend">70</output>
+            <input id="depth-model-blend" type="range" min="0" max="100" step="5" value="70" data-default="70">
+          </label>
+                    <label id="depth-blend-row" title="How the two depth measurements are mixed. 0: Illuminator's depth alone. 100: the Classic Desktop depth alone. 50: the default mix, Classic Desktop up close and Illuminator's in the distance" hidden>Blend <output for="depth-blend" data-for="depth-blend">50</output>
             <input id="depth-blend" type="range" min="0" max="100" step="5" value="50" data-default="50">
           </label>
           <label id="depth-objects-row" class="check" title="Finds the objects in the photo and puts depth edges on their outlines, with or without the High quality depth map. The first time, it downloads a 45 MB object model (kept for later); finding the objects takes a few seconds per photo"><input id="depth-objects" type="checkbox"> Object edges</label>
@@ -921,6 +924,11 @@
         <div class="row">
           <button type="button" id="import-folder">Import Lytro Desktop library…</button>
         </div>
+      </section>
+      <section class="setting" id="depth-models-setting">
+        <h3>Depth models</h3>
+        <p class="hint">Downloaded models appear under Camera &gt; Depth &gt; Depth method. They see the picture as a whole and give clean object edges; the measured depth gives their scale.</p>
+        <div id="depth-models-list" class="models-list"></div>
       </section>
       <section class="setting" id="models-setting">
         <h3>Upscaling models</h3>
