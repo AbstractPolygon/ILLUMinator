@@ -252,9 +252,13 @@ dd { margin: 0; word-break: break-word; }
 dialog {
   background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 10px; width: min(900px, 92vw); max-height: 86vh; padding: 16px;
+  overflow: hidden; /* the title and the buttons stay put; only the text area of a dialog scrolls (.dialog-body, .credits, .qe-list, .camera-grid, .update-news) */
 }
 dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
-dialog form { display: flex; flex-direction: column; gap: 10px; max-height: calc(86vh - 32px); }
+dialog form { display: flex; flex-direction: column; gap: 10px; max-height: calc(86vh - 34px); }
+dialog h2, dialog menu { flex: none; }
+.dialog-body:focus, #about-dialog .credits:focus { outline: none; }
+.dialog-body { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
 dialog h2 { margin: 0; }
 dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
 #quick-export-dialog { width: min(480px, 94vw); }
@@ -291,7 +295,7 @@ dialog menu { display: flex; gap: 8px; padding: 0; margin: 0; }
 .qe-row > output { float: none; text-align: right; }
 .qe-row > button { justify-self: start; }
 .spacer { flex: 1; }
-.camera-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; overflow-y: auto; }
+.camera-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; overflow-y: auto; min-height: 0; }
 .camera-grid label { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px; cursor: pointer; }
 .camera-grid label:has(input:checked) { border-color: var(--accent); }
 .camera-grid img, .camera-grid .noimg { width: 100%; aspect-ratio: 704 / 480; object-fit: cover; border-radius: 4px; background: #2a2e35; display: block; }
@@ -428,6 +432,7 @@ button.wide { display: block; width: 100%; }
 #about-dialog .links { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 #about-dialog .links a { color: var(--text); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
 #about-dialog .links a:hover { text-decoration-color: var(--text); }
+#about-dialog .credits { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
 #about-dialog .credits h3 { margin: 4px 0 4px; font-size: 13px; }
 #about-dialog .credits h3.credit-extra { margin-top: 20px; }
 #about-dialog .about-copyright { margin-top: 6px; }
@@ -435,7 +440,7 @@ button.wide { display: block; width: 100%; }
 #about-dialog .about-intro a:hover { text-decoration-color: var(--text); }
 #about-dialog .about-copyright a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
 #about-dialog .about-copyright a:hover { color: var(--text); text-decoration-color: var(--text); }
-#about-dialog .about-last { margin-bottom: 18px; }
+#about-dialog .about-last { margin-bottom: 4px; }
 /* Same as the top bar: the logo left of the app name. */
 #about-dialog h2 { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: bold; letter-spacing: 0.02em; color: var(--text); }
 #about-dialog h2 .logo { width: 22px; height: 22px; flex: none; }
