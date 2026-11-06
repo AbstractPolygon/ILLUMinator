@@ -825,20 +825,20 @@
                   <option value="4">4× lens grid</option>
                 </select>
               </label>
-              <label title="Where each microlens really is. The lenses sit a little off their regular grid, each by its own amount, and out of focus the errors add up to a pattern at the lens grid's period. Automatic uses the camera's own white images when its calibration has been imported (Settings) and the white image stored in the photo otherwise; This photo's white image is the one stored in the file; Off uses the regular grid">Lens centres
+              <label title="Where each microlens really is. The lenses sit a little off their regular grid, each by its own amount, and out of focus the errors add up to a pattern at the lens grid's period. Automatic uses the camera's own white images when its calibration has been imported (Settings) and the white image stored in the photo otherwise; Measured from photo measures each lens's centre from the white image stored in the photo's file; Camera calibration uses the imported calibration only; Off uses the regular grid">Lens centres
                 <select id="lens-centres">
                   <option value="auto" selected>Automatic</option>
                   <option value="camera">Camera calibration</option>
-                  <option value="photo">This photo's white image</option>
+                  <option value="photo">Measured from photo</option>
                   <option value="off">Off</option>
                 </select>
               </label>
               <label class="check" title="Takes out the diamond pattern the microlens grid can leave in out-of-focus areas of a picture rendered from the full sensor at 3× and 4× (it shows most once the picture is sharpened). On by default"><input id="lattice-on" type="checkbox" checked> Lattice filter</label>
-              <label title="How hard the filter pulls the pattern down: low leaves some of it, high takes it all out and can soften fine texture at the same frequencies">Lattice strength <output data-for="lattice-strength" for="lattice-strength">75</output>
-                <input id="lattice-strength" type="range" min="10" max="100" step="5" value="75" data-default="75">
-              </label>
               <label title="How faint a pattern the filter looks for before it acts. Higher finds fainter ones (and acts on more pictures); lower acts only where the pattern is plain">Lattice detection <output data-for="lattice-detect" for="lattice-detect">50</output>
                 <input id="lattice-detect" type="range" min="0" max="100" step="5" value="50" data-default="50">
+              </label>
+              <label title="How hard the filter pulls the pattern down: low leaves some of it, high takes it all out and can soften fine texture at the same frequencies">Lattice strength <output data-for="lattice-strength" for="lattice-strength">75</output>
+                <input id="lattice-strength" type="range" min="10" max="100" step="5" value="75" data-default="75">
               </label>
             </div>
           </div>
