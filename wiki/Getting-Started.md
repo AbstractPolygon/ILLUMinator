@@ -44,7 +44,7 @@ Every photo you open is added to your library, so it is there next time ([[Libra
 
 <img src="images/fullscreen.png" width="20" height="20" alt="Full screen"> **Full screen** (click again or press Esc to leave)
 
-<img src="images/about.png" width="20" height="20" alt="About"> **About**
+<img src="images/about.png" width="20" height="20" alt="About"> **About** (the version, who made Illuminator, and the credits and licenses of the code, film looks and optional models it uses; the credits scroll while the title and buttons stay in place)
 
 <img src="images/settings.png" width="20" height="20" alt="Settings"> **Settings**
 
