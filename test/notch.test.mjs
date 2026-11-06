@@ -56,3 +56,32 @@ test('a small picture is skipped', () => {
   const rgb = new Float32Array(100 * 100 * 3).fill(0.5);
   assert.deepEqual(removePeriodicPattern(rgb, 100, 100), []);
 });
+
+import { removePeriodicPatternRepeatedly } from '../app/js/core/notch.js';
+
+test('more peaks than one pass takes are removed by repeating it', () => {
+  const make = () => {
+    const { rgb, base } = picture(false);
+    // 14 patterns of different frequencies, each faint: more than the 10 one pass takes
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let p = 0;
+        for (let k = 0; k < 14; k++) p += 0.006 * Math.sin(2 * Math.PI * ((0.01 + 0.011 * k) * x + (0.27 + 0.012 * k) * y) + k);
+        const q = (base[y * W + x] + p) ** 2;
+        rgb.set([q, q, q], 3 * (y * W + x));
+      }
+    }
+    return { rgb, base };
+  };
+  const error = (rgb, base) => {
+    let e = 0;
+    for (let i = 0; i < W * H; i++) e += (Math.sqrt(rgb[3 * i]) - base[i]) ** 2;
+    return e;
+  };
+  const once = make();
+  removePeriodicPattern(once.rgb, W, H);
+  const again = make();
+  const removed = removePeriodicPatternRepeatedly(again.rgb, W, H);
+  assert.ok(removed.length > 10, `removed ${removed.length}`);
+  assert.ok(error(again.rgb, again.base) < error(once.rgb, once.base), 'repeating leaves less of the pattern');
+});

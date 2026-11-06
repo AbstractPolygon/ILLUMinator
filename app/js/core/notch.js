@@ -295,3 +295,16 @@ export function removePeriodicPattern(rgb, W, H, options = {}) {
   }
   return peaks;
 }
+
+// removePeriodicPattern repeated while it still finds peaks (at most `passes` times). One pass takes out the peaks it finds, but removing the strongest ones shows weaker ones
+// next to them (a pattern whose period drifts with depth, as in a blurred background at 3x, is a family of close peaks), and it takes at most `maxPeaks` at a time. Returns every
+// peak that was removed.
+export function removePeriodicPatternRepeatedly(rgb, W, H, options = {}, passes = 3) {
+  const all = [];
+  for (let k = 0; k < passes; k++) {
+    const found = removePeriodicPattern(rgb, W, H, options);
+    if (!found.length) break;
+    all.push(...found);
+  }
+  return all;
+}

@@ -13,7 +13,7 @@ import { encodeProcessed, decodeProcessed } from './core/processed-cache.js';
 import { hashKey, stillKeyText } from './core/still-cache.js';
 import { encodePng16 } from './core/png16.js';
 import { UPSCALE_MODELS, modelMethod, methodModel, modelState, downloadModel, removeModel, readModel } from './core/upscalemodels.js';
-import { aiUpscale, aiUpscaleAvailable } from './core/aiupscale.js';
+import { aiUpscale, aiUpscaleAvailable, denoiseRgb16, addGrain16 } from './core/aiupscale.js';
 import { DEPTH_MODELS, depthModelMethod, methodDepthModel, depthModelState, downloadDepthModel, removeDepthModel } from './core/depthmodels.js';
 import { setMemoryLimits, fitsMemory, memoryProblem, superResVram, exportRam } from './core/memorybudget.js';
 import { openFiles, openCalibrationFile, pickCameraFolder, pickFolder, isLightFieldName, findSidecar, download, native, NativeFile, CAMERA_IMPORT, LYTRO_USB_VENDOR, listCameraFolder, rememberCameraFolder, recallCameraFolder } from './platform.js';
@@ -1592,14 +1592,15 @@ async function renderAtPhotoSize() {
     }
     const W = Math.round(w * k);
     const H = Math.round(h * k);
-    const grown = await aiUpscale(model, () => readModel(model), rgb, w, h, showProgress);
+    const P = modelUpscaleParams();
+    const grown = await aiUpscale(model, () => readModel(model), denoiseRgb16(rgb, w, h, P.denoise), w, h, showProgress);
     hideProgress();
     let big = { rgb: grown.rgb, width: grown.width, height: grown.height };
     if (grown.width !== W) {
       const sized = upscaleBits16(grown.rgb, grown.width, grown.height, W, H, { method: 'lanczos', sharpen: 0 });
       if (sized) big = { rgb: sized, width: W, height: H };
     }
-    big = blendWithPlain(big, rgb, w, h, +$('upscale-strength').value / 100);
+    big = finishModelEnlargement(big, rgb, w, h, P);
     const out = new ImageData(big.width, big.height);
     for (let i = 0; i < big.width * big.height; i++) {
       out.data[4 * i] = big.rgb[3 * i] >> 8;
@@ -1622,6 +1623,23 @@ async function renderAtPhotoSize() {
   } finally {
     renderingAtSize = false;
   }
+}
+
+// The downloaded model's own settings (Render > Upscaling, kept per model): how much of its result is used, how much the picture is smoothed before it goes in, the
+// sharpening and the grain applied to what comes out.
+function modelUpscaleParams() {
+  return { strength: +$('upscale-strength').value / 100, denoise: +$('upscale-denoise').value / 100, sharpen: +$('upscale-sharpen').value / 100, grain: +$('upscale-grain').value / 100 };
+}
+
+// The model's enlargement `big` (16-bit RGB of the picture `rgb`, w x h) with the model settings applied: mixed with the plain enlargement, sharpened, grained.
+function finishModelEnlargement(big, rgb, w, h, P) {
+  big = blendWithPlain(big, rgb, w, h, P.strength);
+  if (P.sharpen > 0) {
+    const sharp = upscaleBits16(big.rgb, big.width, big.height, big.width, big.height, { method: 'lanczos', sharpen: P.sharpen });
+    if (sharp) big = { rgb: sharp, width: big.width, height: big.height };
+  }
+  if (P.grain > 0) big = { rgb: addGrain16(big.rgb, big.width, big.height, P.grain), width: big.width, height: big.height };
+  return big;
 }
 
 // `big` (the model's enlargement, 16-bit RGB) mixed with the plain Lanczos enlargement of `rgb` (w x h) of the same size: strength 1 is the model alone.
@@ -1903,7 +1921,7 @@ function setMode(mode) {
   const stack = !!(state.info && state.info.processed && state.info.processed.kind === 'focus');
   $('fullres-on').disabled = !raw || !camera;
   if (!raw || !camera) setFullResMode(false);
-  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-style', 'depth-blend', 'depth-model-blend', 'depth-objects', 'depth-objects-soft', 'lytro-depth']) $(id).disabled = !depthTools;
+  for (const id of ['depth-btn', 'depth-grey', 'depth-contrast', 'spread-show', 'depth-smooth', 'depth-hq', 'depth-style', 'depth-blend', 'depth-model-blend', 'depth-objects', 'depth-objects-soft', 'depth-model-smooth', 'depth-model-curve', 'lytro-depth']) $(id).disabled = !depthTools;
   // Photos imported with a depth map edited in Lytro Desktop can use it.
   $('lytro-depth-row').hidden = !(state.info && state.info.userDepth);
   for (const id of ['fstop', 'bokeh', 'dof-depth', 'highlights', 'spread', 'spread-smooth', 'spread-blur', 'tilt-on', 'tilt', 'tilt-rotation', 'tilt-show', ...BOKEH_SHAPE]) $(id).disabled = !depthTools || stack;
@@ -2328,15 +2346,53 @@ $('depth-smooth').onchange = () => {};
 // Normal or high quality depth: the depth map is measured again.
 $('depth-hq').onchange = () => applySettingsSoon();
 // The mix of the two depth measurements, shown for Blended only; the worker recombines without measuring again.
-const showDepthBlend = () => {
+const showDepthBlend = (loaded = false) => {
   $('depth-blend-row').hidden = $('depth-style').value !== 'combined';
-  $('depth-model-blend-row').hidden = !methodDepthModel($('depth-style').value);
+  showDepthModelControls(loaded);
 };
-$('depth-model-blend').oninput = () => {
-  showSliderValue($('depth-model-blend'));
+// Each depth model keeps its own settings (Model blend, Model smoothing, Model curve): the sliders show the chosen method's, and every model's are kept together in the
+// hidden `depth-model-params` (saved with the photo).
+const DEPTH_MODEL_SLIDERS = { blend: 'depth-model-blend', smooth: 'depth-model-smooth', curve: 'depth-model-curve' };
+let depthModelShown = null; // the method whose settings the sliders hold
+function rememberDepthModel() {
+  const all = readParams('depth-model-params');
+  all[depthModelShown ?? $('depth-style').value] = Object.fromEntries(Object.entries(DEPTH_MODEL_SLIDERS).map(([k, id]) => [k, +$(id).value]));
+  $('depth-model-params').value = JSON.stringify(all);
+}
+// `loaded`: the settings were just read from a photo's saved edits, so the sliders already hold the chosen method's values.
+function showDepthModelControls(loaded = false) {
+  const method = $('depth-style').value;
+  const model = !!methodDepthModel(method);
+  if (model && depthModelShown !== method) {
+    const saved = readParams('depth-model-params')[method];
+    if (!loaded || saved) {
+      for (const [k, id] of Object.entries(DEPTH_MODEL_SLIDERS)) {
+        $(id).value = saved && saved[k] !== undefined ? saved[k] : $(id).dataset.default;
+        showSliderValue($(id));
+      }
+    }
+  }
+  depthModelShown = model ? method : null;
+  for (const id of ['depth-model-blend-row', 'depth-model-smooth-row', 'depth-model-curve-row']) $(id).hidden = !model;
+}
+for (const id of Object.values(DEPTH_MODEL_SLIDERS)) {
+  $(id).oninput = () => {
+    showSliderValue($(id));
+    rememberDepthModel();
+    applySettingsSoon();
+  };
+  $(id).ondblclick = () => {
+    $(id).value = $(id).dataset.default;
+    showSliderValue($(id));
+    rememberDepthModel();
+    applySettingsSoon();
+  };
+}
+$('depth-style').onchange = () => {
+  if (depthModelShown) rememberDepthModel(); // the old model's settings, still in the sliders
+  showDepthBlend();
   applySettingsSoon();
 };
-$('depth-style').onchange = () => { showDepthBlend(); applySettingsSoon(); };
 $('depth-blend').oninput = () => {
   showSliderValue($('depth-blend'));
   applySettingsSoon();
@@ -5509,7 +5565,12 @@ function baseName() {
 function upscaleSettings() {
   // (an upscaling model works when a photo is saved; the picture on show, videos and 3D images use Lanczos)
   const method = $('upscale-method').value;
-  return { method: !method || methodModel(method) ? 'lanczos' : method, sharpen: +$('upscale-sharpen').value / 100 };
+  if (!method || methodModel(method)) {
+    // (the picture on show, videos and 3D images use the Lanczos settings, whatever the model's)
+    const p = readParams('upscale-params').lanczos || {};
+    return { method: 'lanczos', sharpen: (p.sharpen ?? 25) / 100, lobes: p.lobes ?? 3 };
+  }
+  return { method, sharpen: +$('upscale-sharpen').value / 100, lobes: +$('upscale-lobes').value };
 }
 
 // The scale a picture of w x h is shown at: the Photo Size for a picture, the Video Size (when it is a height, as 1080p) for an animation frame. At most 4096 px wide.
@@ -5603,7 +5664,8 @@ async function savePhotoRendered(name, model, k) {
       let big = null;
       if (model) {
         try {
-          const grown = await aiUpscale(model, () => readModel(model), rgb, width, height, showProgress);
+          const P = modelUpscaleParams();
+          const grown = await aiUpscale(model, () => readModel(model), denoiseRgb16(rgb, width, height, P.denoise), width, height, showProgress);
           hideProgress();
           big = grown;
           // to the exact Photo Size (the model makes 4 times; fewer needs a reduction)
@@ -5611,7 +5673,7 @@ async function savePhotoRendered(name, model, k) {
             const sized = upscaleBits16(grown.rgb, grown.width, grown.height, W, H, { method: 'lanczos', sharpen: 0 });
             big = sized ? { rgb: sized, width: W, height: H } : grown;
           }
-          big = blendWithPlain(big, rgb, width, height, +$('upscale-strength').value / 100);
+          big = finishModelEnlargement(big, rgb, width, height, P);
         } catch (err) {
           hideProgress();
           showNotice('Could not enlarge with the model', `${err && err.message ? err.message : err} The picture is enlarged with Lanczos instead.`);
@@ -5705,27 +5767,63 @@ $('video-quality').ondblclick = () => {
   showSliderValue($('video-quality'));
   scheduleSave();
 };
-$('upscale-sharpen').oninput = () => showSliderValue($('upscale-sharpen'));
-// Controls that belong to the chosen method: Model strength for the downloaded models.
-function showUpscaleControls() {
-  $('upscale-strength-row').hidden = !methodModel($('upscale-method').value);
+// Each upscaling method keeps its own settings (Sharpen, Lobes, Model strength, Clean up first, Grain): the sliders show the chosen method's, and every method's are kept
+// together in the hidden `upscale-params` (saved with the photo).
+const UPSCALE_SLIDERS = { sharpen: 'upscale-sharpen', lobes: 'upscale-lobes', strength: 'upscale-strength', denoise: 'upscale-denoise', grain: 'upscale-grain' };
+let upscaleShown = null; // the method whose settings the sliders hold
+function readParams(id) {
+  try {
+    const p = JSON.parse($(id).value || '{}');
+    return p && typeof p === 'object' ? p : {};
+  } catch {
+    return {};
+  }
 }
-$('upscale-strength').oninput = () => showSliderValue($('upscale-strength'));
-$('upscale-strength').ondblclick = () => {
-  $('upscale-strength').value = $('upscale-strength').dataset.default;
-  showSliderValue($('upscale-strength'));
+function rememberUpscale() {
+  const all = readParams('upscale-params');
+  all[upscaleShown ?? $('upscale-method').value] = Object.fromEntries(Object.entries(UPSCALE_SLIDERS).map(([k, id]) => [k, +$(id).value]));
+  $('upscale-params').value = JSON.stringify(all);
+}
+for (const id of Object.values(UPSCALE_SLIDERS)) {
+  $(id).oninput = () => {
+    showSliderValue($(id));
+    rememberUpscale();
+  };
+  $(id).ondblclick = () => {
+    $(id).value = $(id).dataset.default;
+    showSliderValue($(id));
+    rememberUpscale();
+    scheduleSave();
+  };
+}
+// The controls of the chosen method: Sharpen for all (FSR 1's is its RCAS sharpness), Lobes for Lanczos, and for a downloaded model Model strength, Clean up first and Grain.
+// `loaded`: the settings were just read from a photo's saved edits, so the sliders already hold the chosen method's values.
+function showUpscaleControls(loaded = false) {
+  const method = $('upscale-method').value;
+  const model = !!methodModel(method);
+  if (upscaleShown !== method) {
+    const saved = readParams('upscale-params')[method];
+    if (!loaded || saved) {
+      for (const [k, id] of Object.entries(UPSCALE_SLIDERS)) {
+        $(id).value = saved && saved[k] !== undefined ? saved[k] : $(id).dataset.default;
+        showSliderValue($(id));
+      }
+    }
+    upscaleShown = method;
+  }
+  $('upscale-lobes-row').hidden = method !== 'lanczos';
+  for (const id of ['upscale-strength-row', 'upscale-denoise-row', 'upscale-grain-row']) $(id).hidden = !model;
+  $('upscale-sharpen-label').textContent = method === 'fsr' ? 'Sharpness (RCAS)' : 'Sharpen';
+}
+$('upscale-method').addEventListener('change', () => {
+  rememberUpscale(); // the old method's settings, still in the sliders
+  showUpscaleControls();
   scheduleSave();
-};
-$('upscale-method').addEventListener('change', showUpscaleControls);
+});
 // The picture shown follows the Photo Size, Video Size and Upscaling settings.
 for (const id of ['photo-size', 'video-size', 'upscale-method', 'upscale-sharpen']) {
   $(id).addEventListener('change', () => { if (state.lastImage && !state.lastImage.pair && !state.depthShown) draw(state.lastImage); });
 }
-$('upscale-sharpen').ondblclick = () => {
-  $('upscale-sharpen').value = $('upscale-sharpen').dataset.default;
-  showSliderValue($('upscale-sharpen'));
-  scheduleSave();
-};
 
 // The crop, rotation and this frame's pivot, pan and zoom, for frame i of
 // the animation (an image w x h), or null when there is nothing to apply.
@@ -6617,6 +6715,8 @@ async function applySettings() {
     depthStyle: $('depth-style').value,
     depthBlend: $('depth-blend').value / 100,
     depthModelBlend: $('depth-model-blend').value / 100,
+    depthModelSmooth: $('depth-model-smooth').value / 100,
+    depthModelCurve: $('depth-model-curve').value / 100,
     depthContrast: $('depth-contrast').value / 100,
     depthObjects: $('depth-objects').checked,
     depthObjectSoft: $('depth-objects-soft').value / 100,
@@ -6757,9 +6857,11 @@ async function applyEdits(info, saved) {
     showAnimationEnabled();
     showVideoCodecs();
     showPhotoFormat();
-    showUpscaleControls();
+    upscaleShown = null;
+    showUpscaleControls(true);
     showObjectSoft();
-    showDepthBlend();
+    depthModelShown = null;
+    showDepthBlend(true);
     maskSel = getMasks().length ? 0 : -1;
     $('mask-show').checked = false;
     renderMasks();
@@ -7003,7 +7105,7 @@ function showSliderValue(input) {
   else if (input.id === 'ml-angle') out.textContent = `${v}°`;
   else if (input.id === 'frame-zoom') out.textContent = `${v}%`;
   else if (input.id === 'video-quality') out.textContent = `${v} Mbit/s`;
-  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen', 'upscale-strength'].includes(input.id)) out.textContent = `${v}`;
+  else if (['photo-quality', 'bokeh-blades', 'stereo-baseline', 'upscale-sharpen', 'upscale-strength', 'upscale-lobes', 'upscale-denoise', 'upscale-grain', 'depth-model-smooth', 'depth-model-curve'].includes(input.id)) out.textContent = `${v}`;
   else if (input.id === 'mx-strength' || input.id === 'lut-amount') out.textContent = `${v}%`;
   else if (input.id === 'mx-exposure') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)} EV`;
   else if (input.id === 'md-near' || input.id === 'md-far') out.textContent = `${sign}${Math.abs(v / 100).toFixed(2)}`;

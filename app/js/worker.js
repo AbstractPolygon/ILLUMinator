@@ -20,10 +20,10 @@ import { DEPTH_PASSES, measureMatch, viewColors } from './core/depthmatch.js';
 import { measureMatchGpu, engineSolveGpu } from './gpu/depthmatch.js';
 import { combineDepth } from './core/depthcombine.js';
 import { VERSION } from './version.js';
-import { removePeriodicPattern } from './core/notch.js';
+import { removePeriodicPattern, removePeriodicPatternRepeatedly } from './core/notch.js';
 import { snapDepthEdges, snapToObjects, softenObjectEdges, EDGE_SNAP_DEPTH } from './core/segments.js';
 import { methodDepthModel, readDepthModel } from './core/depthmodels.js';
-import { runDepthModel, fitModelDepth, fuseModelDepth } from './core/depthmodel.js';
+import { runDepthModel, fitModelDepth, shapeModelDepth, fuseModelDepth } from './core/depthmodel.js';
 import { shapeDepthContrast, setDepthStyle, estimateDepth, focusAtPoint, smoothDepth, finishDepth, depthGuide, depthColorGuide, luminance, brightnessFloor, DEPTH_SEARCH, DEPTH_LCOST, DEPTH_CBCA, DEPTH_TRWS, DEPTH_COARSE, DEPTH_STEP, DEPTH_REGIONS, combineCoarse } from './core/depth.js';
 import { applyDepthOfField } from './core/dof.js';
 import { defringe, autoDefringe } from './core/defringe.js';
@@ -1268,7 +1268,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     }
   }
   // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 28 at 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings.
-  if (scale >= 3 && !debugFlags().noNotch) removePeriodicPattern(out, W, H, { prominence: 10 });
+  if (scale >= 3 && !debugFlags().noNotch) removePeriodicPatternRepeatedly(out, W, H, { prominence: 6 });
   if (hook('edofLinear')) hook('edofLinear')(out, W, H);
   setHook('lytroStats', sp.stats);
   const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
@@ -1301,7 +1301,7 @@ async function renderFullSensor({ alpha, allInFocus, u, v, scale, passes, base, 
   });
   state.lensOffsets = sr.lensOffsets;
   // What the lens grid correction leaves of the dotted pattern (core/notch.js).
-  removePeriodicPattern(sr.rgb, sr.width, sr.height);
+  removePeriodicPatternRepeatedly(sr.rgb, sr.width, sr.height);
   return sr;
 }
 
@@ -1458,6 +1458,19 @@ function resolveDepthStyle(v) {
   return v && v !== 'auto' && v !== 'guided' ? v : (engineDepthAvailable() ? 'match' : 'combined');
 }
 
+// The model's relative depth with the model's smoothing and curve settings applied, and fitted to the measured depth (kept until a setting or the measurement changes).
+function shapedModelDepth() {
+  const m = state.modelDepth;
+  const { outW, outH } = state.sampler;
+  const smooth = state.settings.depthModelSmooth ?? 0;
+  const curve = state.settings.depthModelCurve ?? 0.5;
+  if (!m.shaped || m.shaped.smooth !== smooth || m.shaped.curve !== curve || m.shaped.raw !== state.depthRaw) {
+    const rel = shapeModelDepth(m.rel, outW, outH, { smooth, curve });
+    m.shaped = { smooth, curve, raw: state.depthRaw, rel, fit: fitModelDepth(rel, state.depthRaw.alpha, state.depthRaw.confidence, outW, outH) };
+  }
+  return m.shaped;
+}
+
 // A depth model (Camera > Depth > Depth method, once downloaded in Settings): its relative depth for the picture, fitted to the measurement, mixed in by Model blend. The
 // model runs once per photo and model; the blend (and the smoothing, contrast and the rest) is applied with applyDepthSmoothing.
 async function ensureModelDepth(id) {
@@ -1469,7 +1482,7 @@ async function ensureModelDepth(id) {
     try {
       const rel = await runDepthModel(model, readDepthModel, centerView(), outW, outH, (stage, p) => post({ id, type: 'progress', stage, progress: p }));
       if (state.sampler !== sampler || !state.depthRaw) return;
-      state.modelDepth = { id: model.id, sampler, rel, fit: fitModelDepth(rel, state.depthRaw.alpha, state.depthRaw.confidence, outW, outH) };
+      state.modelDepth = { id: model.id, sampler, rel, shaped: null };
     } catch (e) {
       state.modelDepth = null;
       post({ id, type: 'notice', message: `The depth model could not run: ${(e && e.message) || e}` });
@@ -1487,7 +1500,9 @@ async function settings({ id, settings: s }) {
   const contrastChanged = s.depthContrast !== undefined && s.depthContrast !== (state.settings.depthContrast ?? 0);
   const modelOf = (v) => (methodDepthModel(v) ? v : null);
   const modelChanged = s.depthStyle !== undefined && modelOf(s.depthStyle) !== modelOf(state.settings.depthStyle);
-  const modelBlendChanged = s.depthModelBlend !== undefined && s.depthModelBlend !== (state.settings.depthModelBlend ?? 0.7);
+  const modelBlendChanged = (s.depthModelBlend !== undefined && s.depthModelBlend !== (state.settings.depthModelBlend ?? 0.7))
+    || (s.depthModelSmooth !== undefined && s.depthModelSmooth !== (state.settings.depthModelSmooth ?? 0))
+    || (s.depthModelCurve !== undefined && s.depthModelCurve !== (state.settings.depthModelCurve ?? 0.5));
   const objectSoftChanged = s.depthObjectSoft !== undefined && s.depthObjectSoft !== (state.settings.depthObjectSoft ?? 0.3);
   const qualityChanged = s.depthQuality !== undefined && s.depthQuality !== (state.settings.depthQuality ?? 'normal');
   const styleChanged = s.depthStyle !== undefined && (s.depthStyle === 'guided') !== (state.settings.depthStyle === 'guided') || (s.depthStyle !== undefined && resolveDepthStyle(s.depthStyle) !== resolveDepthStyle(state.settings.depthStyle));
@@ -2443,7 +2458,10 @@ function applyDepthSmoothing() {
   const soft = (state.settings.depthObjectSoft ?? 0.3) * OBJECT_SOFT_MAX;
   if (state.settings.depthObjects && soft > 0 && state.objects && state.objects.w === outW && state.objects.h === outH) smoothed = softenObjectEdges(smoothed, state.objects.labels, outW, outH, soft);
   const model = methodDepthModel(state.settings.depthStyle);
-  if (model && state.modelDepth && state.modelDepth.id === model.id && state.modelDepth.sampler === state.sampler) smoothed = fuseModelDepth(smoothed, state.modelDepth.rel, state.modelDepth.fit, state.settings.depthModelBlend ?? 0.7);
+  if (model && state.modelDepth && state.modelDepth.id === model.id && state.modelDepth.sampler === state.sampler) {
+    const shaped = shapedModelDepth();
+    smoothed = fuseModelDepth(smoothed, shaped.rel, shaped.fit, state.settings.depthModelBlend ?? 0.7);
+  }
   // Moved by the focus offset found for this photo (see superRes).
   const shift = (state.focusOffset || 0) * LAMBDA_TO_ALPHA + rayWarpShift();
   const field = rayWarpField(outW, outH);

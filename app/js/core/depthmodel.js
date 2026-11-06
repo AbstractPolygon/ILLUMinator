@@ -152,3 +152,49 @@ export function fuseModelDepth(measured, rel, fit, blend) {
   }
   return out;
 }
+
+// The model's relative depth shaped by the model's own settings before it is fitted to the measurement: `smooth` (0..1) blurs it (a box of up to 2% of the picture's width,
+// twice) so a noisy or blocky model gives gentler depth; `curve` (0..1, 0.5 leaves it as it is) bends it: below 0.5 pulls the middle distances toward the far end, above
+// toward the near end (the depth's gamma, 0.5 to 2). Larger is nearer, as in the model's output.
+export function shapeModelDepth(rel, w, h, { smooth = 0, curve = 0.5 } = {}) {
+  let out = rel;
+  const r = Math.round(smooth * 0.02 * w);
+  if (r > 0) {
+    const blur = (src) => {
+      const tmp = new Float32Array(w * h);
+      const dst = new Float32Array(w * h);
+      const n = 2 * r + 1;
+      for (let y = 0; y < h; y++) {
+        let sum = 0;
+        for (let x = -r; x <= r; x++) sum += src[y * w + Math.min(w - 1, Math.max(0, x))];
+        for (let x = 0; x < w; x++) {
+          tmp[y * w + x] = sum / n;
+          sum += src[y * w + Math.min(w - 1, x + r + 1)] - src[y * w + Math.max(0, x - r)];
+        }
+      }
+      for (let x = 0; x < w; x++) {
+        let sum = 0;
+        for (let y = -r; y <= r; y++) sum += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+        for (let y = 0; y < h; y++) {
+          dst[y * w + x] = sum / n;
+          sum += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+        }
+      }
+      return dst;
+    };
+    out = blur(blur(out));
+  }
+  const gamma = 2 ** ((0.5 - curve) * 2);
+  if (Math.abs(gamma - 1) > 1e-3) {
+    const sorted = Float32Array.from(out).sort();
+    const lo = sorted[Math.floor(0.01 * (sorted.length - 1))];
+    const hi = sorted[Math.floor(0.99 * (sorted.length - 1))];
+    const span = hi - lo;
+    if (span > 1e-9) {
+      const bent = new Float32Array(out.length);
+      for (let i = 0; i < bent.length; i++) bent[i] = lo + span * Math.max(0, Math.min(1.2, (out[i] - lo) / span)) ** gamma;
+      out = bent;
+    }
+  }
+  return out;
+}

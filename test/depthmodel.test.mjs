@@ -67,3 +67,22 @@ test('the fit finds the measurement in the model, robust to where they disagree'
   // a flat model has nothing to fit
   assert.equal(fitModelDepth(new Float32Array(w * h), measured, null, w, h), null);
 });
+
+import { shapeModelDepth } from '../app/js/core/depthmodel.js';
+
+test('model smoothing blurs the model depth and the curve bends it', () => {
+  const w = 40;
+  const h = 30;
+  const rel = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) rel[y * w + x] = x < 20 ? 0 : 1;
+  const same = shapeModelDepth(rel, w, h, {});
+  assert.deepEqual([...same], [...rel], 'defaults leave it as it is');
+  const blurred = shapeModelDepth(rel, w, h, { smooth: 1 });
+  const mid = blurred[15 * w + 19];
+  assert.ok(mid > 0.05 && mid < 0.95, `the edge is softened ${mid}`);
+  const ramp = Float32Array.from({ length: w * h }, (_, i) => (i % w) / (w - 1));
+  const mid50 = shapeModelDepth(ramp, w, h, {})[5 * w + 20];
+  const toFar = shapeModelDepth(ramp, w, h, { curve: 0.25 })[5 * w + 20];
+  const toNear = shapeModelDepth(ramp, w, h, { curve: 0.75 })[5 * w + 20];
+  assert.ok(toFar < mid50 && mid50 < toNear, `${toFar} < ${mid50} < ${toNear}`);
+});

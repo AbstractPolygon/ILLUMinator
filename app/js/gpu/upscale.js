@@ -21,6 +21,7 @@ precision highp float;
 uniform sampler2D uSrc;
 uniform int uAxis;
 uniform int uLanczos;
+uniform float uLobes;
 uniform float uRatio;
 out vec4 outColor;
 const float PI = 3.14159265;
@@ -41,7 +42,7 @@ void main() {
   float pos = (float(uAxis == 0 ? p.x : p.y) + 0.5) * uRatio - 0.5;
   // Reducing: the filter widens with the reduction (no aliasing).
   float scale = clamp(uRatio, 1.0, 8.0);
-  float radius = (uLanczos == 1 ? 3.0 : 1.0) * scale;
+  float radius = (uLanczos == 1 ? uLobes : 1.0) * scale;
   float start = floor(pos - radius) + 1.0;
   int taps = int(ceil(2.0 * radius)) + 1;
   vec4 sum = vec4(0.0);
@@ -50,7 +51,7 @@ void main() {
     if (t >= taps) break;
     float i = start + float(t);
     float d = (pos - i) / scale;
-    float w = uLanczos == 1 ? (abs(d) < 3.0 ? sinc(d) * sinc(d / 3.0) : 0.0) : max(0.0, 1.0 - abs(d));
+    float w = uLanczos == 1 ? (abs(d) < uLobes ? sinc(d) * sinc(d / uLobes) : 0.0) : max(0.0, 1.0 - abs(d));
     int k = int(clamp(i, 0.0, float(n - 1)));
     sum += texelFetch(uSrc, uAxis == 0 ? ivec2(k, p.y) : ivec2(p.x, k), 0) * w;
     wsum += w;
@@ -296,11 +297,11 @@ function pass(gl, program, src, target, w, h, uniforms) {
 // Enlarges (or reduces) `source` (a canvas, ImageBitmap or ImageData) to W x H and returns
 // a canvas holding the result. The returned canvas may be reused by the next
 // call: draw or save it before upscaling again.
-export function upscaleImage(source, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
+export function upscaleImage(source, W, H, { method = 'lanczos', sharpen = 0, lobes = 3 } = {}) {
   const w = source.width;
   const h = source.height;
   const c = setup();
-  if (!c || W > c.max || H > c.max) return upscaleOnCpu(source, W, H, { method, sharpen });
+  if (!c || W > c.max || H > c.max) return upscaleOnCpu(source, W, H, { method, sharpen, lobes });
   const { gl } = c;
   c.canvas.width = W;
   c.canvas.height = H;
@@ -318,8 +319,8 @@ export function upscaleImage(source, W, H, { method = 'lanczos', sharpen = 0 } =
   const src = texture(gl, w, h, false, source);
   const rows = texture(gl, W, h, c.float);
   const both = sharpen > 0 ? texture(gl, W, H, c.float) : null;
-  pass(gl, c.resample, src, rows, W, h, { uAxis: ['uniform1i', 0], uLanczos: ['uniform1i', lanczos], uRatio: ['uniform1f', w / W] });
-  pass(gl, c.resample, rows, both, W, H, { uAxis: ['uniform1i', 1], uLanczos: ['uniform1i', lanczos], uRatio: ['uniform1f', h / H] });
+  pass(gl, c.resample, src, rows, W, h, { uAxis: ['uniform1i', 0], uLanczos: ['uniform1i', lanczos], uLobes: ['uniform1f', lobes], uRatio: ['uniform1f', w / W] });
+  pass(gl, c.resample, rows, both, W, H, { uAxis: ['uniform1i', 1], uLanczos: ['uniform1i', lanczos], uLobes: ['uniform1f', lobes], uRatio: ['uniform1f', h / H] });
   if (both) {
     const radius = Math.min(4, Math.max(1, Math.round(Math.max(W / w, H / h))));
     pass(gl, c.sharpen, both, null, W, H, { uRadius: ['uniform1i', radius], uAmount: ['uniform1f', sharpen * 1.5] });
@@ -345,7 +346,7 @@ function upscaleOnCpu(source, W, H, opts) {
 // The same enlarging as upscaleImage for a picture at 16 bits per channel: `rgb` is a Uint16Array (w * h * 3, the first row the top). Returns the enlarged picture the same
 // way (W * H * 3), or null where the card cannot do it (no float render targets, a size beyond its textures): the caller saves the picture as it is. Everything between the
 // first and the last pass is in 32-bit floats (16-bit floats above about 24 million pixels, to keep the memory in bounds), and the last pass runs twice, for the two bytes.
-export function upscaleBits16(rgb, w, h, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
+export function upscaleBits16(rgb, w, h, W, H, { method = 'lanczos', sharpen = 0, lobes = 3 } = {}) {
   const c = setup();
   if (!c || !c.float || Math.max(W, H, w, h) > c.max) return null;
   const { gl } = c;
@@ -389,8 +390,8 @@ export function upscaleBits16(rgb, w, h, W, H, { method = 'lanczos', sharpen = 0
     } else {
       const lanczos = method === 'lanczos' || method === 'fsr' ? 1 : 0;
       const rows = floats(W, h, big32);
-      pass(gl, c.resample, src, rows, W, h, { uAxis: ['uniform1i', 0], uLanczos: ['uniform1i', lanczos], uRatio: ['uniform1f', w / W] });
-      const vertical = (target, bytePass) => pass(gl, c.resample, rows, target, W, H, { uAxis: ['uniform1i', 1], uLanczos: ['uniform1i', lanczos], uRatio: ['uniform1f', h / H], uBytePass: ['uniform1i', bytePass] });
+      pass(gl, c.resample, src, rows, W, h, { uAxis: ['uniform1i', 0], uLanczos: ['uniform1i', lanczos], uLobes: ['uniform1f', lobes], uRatio: ['uniform1f', w / W] });
+      const vertical = (target, bytePass) => pass(gl, c.resample, rows, target, W, H, { uAxis: ['uniform1i', 1], uLanczos: ['uniform1i', lanczos], uLobes: ['uniform1f', lobes], uRatio: ['uniform1f', h / H], uBytePass: ['uniform1i', bytePass] });
       if (sharpen > 0) {
         const both = floats(W, H, big32);
         vertical(both, 0);

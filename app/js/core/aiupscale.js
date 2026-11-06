@@ -113,3 +113,62 @@ export async function aiUpscale(model, readModel, rgb, w, h, onProgress = () => 
   return { rgb: big, width: w * model.scale, height: h * model.scale };
 }
 
+
+// Before enlarging: a light edge-preserving smoothing of the picture (16-bit RGB, 3 per pixel), so the model does not take noise for texture and sharpen it. `amount` 0..1 is
+// how much of the smoothed picture replaces the original; the smoothing keeps strong edges (a 3 x 3 neighbourhood weighted by how close each neighbour's color is).
+export function denoiseRgb16(rgb, w, h, amount) {
+  if (!(amount > 0)) return rgb;
+  const out = new Uint16Array(rgb.length);
+  const sigma = 0.03 + 0.1 * amount;
+  const k = -1 / (2 * sigma * sigma);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = 3 * (y * w + x);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let ws = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = Math.min(h - 1, Math.max(0, y + dy));
+        for (let dx = -1; dx <= 1; dx++) {
+          const q = 3 * (yy * w + Math.min(w - 1, Math.max(0, x + dx)));
+          const dr = (rgb[q] - rgb[p]) / 65535;
+          const dg = (rgb[q + 1] - rgb[p + 1]) / 65535;
+          const db = (rgb[q + 2] - rgb[p + 2]) / 65535;
+          const wt = Math.exp(k * (dr * dr + dg * dg + db * db));
+          r += wt * rgb[q];
+          g += wt * rgb[q + 1];
+          b += wt * rgb[q + 2];
+          ws += wt;
+        }
+      }
+      out[p] = rgb[p] + (r / ws - rgb[p]) * amount;
+      out[p + 1] = rgb[p + 1] + (g / ws - rgb[p + 1]) * amount;
+      out[p + 2] = rgb[p + 2] + (b / ws - rgb[p + 2]) * amount;
+    }
+  }
+  return out;
+}
+
+// After enlarging: fine film-like grain added to the 16-bit RGB picture, strongest in the mid-tones, because a model's result is smoother than a photograph. `amount` 0..1;
+// the same picture always gets the same grain (it comes from the pixel's position).
+export function addGrain16(rgb, w, h, amount) {
+  if (!(amount > 0)) return rgb;
+  const out = new Uint16Array(rgb.length);
+  const peak = amount * 0.035 * 65535;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = 3 * (y * w + x);
+      // two hashes of the position, added: a triangular distribution around zero
+      let a = Math.imul(x * 73856093 ^ y * 19349663, 0x45d9f3b) >>> 0;
+      a = ((a >>> 16) ^ a) >>> 0;
+      let b = Math.imul(x * 83492791 ^ y * 2654435761, 0x2c1b3c6d) >>> 0;
+      b = ((b >>> 16) ^ b) >>> 0;
+      const noise = ((a & 0xffff) + (b & 0xffff)) / 65535 - 1;
+      const l = (0.2126 * rgb[p] + 0.7152 * rgb[p + 1] + 0.0722 * rgb[p + 2]) / 65535;
+      const d = noise * peak * (4 * l * (1 - l));
+      for (let c = 0; c < 3; c++) out[p + c] = Math.min(65535, Math.max(0, rgb[p + c] + d));
+    }
+  }
+  return out;
+}

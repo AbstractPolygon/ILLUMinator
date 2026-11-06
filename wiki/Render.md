@@ -27,6 +27,11 @@ Optional *upscaling models* (Real-ESRGAN general, fast, 5 MB; SPAN x4, fast and 
 
 - *Sharpen:* sharpens the enlarged picture to bring back crispness lost in enlarging; 0 for none (25 by default). With FSR 1 it sets the strength of FSR's built-in sharpening. It has no effect at *Native* size.
 
+Each method keeps its own settings: the sliders under *Method* show the chosen method's, and changing the method brings back the values you last used with it (all of them are saved with the photo). Beyond *Sharpen* (called *Sharpness (RCAS)* for FSR 1):
+
+- *Lobes* (Lanczos only, 2 to 4, 3 by default): the filter's width. 2 is softer with less ringing at edges, 4 is crisper with more.
+- For a downloaded model: *Model strength* (how much of the model's result is used, the rest being the plain enlargement), *Clean up first* (smooths noise in the picture before the model sees it, keeping strong edges, so the model does not take noise for texture; 0 for none) and *Grain* (fine film-like grain on the result, mostly in the mid-tones, because a model's picture is smoother than a photograph; 0 for none). *Sharpen* then sharpens the model's enlargement.
+
 The pictures in the app are enlarged the same way: the picture on screen is shown at the Photo *Size*, and animation frames at the Video *Size* (when it is a height such as 1080p), with these settings, so what you see is what is saved or exported. (Not while a slider or the picture is being dragged.)
 
 Enlarging adds pixels, not detail. For the most detail, render with *Full sensor* and enlarge that.

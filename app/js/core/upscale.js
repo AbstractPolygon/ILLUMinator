@@ -2,7 +2,7 @@
 // size for saved photos and videos. Three methods:
 //  - 'fsr': AMD FSR 1 (core/fsr.js), edge-adaptive enlarging with its own
 //    sharpening (RCAS) in place of the unsharp mask; reductions use Lanczos;
-//  - 'lanczos': a Lanczos-3 filter, sharper than ordinary smoothing and
+//  - 'lanczos': a Lanczos filter (3 lobes; `lobes` 2 is softer with less ringing, 4 crisper), sharper than ordinary smoothing and
 //    without its softness (overshoot at edges is clamped);
 //  - 'smooth': bilinear, the browser's ordinary enlarging.
 // `sharpen` (0..1) then adds an unsharp mask scaled to the enlargement, to
@@ -11,7 +11,7 @@
 
 import { easu, rcas, rcasStrength } from './fsr.js';
 
-const A = 3;
+const A = 3; // the Lanczos filter's lobes (`lobes` picks another)
 
 function sinc(x) {
   if (x === 0) return 1;
@@ -21,12 +21,12 @@ function sinc(x) {
 
 // For each output position along one axis: the first input index and the
 // normalized weights of the input samples it takes.
-function weights(inSize, outSize, method) {
+function weights(inSize, outSize, method, lobes = A) {
   const ratio = inSize / outSize;
   // Reducing: the filter widens with the reduction, so every input pixel
   // counts and fine detail does not alias.
   const scale = Math.max(1, ratio);
-  const radius = (method === 'lanczos' ? A : 1) * scale;
+  const radius = (method === 'lanczos' ? lobes : 1) * scale;
   const taps = Math.ceil(2 * radius) + 1;
   const first = new Int32Array(outSize);
   const w = new Float32Array(outSize * taps);
@@ -38,7 +38,7 @@ function weights(inSize, outSize, method) {
     for (let t = 0; t < taps; t++) {
       const d = (center - (start + t)) / scale;
       const v = method === 'lanczos'
-        ? (Math.abs(d) < A ? sinc(d) * sinc(d / A) : 0)
+        ? (Math.abs(d) < lobes ? sinc(d) * sinc(d / lobes) : 0)
         : Math.max(0, 1 - Math.abs(d));
       w[o * taps + t] = v;
       sum += v;
@@ -52,7 +52,7 @@ const clampIndex = (i, n) => (i < 0 ? 0 : i >= n ? n - 1 : i);
 
 // Enlarges (or reduces) `img` ({ width, height, data: RGBA bytes }) to
 // width W and height H. Returns { width, height, data: Uint8ClampedArray }.
-export function upscale(img, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
+export function upscale(img, W, H, { method = 'lanczos', sharpen = 0, lobes = A } = {}) {
   const { width: w, height: h, data } = img;
   if (W === w && H === h && !sharpen) return { width: w, height: h, data: new Uint8ClampedArray(data) };
   if (method === 'fsr') {
@@ -60,7 +60,7 @@ export function upscale(img, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
     method = 'lanczos';
   }
   // Rows first: w x h -> W x h (floats), then columns: -> W x H.
-  const X = weights(w, W, method);
+  const X = weights(w, W, method, lobes);
   const mid = new Float32Array(W * h * 4);
   for (let y = 0; y < h; y++) {
     const row = y * w * 4;
@@ -86,7 +86,7 @@ export function upscale(img, W, H, { method = 'lanczos', sharpen = 0 } = {}) {
       mid[j + 3] = a;
     }
   }
-  const Y = weights(h, H, method);
+  const Y = weights(h, H, method, lobes);
   const out = new Float32Array(W * H * 4);
   for (let o = 0; o < H; o++) {
     const s = Y.first[o];
