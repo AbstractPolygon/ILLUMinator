@@ -3,6 +3,7 @@
 // the picture, and only the middle is kept. `run(chw)` takes one window as a float32 [3, tile, tile] array (RGB 0..1) and returns [3, tile * scale, tile * scale].
 
 import { fitsMemory, memoryProblem, modelRam } from './memorybudget.js';
+import { debugFlags } from './debugflags.js';
 
 export const AI_TILE = 256;
 export const AI_PAD = 16;
@@ -79,7 +80,7 @@ export const aiUpscaleAvailable = () => hasWebGpu();
 export async function loadUpscaleSession(model, readModel) {
   if (!sessions.has(model.id)) {
     sessions.set(model.id, (async () => {
-      if (!(await hasWebGpu()) && !(globalThis.__lytro && globalThis.__lytro.aiCpu)) throw new Error('Upscaling models need a graphics card with WebGPU.');
+      if (!(await hasWebGpu()) && !debugFlags().aiCpu) throw new Error('Upscaling models need a graphics card with WebGPU.');
       const ort = await import('../../vendor/ort/ort.webgpu.min.mjs');
       ort.env.wasm.wasmPaths = new URL('../../vendor/ort/', import.meta.url).href;
       ort.env.wasm.numThreads = 1;

@@ -30,6 +30,7 @@ import { TRACKS, PRESETS, FPS as DEFAULT_FPS, emptyAnimation, parseAnimation, se
 let KEY_FPS = DEFAULT_FPS;
 import { curveEditor } from './ui/curve-editor.js';
 import { geometry, isIdentity, apply as applyMatrix, invert, rotateOrientation, flipOrientation, flipVerticalOrientation, fitAspect, FULL_CROP } from './core/geometry.js';
+import { hook } from './core/debugflags.js';
 
 const $ = (id) => document.getElementById(id);
 const engine = new Engine();
@@ -1154,7 +1155,7 @@ const sharp = { running: false, token: 0 };
 function sharpWanted() {
   const info = state.info;
   if (!info || !info.hasRaw || state.mode !== 'camera' || !showsCamera() || state.fullResMode || state.playing || drag.on || stereoShown()) return false;
-  if (!globalThis.__sharpAnyGpu && /swiftshader|llvmpipe|software|softpipe|^CPU/i.test(info.renderer || 'CPU')) return false;  // (the flag: tests on a software renderer)
+  if (!hook('sharpAnyGpu') && /swiftshader|llvmpipe|software|softpipe|^CPU/i.test(info.renderer || 'CPU')) return false;  // (the flag: tests on a software renderer)
   const lens = apertureFor(fNumber());
   if (lens.aperture !== 0 || lens.dof !== 0) return false;
   const size = info.stillSizes && info.stillSizes[SHARP_SCALE];

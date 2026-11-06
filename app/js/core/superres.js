@@ -17,6 +17,7 @@ import { geometryAt } from './geometrytable.js';
 import { lensWarp } from './lens.js';
 import { lensRange, lensCenter, toLocal } from './lenslet.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
+import { hook, setHook } from './debugflags.js';
 
 const BINS = 17;
 
@@ -681,7 +682,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
   function reduceRobust(lists, owners, accY, wsum, accY2) {
     const { minCount, sigma, cut, capacity: CAP } = ROBUST_EDGE;
     const keys = new Float32Array(CAP);
-    const st = (globalThis.__robustStats = { flagged: owners.length, listed: 0, gated: 0, dropped: 0, rays: 0, sumN: 0 });
+    const st = setHook('robustStats', { flagged: owners.length, listed: 0, gated: 0, dropped: 0, rays: 0, sumN: 0 });
     for (let sl = 0; sl < owners.length; sl++) {
       const n = lists.count[sl];
       if (!n) continue;
@@ -749,8 +750,8 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
     for (let p = 0; p < W * H; p++) sharpY[p] = (r.accY[p] + upY[p] * lambda) / (r.wsum[p] + lambda);
     ({ accY, wsum } = r);
   }
-  if (globalThis.__depthProbe && allInFocus && depth) {
-    const hook = globalThis.__depthProbe;
+  if (hook('depthProbe') && allInFocus && depth) {
+    const hook = hook('depthProbe');
     const table = lensTable(g, cam);
     const est = hook.makeEst(W, H, sharpY, upY);
     const deltas = hook.deltas;
@@ -772,7 +773,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
       return splatOnCpu(null, null, null, true);
     });
     rayDepth = depth;
-    if (globalThis.__focus) {
+    if (hook('focus')) {
       // Debug: how well the rays agree with the depth as is (lower: better focus).
       const dis = rayDisagreement(renders[0], W, H);
       let sum = 0;
@@ -783,7 +784,7 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
           if (upY[q] > 0.02 && dis[q] < 9) { sum += dis[q]; n++; }
         }
       }
-      globalThis.__focus.val = n ? sum / n : NaN;
+      hook('focus').val = n ? sum / n : NaN;
     }
     bestDis = snapBlend(renders, upY, lambda, W, H, sharpY);
   }
@@ -818,12 +819,12 @@ export function renderSuperRes(raw, cam, dev, sampler, options) {
         D[j * W + k] = sampleDepth(rayDepth, bw, bh, (sx / scale) * detail, (sy / scale) * detail) / LAMBDA_TO_ALPHA;
       }
     }
-    if (globalThis.__earStats) { let m = 0; let dsteps = 0; for (let p = 0; p < W * H; p++) { m += sharpY[p]; if (p + 1 < W * H && Math.abs(D[p + 1] - D[p]) > EDGE_ARTIFACT.depth) dsteps++; } globalThis.__earStats.meanY = m / (W * H); globalThis.__earStats.depthSteps = dsteps; }
+    if (hook('earStats')) { let m = 0; let dsteps = 0; for (let p = 0; p < W * H; p++) { m += sharpY[p]; if (p + 1 < W * H && Math.abs(D[p + 1] - D[p]) > EDGE_ARTIFACT.depth) dsteps++; } hook('earStats').meanY = m / (W * H); hook('earStats').depthSteps = dsteps; }
     edgeArtifactReduce(sharpY, W, H, D);
   }
   const pattern = removeLatticePattern(sharpY, upY, focus, wsum, W, H, lattice);
   if (bestDis) {
-    if (globalThis.__disStats) { const a = Float32Array.from(bestDis).sort(); globalThis.__disStats = [0.5, 0.75, 0.9, 0.95, 0.99].map((q) => a[Math.floor(q * (a.length - 1))]); }
+    if (hook('disStats')) { const a = Float32Array.from(bestDis).sort(); setHook('disStats', [0.5, 0.75, 0.9, 0.95, 0.99].map((q) => a[Math.floor(q * (a.length - 1))])); }
     smoothDisagreeing(sharpY, bestDis, W, H, scale);
   }
   sharpenLuma(sharpY, W, H, scale);
@@ -918,7 +919,7 @@ export function edgeArtifactReduce(a, W, H, D, { depth = EDGE_ARTIFACT.depth, im
           continue;
         }
         const v = (c7 - c4) * A - (c8 - c5) * B;
-        if (globalThis.__earStats) globalThis.__earStats.n++;
+        if (hook('earStats')) hook('earStats').n++;
         dst[p] += v;
         dst[p + along] -= v;
         if (bend < curve * 0.2) {

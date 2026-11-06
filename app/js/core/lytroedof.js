@@ -246,7 +246,7 @@ function designTaps(freqs, mags, size, taps) {
   const px = [];
   const py = [];
   for (let i = 0; i < freqs.length; i++) {
-    const fs = globalThis.__bankFS || 1;
+    const fs = hook('bankFS') || 1;
     if (size * 0.5 < freqs[i] * fs) break;
     px.push(Math.fround((freqs[i] * fs) / size));
     py.push(mags[i]);
@@ -390,6 +390,7 @@ import { geometryAt } from './geometrytable.js';
 import { forEachLensPixel, tileWeights, isDefect, sampleDepth, depthFilter } from './superres.js';
 import { LAMBDA_TO_ALPHA } from './recipe.js';
 import { createLfDemosaic } from './lfdemosaic.js';
+import { debugFlags, hook } from './debugflags.js';
 
 // aperture: the engine's HexAperture value, LightfieldLogic::NominalApertureFraction = min(micro f-number / main f-number, 2 - that - 2 / pitch)
 // clamped to 0..1, which is 1 - 2/14 on the 14 px standardized lightfield; 'hex' is HexAperture's shape (apothem 0.5 * value lens pitches),
@@ -439,8 +440,8 @@ export function engineColorScale(modulation, cam, dev, g) {
   }
   const centre = [0, 0, 0];
   const nCentre = [0, 0, 0];
-  forEachLensPixel(g, cam, (globalThis.__lytro && globalThis.__lytro.centreRad) || 3.2, (i, x, y, u, v) => {
-    if (u * u + v * v > ((globalThis.__lytro && globalThis.__lytro.centreR2) || 9)) return;
+  forEachLensPixel(g, cam, debugFlags().centreRad || 3.2, (i, x, y, u, v) => {
+    if (u * u + v * v > (debugFlags().centreR2 || 9)) return;
     const ch = dev.cfa[y & 1][x & 1];
     centre[ch] += Math.max(0, modulation[i] - dev.black[ch] * MOD_BLACK());
     nCentre[ch]++;
@@ -448,12 +449,12 @@ export function engineColorScale(modulation, cam, dev, g) {
   return [0, 1, 2].map((ch) => {
     // the engine's own plane (core/enginemod.js) is in units where the engine divides by it directly, i.e. its "whole sensor mean" is the unit
     const f = nCentre[ch] && nWhole[ch] && centre[ch] ? (modulation.eUnit ? modulation.eUnit : whole[ch] / nWhole[ch]) / (centre[ch] / nCentre[ch]) : 0.82;
-    if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('SCALEPARTS', ch, JSON.stringify({ white: cam.white[ch], black: cam.black[ch], f, eUnit: modulation.eUnit, gain: cam.capture && cam.capture.analogGain }));
+    if (debugFlags().printColor) console.error('SCALEPARTS', ch, JSON.stringify({ white: cam.white[ch], black: cam.black[ch], f, eUnit: modulation.eUnit, gain: cam.capture && cam.capture.analogGain }));
     return ((cam.white[ch] - cam.black[ch]) / 1023) * f;
   });
 }
 
-const MOD_BLACK = () => (globalThis.__modBlack === undefined ? 1 : globalThis.__modBlack);
+const MOD_BLACK = () => (hook('modBlack') === undefined ? 1 : hook('modBlack'));
 export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, globalRef = false, listedOnly = false, need = null) {
   const { width, height } = cam;
   const plane = new Float32Array(width * height).fill(NaN);
@@ -504,7 +505,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
     }
     if (!(gain > 0)) return;
     let value = raw[i];
-    if (!listedOnly && !(globalThis.__lytro && globalThis.__lytro.noDefect) && isDefect(raw, width, i)) {
+    if (!listedOnly && !debugFlags().noDefect && isDefect(raw, width, i)) {
       // HotPixelCorrectionImage::SimpleCorrection: the mean of the two same-colour neighbours along the smoother axis, if the pixel is
       // 1.2 times brighter than it (cfg 0xa30) or above 0.99 of the white level.
       const b = dev.black[ch];
@@ -514,7 +515,7 @@ export function correctedPlane(raw, cam, dev, g, vg, radius, modulation = null, 
       if (value - b > 1.2 * est || value > 0.99 * dev.saturated[ch]) value = est + b;
       else return;
     }
-    if (globalThis.__radialFix) gain *= globalThis.__radialFix(Math.hypot(u, v) / g.pitch);
+    if (hook('radialFix')) gain *= hook('radialFix')(Math.hypot(u, v) / g.pitch);
     plane.mod[i] = 1 / gain;
     plane[i] = Math.max(0, value - dev.black[ch]) * dev.scale[ch] * gain;
   });
@@ -798,7 +799,7 @@ function suppressCurve(v) {
 // matrix (the other 15 photos do not move), so another part of our highlight path is still compensating for the as-shot one. `__bisgEngineMatrix` selects the engine's.
 export function bisgMatrix(cam) {
   const asShot = cam.ccm && cam.ccm.length === 9 ? cam.ccm : [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  if (!globalThis.__bisgEngineMatrix || !cam.perCcm || !cam.perCcm.length) return asShot;
+  if (!hook('bisgEngineMatrix') || !cam.perCcm || !cam.perCcm.length) return asShot;
   return blendedCcm(cam.perCcm, 0, asShot);
 }
 
@@ -942,8 +943,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   const hi = depthFilter(depth, lw, lh, reach, Math.max);
   // The sensor side on the GPU (gpu/lytroengine.js), when the caller gives it and the picture is one it handles.
   const gpuInput = { satOver: null, views: viewHits ? views : null, listedOnly: ex, rayShift, geoTable, sampleGrid: sg, depth5, raw, modulation, cam, dev, grid: g, sampler, unit, rayWarp, depth, lw, lh, lo, hi, zMap, scale, W, H, apothem, rise: hexRise, planeRadius: radius + 2, opts };
-  if (opts.gpu || globalThis.__dumpSplat) gpuInput.satOver = saturationOverride(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
-  if (globalThis.__dumpSplat) globalThis.__dumpSplat(gpuInput);
+  if (opts.gpu || hook('dumpSplat')) gpuInput.satOver = saturationOverride(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
+  if (hook('dumpSplat')) hook('dumpSplat')(gpuInput);
   if (opts.gpu && (!viewHits || (opts.sensorRaster && !opts.noGpuViews)) && rayWarp && modulation && !warp && opts.demosaic === 'engine' && opts.shape === 'hex' && !opts.inner && !opts.geoSign && !opts.vScale && !opts.persp && !opts.apFall && !opts.apCone && !opts.plainMarch && opts.gctFirst !== false && opts.apShift !== false && !opts.posX && !opts.posY && opts.posUScale === undefined && !opts.marchDu && !opts.marchDv && opts.nearest && !opts.alphaPow && !opts.noFar && (opts.duScale ?? 1) === 1) {
     const gpuAcc = opts.gpu(gpuInput);
     if (gpuAcc && viewHits) {
@@ -955,7 +956,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
   }
   const plane = correctedPlane(raw, cam, dev, g, vg, radius + 2, modulation, !!opts.modGlobal, ex);
   let dm = opts.demosaic === 'engine' ? createLfDemosaic(completePlane(plane, raw, cam, dev), width, cam.height, dev.cfa) : null;
-  if (dm && globalThis.__dmDump) globalThis.__dmDump(dm); // debugging aid: the demosaiced, saturation-recovered image at the entry of the blend stage
+  if (dm && hook('dmDump')) hook('dmDump')(dm); // debugging aid: the demosaiced, saturation-recovered image at the entry of the blend stage
   if (dm && opts.sharpen) dm = opts.bisg ? bisgFilter(dm, raw, cam, dev, width, cam.height, opts.sharpen) : sharpenHighlights(dm, width, cam.height, opts.sharpen);
   const acc = new Float32Array(W * H * 4);
   const rgb = [0, 0, 0];
@@ -996,8 +997,8 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
     } else if (u * u + v * v > r2) return;
     if (opts.inner && Math.hypot(u, v) / g.pitch < opts.inner) return;
     if (dm ? !(plane[i] === plane[i] && dm.at(x, y, rgb)) : !rgbAt(plane, width, dev.cfa, x, y, rgb)) return;
-    if (globalThis.__diagBins) {
-      const dg = globalThis.__diagBins;
+    if (hook('diagBins')) {
+      const dg = hook('diagBins');
       const cxm = x - (cosR * u - sinR * v);
       const cym = y - (sinR * u + cosR * v);
       if (cxm > cam.width * 0.4 && cxm < cam.width * 0.6 && cym > cam.height * 0.4 && cym < cam.height * 0.6) {
@@ -1148,18 +1149,18 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
         const yy = y0 + j;
         if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
         const p = yy * W + xx;
-        if (globalThis.__rayDiag && j === 0 && k === 0) {
+        if (hook('rayDiag') && j === 0 && k === 0) {
           const dd = lamR - zMap[p];
           const rb = Math.min(7, Math.floor((Math.hypot(u, v) / g.pitch) * 16));
-          const dgn = globalThis.__rayDiag;
+          const dgn = hook('rayDiag');
           dgn.n[rb]++;
           if (dd < -5) dgn.near[rb]++;
           if (dd > 5) dgn.far[rb]++;
         }
         if (lamR - zMap[p] >= opts.tolerance) continue;
         const w = (k ? fx : 1 - fx) * (j ? fy : 1 - fy);
-        if (globalThis.__regionProbe) {
-          const R = globalThis.__regionProbe;
+        if (hook('regionProbe')) {
+          const R = hook('regionProbe');
           if (xx >= R.x0 && xx < R.x1 && yy >= R.y0 && yy < R.y1) {
             const b = Math.max(0, Math.min(R.n - 1, Math.round((lamR - R.lo) / R.step)));
             R.w[b] += w;
@@ -1178,7 +1179,7 @@ export function lytroSplat({ raw, cam, dev, grid: g, sampleGrid = null, sampler,
       }
     }
   }, onProgress);
-  if (globalThis.__dumpSplatAcc) globalThis.__dumpSplatAcc(viewAcc ? Float32Array.from(viewAcc.flatMap((a) => Array.from(a))) : acc);
+  if (hook('dumpSplatAcc')) hook('dumpSplatAcc')(viewAcc ? Float32Array.from(viewAcc.flatMap((a) => Array.from(a))) : acc);
   return { acc, W, H, zMap, views: viewAcc, stats: { rays: count, accepted } };
 }
 

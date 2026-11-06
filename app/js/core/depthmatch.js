@@ -8,6 +8,7 @@
 // and a 3 x 3 median. See depth.js for the pieces.
 import { engineTone } from './base.js';
 import { crossArms, aggregateCross, flatness, trwsVolume, bestDepth, depthColorGuide, median3, DEPTH_CBCA, DEPTH_EDGE, DEPTH_TRWS, DEPTH_LCOST } from './depth.js';
+import { hook } from './debugflags.js';
 
 export const DEPTH_PASSES = {
   // 3x3 colour matrix (row-major) of the engine's depth views; null: linear views.
@@ -110,7 +111,7 @@ export function hdtvGamma(x) {
 }
 
 function engineViewColors(views, n, matrix) {
-  if (globalThis.__viewRawDump) globalThis.__viewRawDump(views.map((v) => v.rgb), matrix);
+  if (hook('viewRawDump')) hook('viewRawDump')(views.map((v) => v.rgb), matrix);
   const colors = views.map((v) => {
     const out = new Float32Array(n * 3);
     const g = v.gain;
@@ -127,7 +128,7 @@ function engineViewColors(views, n, matrix) {
     return out;
   });
   matchColor(colors, Math.floor(views.length / 2), n);
-  if (globalThis.__viewColorsDump) globalThis.__viewColorsDump(colors);
+  if (hook('viewColorsDump')) hook('viewColorsDump')(colors);
   return colors;
 }
 

@@ -1,4 +1,5 @@
 // Raw sensor data and the camera metadata needed to interpret it.
+import { debugFlags } from './debugflags.js';
 
 export const ILLUM = { width: 7728, height: 5368, bits: 10 };
 export const F01 = { width: 3280, height: 3280, bits: 12 };
@@ -146,7 +147,7 @@ export function cameraInfo(metadata, fallbackLayout) {
   // the metadata carries it rounded to a whole count.
   const analogGain = get(md, 'devices', 'sensor', 'analogGain') || {};
   const gainGr = first(analogGain.gr, analogGain.r);
-  if (!isFirstGen && Number.isFinite(gainGr) && !(globalThis.__lytro && globalThis.__lytro.noLutBlack)) black = black.map(() => illumBlackLevel(gainGr));
+  if (!isFirstGen && Number.isFinite(gainGr) && !debugFlags().noLutBlack) black = black.map(() => illumBlackLevel(gainGr));
   const white = channelGains(pixelFormat.white, [max, max, max]);
 
   const color = image.color || {};
@@ -244,7 +245,7 @@ export function listedHotPixels(raw, width, height, listed, max = 1023) {
 // calibration names as defective: those are always replaced, and the
 // search above still finds the ones the list misses.
 export function fixHotPixels(raw, width, height, listed = null, max = 1023) {
-  if (listed && listed.length && !(globalThis.__lytro && globalThis.__lytro.heuristicHot)) return listedHotPixels(raw, width, height, listed, max);
+  if (listed && listed.length && !debugFlags().heuristicHot) return listedHotPixels(raw, width, height, listed, max);
   const out = raw.slice();
   const nb = new Float64Array(8);
   const w2 = 2 * width;

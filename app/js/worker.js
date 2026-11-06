@@ -51,6 +51,7 @@ import { lensParams, applyLens, withoutDistortion, fitDistortion, lensWarp } fro
 import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpatial } from './core/local.js';
 import { GpuRenderer } from './gpu/renderer.js';
 import { lytroSplatGpu } from './gpu/lytroengine.js';
+import { debugFlags, hook, setHook } from './core/debugflags.js';
 
 // Requests whose picture is wanted at 16 bits per channel (see finishGpu).
 const bits16Ids = new Set();
@@ -82,7 +83,7 @@ const state = {
   jobs: {},
   scratch: null,
 };
-if (globalThis.__fs) globalThis.__state = state; // test harnesses
+if (hook('fs')) setHook('state', state); // test harnesses
 
 const VIEW_SCALE = 8192;
 
@@ -190,7 +191,7 @@ function firstGenColor(s, gains, center) {
 }
 
 function asShotKelvin() {
-  if (globalThis.__lytro && globalThis.__lytro.cct) return globalThis.__lytro.cct;
+  if (debugFlags().cct) return debugFlags().cct;
   const c = state.lf && state.lf.cam && state.lf.cam.capture;
   return (c && c.cct) || DEFAULT_KELVIN;
 }
@@ -237,7 +238,7 @@ function updateColor() {
   if (state.gpu) state.gpu.setVeil(state.veil);
   // The Lytro Desktop look keeps the camera's exposure; the flat look picks
   // one for the photo.
-  if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('COLOR', JSON.stringify({ swb: s.wb, autoWb: s.autoWb, exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
+  if (debugFlags().printColor) console.error('COLOR', JSON.stringify({ swb: s.wb, autoWb: s.autoWb, exactColor, camCcm, scale: state.engineScale, wb: state.wbGains, cct: asShot, camwb: lf.cam.wb, matrix: state.matrix }));
   state.baseExposure = state.lytro ? (exactColor ? 1 : LYTRO_EXPOSURE) : autoExposure(state.veil ? subtractVeil(center, outW, outH, state.veil, state.veilAmount) : center, state.matrix);
   // First generation photos have the engine's own pipeline (clamp before the matrix, Lab contrast spline), with its auto level.
   const first = state.lytro ? firstGenColor(s, state.wbGains, center) : null;
@@ -259,7 +260,7 @@ const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 function computeEngineWb() {
   const { lf } = state;
   const cam = lf && lf.cam;
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   if (!cam || !state.modulation || state.settings.engineWb === false || dbg.noEngineWb || dbg.legacy || !cam.capture || !cam.capture.responses || !cam.wb || !Number.isFinite(cam.capture.exposure)) return null;
   try {
     const W = Math.round(cam.width / lf.grid.pitch);
@@ -277,12 +278,12 @@ function computeEngineWb() {
 
 // The engine's gains over the camera's (depth views), when the white balance is the photo's own (not set by the user, not automatic).
 function engineWbRel(s) {
-  return state.engineWb && !(globalThis.__lytro && globalThis.__lytro.noWbRel) && !(s && s.wb && s.wb.kelvin) && !(s && s.autoWb) ? state.engineWb.rel : [1, 1, 1];
+  return state.engineWb && !debugFlags().noWbRel && !(s && s.wb && s.wb.kelvin) && !(s && s.autoWb) ? state.engineWb.rel : [1, 1, 1];
 }
 
 // The photo's own white balance on a raw photo (no temperature set, not automatic in our sense): the engine's automatic gains over the camera's (the engine's picture is balanced with its own gains; the camera's only start it).
 function engineAutoGains(s) {
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   if ((s && s.wb && s.wb.kelvin) || (s && s.autoWb) || !state.engineWb || !state.engineScale || state.pp || dbg.noAutoGains) return null;
   return state.engineWb.rel;
 }
@@ -290,7 +291,7 @@ function engineAutoGains(s) {
 // A temperature (and tint) set by the user or a recipe, on a raw photo with the engine's own white balance known: the engine's gains for it (core/enginewb.js customGains) over the camera's, which the raw data already carries.
 function customWbGains(s) {
   const k = s && s.wb && s.wb.kelvin;
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   if (!k || s.autoWb || !state.engineWb || !state.engineScale || state.pp || dbg.noCustomWb || !state.lf.cam.wb) return null;
   return customGains(k, (s.wb.tint || 0) / 600, state.engineWb.gains).map((g, i) => g / state.lf.cam.wb[i]);
 }
@@ -298,8 +299,8 @@ function customWbGains(s) {
 function engineCcm(s) {
   const cam = state.lf.cam;
   if (!cam.ccm) return cam.ccm;
-  const kelvin = s && s.wb && s.wb.kelvin ? s.wb.kelvin : state.engineWb && !(globalThis.__lytro && globalThis.__lytro.noWbCct) && !(s && s.autoWb) ? state.engineWb.cct : asShotKelvin();
-  return (globalThis.__lytro && globalThis.__lytro.asShotCcm) ? cam.ccm : blendedCcm(cam.perCcm, kelvin, cam.ccm);
+  const kelvin = s && s.wb && s.wb.kelvin ? s.wb.kelvin : state.engineWb && !debugFlags().noWbCct && !(s && s.autoWb) ? state.engineWb.cct : asShotKelvin();
+  return debugFlags().asShotCcm ? cam.ccm : blendedCcm(cam.perCcm, kelvin, cam.ccm);
 }
 
 function colorState(color) {
@@ -387,7 +388,7 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
       srgb[i + 1] = m[3] * r + m[4] * g + m[5] * b;
       srgb[i + 2] = m[6] * r + m[7] * g + m[8] * b;
     }
-    const clean = engineDenoise(srgb, w, h, { gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 }, undefined, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuNr) ? (planes, pw, ph, tables, prog) => nrFilterGpu(state.gpu, planes, pw, ph, tables, prog) : null);
+    const clean = engineDenoise(srgb, w, h, { gain: totalGain(state.lf.cam), luminance: cs.settings.engineNrLuma ?? 50, color: cs.settings.engineNrColor ?? 50 }, undefined, state.gpu && !debugFlags().noGpuNr ? (planes, pw, ph, tables, prog) => nrFilterGpu(state.gpu, planes, pw, ph, tables, prog) : null);
     const flt = cs.settings.defringe;
     return sharp(toneMap(flt && flt.on && flt.colors.some(([amount]) => amount > 0) ? defringe(clean, w, h, flt) : clean, IDENTITY, 1, undefined, cs.look, local, grade, cs.lytro));
   }
@@ -515,7 +516,7 @@ function finishGpu(tex, w, h, packed, message, cs = state, distortionCorrected =
   if (nr && (mode === 'draft' || mode === 'defer')) {
     if (mode === 'defer') message = { ...message, nrDeferred: true };
   } else if (nr) {
-    if (!(globalThis.__lytro && globalThis.__lytro.noGpuNr)) {
+    if (!debugFlags().noGpuNr) {
       try {
         const pic = nrOnGpu(tex, w, h, packed, cs, distortionCorrected, bits16);
         state.gpuNr = true;
@@ -687,15 +688,15 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     lap('hotPixels');
     state.dev = makeDevelopParams(state.lf.cam);
     // Off until its meaning is settled: applied as a direction shift it made the picture worse against the engine's (MAE 4.62 -> 4.96).
-    state.geoTable = state.lf.geometryBytes && globalThis.__useGeo ? parseGeometryTable(state.lf.geometryBytes) : null;
+    state.geoTable = state.lf.geometryBytes && hook('useGeo') ? parseGeometryTable(state.lf.geometryBytes) : null;
     state.rayWarpEdof = null;
     state.modulation = undefined;
     state.rayWarp = state.lf.rayWarpBytes ? parseRayWarp(state.lf.rayWarpBytes, state.lf.cam.width, state.lf.cam.height) : null;
     // The photo's own distortion, from its ray table, rather than the one fitted for its zoom.
-    state.lf.cam.distortionFit = state.rayWarp && !globalThis.__noTableLens ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
+    state.lf.cam.distortionFit = state.rayWarp && !hook('noTableLens') ? fitDistortion(state.rayWarp.distortionProfile(state.lf.cam.width, state.lf.cam.height)) : null;
     if (state.gpu === null && state.settings.gpu !== false) {
       state.gpu = GpuRenderer.create(state.lf.cam) || false;
-      DEPTH_REGIONS.gpu = state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuRegions) ? regionsGpu(state.gpu, gpuFellBack) : null;
+      DEPTH_REGIONS.gpu = state.gpu && !debugFlags().noGpuRegions ? regionsGpu(state.gpu, gpuFellBack) : null;
       if (state.gpu && state.lut) state.gpu.setLut(state.lut);
     }
     lap('setup');
@@ -708,7 +709,7 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
     state.engineWb = null;
     state.usmDepth = null;
     state.usmMap = null;
-    if (!globalThis.__lytro?.legacy && state.lf.readModulation) {
+    if (!debugFlags().legacy && state.lf.readModulation) {
       try {
         const kept = usableOpenCache(state.depthCacheIn && state.depthCacheIn.open);
         state.openOut = kept;
@@ -733,7 +734,7 @@ async function open({ id, bytes, synthetic, userDepth = null, depthCache = null 
         console.error('ENGINESCALE failed', e && e.message);
         state.modulation = undefined;
       }
-      if (globalThis.__lytro && globalThis.__lytro.printGrid) console.error('ENGINESCALE', JSON.stringify(state.engineScale));
+      if (debugFlags().printGrid) console.error('ENGINESCALE', JSON.stringify(state.engineScale));
       if (state.engineScale) updateColor();
       lap('colour');
     }
@@ -959,11 +960,11 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
       vignetting: state.vignetting, lensOffsets: state.lensOffsets, lambdaToAlpha: LAMBDA_TO_ALPHA, rayWarp: activeRayWarp(),
       gpuSplat: state.gpu ? (params) => state.gpu.splat(params) : undefined,
     });
-    globalThis.__focusMetrics = probe.metrics;
+    setHook('focusMetrics', probe.metrics);
     state.focusOffset = probe.focusOffset;
-    globalThis.__focusOffset = state.focusOffset;
+    setHook('focusOffset', state.focusOffset);
     postDepthCache();
-    if (globalThis.__probeOnly) return { cancelled: true };
+    if (hook('probeOnly')) return { cancelled: true };
     applyDepthSmoothing();
   }
   // Each lens's center is measured once per photo from an all-in-focus
@@ -1058,13 +1059,13 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
   const progress = (stage, p) => post({ id, type: 'progress', stage, progress: p });
   if (!state.vignetting) {
     progress('Measuring lens vignetting', 0);
-    const vt = (globalThis.__lytro || {}).vigTiles;
+    const vt = debugFlags().vigTiles;
     state.vignetting = vt ? estimateVignetting(lf.raw, lf.cam, dev, lf.grid, { tilesX: vt[0], tilesY: vt[1], lensStride: 1, selfRef: true }) : estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
   }
   if (!(await ensureDepth(id))) return { cancelled: true };
   const { W, H } = superResParams(sampler, { scale });
   const cs = colorState(color);
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   if (dbg.dumpField && lf.rayWarpBytes) {
     const rw = parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true });
     const out = new Float64Array(4);
@@ -1080,9 +1081,9 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     }
     console.log('RAYFIELD', JSON.stringify(rows));
   }
-  if (globalThis.__depthOverride) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
-  if (globalThis.__depthFinal) globalThis.__depthFinal(state.depth.alpha, state.sampler.outW, state.sampler.outH);
-  if (globalThis.__depthOnly) return { cancelled: true };
+  if (hook('depthOverride')) state.depth = { ...state.depth, alpha: hook('depthOverride') };
+  if (hook('depthFinal')) hook('depthFinal')(state.depth.alpha, state.sampler.outW, state.sampler.outH);
+  if (hook('depthOnly')) return { cancelled: true };
   // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
   // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
   // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
@@ -1127,7 +1128,7 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     const slope = (m * sxy - sx * sy) / (m * sxx - sx * sx);
     const icpt = (sy - slope * sx) / m;
     const corr = (m * sxy - sx * sy) / Math.sqrt((m * sxx - sx * sx) * (m * syy - sy * sy));
-    if (globalThis.__cmpDump) globalThis.__cmpDump(eng, ownField ? state.depthOwnF.plain : state.depthPlain, state.sampler.outW, state.sampler.outH);
+    if (hook('cmpDump')) hook('cmpDump')(eng, ownField ? state.depthOwnF.plain : state.depthPlain, state.sampler.outW, state.sampler.outH);
     console.error('CMPDEPTH', JSON.stringify({ meanEng: sx / m, meanOurs: sy / m, slope, icpt, corr }));
   }
   if (dbg.printGrid) console.error('DEPTHPATH', JSON.stringify({ exactDepth, engineShift, ownField, hasOffsets: !!state.exactOffsets, fromLytro: !!(state.depthRaw && state.depthRaw.fromLytro), pp: !!state.pp, userDepth: !!state.userDepth }));
@@ -1260,9 +1261,9 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     }
   }
   // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 28 at 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings.
-  if (scale >= 3 && !(globalThis.__lytro || {}).noNotch) removePeriodicPattern(out, W, H, { prominence: 10 });
-  if (globalThis.__edofLinear) globalThis.__edofLinear(out, W, H);
-  globalThis.__lytroStats = sp.stats;
+  if (scale >= 3 && !debugFlags().noNotch) removePeriodicPattern(out, W, H, { prominence: 10 });
+  if (hook('edofLinear')) hook('edofLinear')(out, W, H);
+  setHook('lytroStats', sp.stats);
   const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
   post({ id, type: 'result', width: W, height: H, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
@@ -1375,7 +1376,7 @@ async function measureWhiteImage({ id, bytes, meta }) {
 // (lens pitches, lens axes) times the pitch. Returned as the offset of each lens from the app's grid, the whole of it (no common shift removed), or null without the tables.
 function exactLensOffsets() {
   const { lf } = state;
-  if (globalThis.__lytro && (globalThis.__lytro.legacy || globalThis.__lytro.noExact)) return null;
+  if (debugFlags().legacy || debugFlags().noExact) return null;
   if (!lf.geometryBytes || !lf.metadata || !lf.raw) return null;
   const geo = (state.geoTableExact ||= parseGeometryTable(lf.geometryBytes));
   if (!geo) return null;
@@ -1703,7 +1704,7 @@ async function findObjects(id) {
 async function ensureViewDepth(id) {
   if (state.depth) return true;
   const style = resolveDepthStyle(state.settings.depthStyle);
-  if (state.pp || state.userDepth || style === 'classic' || globalThis.__forceFullDepth) return ensureDepth(id);
+  if (state.pp || state.userDepth || style === 'classic' || hook('forceFullDepth')) return ensureDepth(id);
   if (!(await ensureRefocusViews(id))) return false;
   if (state.depth) return true;
   const { outW, outH } = state.sampler;
@@ -1748,9 +1749,9 @@ async function measureDepthOnce(id) {
     state.depthRaw = { alpha, confidence: new Float32Array(outW * outH).fill(1), range: [lo, hi], fromLytro: true };
     applyDepthSmoothing();
   }
-  if (!state.depth && state.userDepth && globalThis.__lytroDump) {
+  if (!state.depth && state.userDepth && hook('lytroDump')) {
     const { outW: ow, outH: oh } = state.sampler;
-    globalThis.__lytroDump(userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, ow, oh)), ow, oh);
+    hook('lytroDump')(userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, ow, oh)), ow, oh);
   }
   if (!state.depth) {
     const { outW, outH } = state.sampler;
@@ -1765,7 +1766,7 @@ async function measureDepthOnce(id) {
     // within 0.05 of Lytro Desktop's own pictures, the blend scores worse), on the CPU too.
     const engineDefault = engineDepthAvailable();
     let style = resolveDepthStyle(state.settings.depthStyle);
-    if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !globalThis.__forceStyle) style = 'classic';
+    if ((style === 'combined' || (style === 'match' && !engineDefault)) && !hardwareGpu() && !hook('forceStyle')) style = 'classic';
     // Object outlines for the depth edges (high quality only; Camera > Depth).
     state.depthParts = null;
     state.cpuFallbacks = new Map();
@@ -1830,7 +1831,7 @@ async function measureDepthOnce(id) {
       post({ id, type: 'notice', message: 'This computer has no graphics card the app can use (a software renderer was found), so depth is measured on the CPU, which is slow.' });
     }
   }
-  if (globalThis.__depthOverride && state.depth) state.depth = { ...state.depth, alpha: globalThis.__depthOverride };
+  if (hook('depthOverride') && state.depth) state.depth = { ...state.depth, alpha: hook('depthOverride') };
   return true;
 }
 
@@ -1890,7 +1891,7 @@ const DEPTH_VIEW_RING = [0, 45, 90, 135, null, 180, 225, 270, 315];
 // The engine's depth path needs the photo's own tables; settings.engineViews = false (or the debug hooks) turns it off.
 function engineDepthAvailable() {
   const { lf } = state;
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   return !!lf && state.settings.engineViews !== false && dbg.engineViews !== false && !dbg.legacy && !dbg.noExact && !state.pp && !!lf.geometryBytes && !!lf.rayWarpBytes && !!lf.metadata;
 }
 
@@ -1898,7 +1899,7 @@ function engineDepthAvailable() {
 // centre rescale). settings.engineModulation = false (or __lytro.rawModulation) keeps the plain white image.
 async function loadModulation(lf) {
   const raw = await lf.readModulation();
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   if (!raw || dbg.rawModulation || state.settings.engineModulation === false) return raw;
   let hot = null;
   try {
@@ -1930,7 +1931,7 @@ async function loadModulation(lf) {
 async function prepareEngineViews(id) {
   state.engineViews = null;
   const { lf, dev, sampler } = state;
-  const dbg = globalThis.__lytro || {};
+  const dbg = debugFlags();
   // On by default for raw photos (settings.engineViews = false turns it off): the GPU ray splat when there is one (gpu/lytroengine.js, agrees with the CPU to about 1 %), else the CPU (about a minute on a full sensor).
   if (!lf || !engineDepthAvailable() || dbg.legacy || dbg.noExact || state.pp || !lf.geometryBytes || !lf.rayWarpBytes || !lf.metadata) return;
   if (!state.vignetting) state.vignetting = estimateVignetting(lf.raw, lf.cam, dev, lf.grid);
@@ -1975,8 +1976,8 @@ async function prepareEngineViews(id) {
               sum += d;
             }
           }
-          globalThis.__blurCheckResult = { worst, mean: sum / (per * input.views.length), views: input.views.length, W, H };
-          console.info('BLURCHECK', JSON.stringify(globalThis.__blurCheckResult));
+          setHook('blurCheckResult', { worst, mean: sum / (per * input.views.length), views: input.views.length, W, H });
+          console.info('BLURCHECK', JSON.stringify(hook('blurCheckResult')));
         }
         if (acc) {
           state.lytroGpu = true;
@@ -2001,20 +2002,20 @@ async function prepareEngineViews(id) {
     return { u: views[k].u * pitch, v: views[k].v * pitch, rgb, gain: 1, detail: state.settings.detail };
   });
   if (raster) list.raster = { w: W, h: H };
-  if (globalThis.__awbDump) globalThis.__awbDump(list, W, H);
+  if (hook('awbDump')) hook('awbDump')(list, W, H);
   state.engineViews = list;
 }
 
 function depthViews() {
   if (state.engineViews) {
-    const k = (globalThis.__lytro || {}).viewShiftScale;
+    const k = debugFlags().viewShiftScale;
     return k ? Object.assign(state.engineViews.map((v) => ({ ...v, u: v.u * k, v: v.v * k })), { raster: state.engineViews.raster }) : state.engineViews;
   }
   const pitch = state.lf.grid.pitch;
   const place = (deg) => (deg === null ? { u: 0, v: 0 } : { u: 0.4 * pitch * Math.cos((deg * Math.PI) / 180), v: 0.4 * pitch * Math.sin((deg * Math.PI) / 180) });
   // The tnt engine's own set (GetBlitzenVersion1Configuration: sub-aperture radius 0.25, step 45): a ring of eight views at `r` lens
   // pitches, 45 degrees apart, and the center. Measured against its depth map this gives the closest depth (MAE 0.93 lambda against 1.0 for the stack's seven views at 0.4).
-  const dv = (globalThis.__lytro || {}).depthViews || { r: 0.25 };
+  const dv = debugFlags().depthViews || { r: 0.25 };
   const ring = dv ? [0, 45, 90, 135, null, 180, 225, 270, 315] : [210, 150, 270, null, 90, 330, 30];
   const radius = dv && dv.r ? dv.r : 0.4;
   const place2 = (deg) => (deg === null ? { u: 0, v: 0 } : { u: radius * pitch * Math.cos((deg * Math.PI) / 180), v: radius * pitch * Math.sin((deg * Math.PI) / 180) });
@@ -2022,7 +2023,7 @@ function depthViews() {
     const q = dv ? place2(deg) : place(deg);
     const u = q.u + (dv && dv.off ? dv.off[0] * pitch : 0);
     const v = q.v + (dv && dv.off ? dv.off[1] * pitch : 0);
-    const raw = renderDisc(u, v, (globalThis.__lytro || {}).viewAp ?? 0);
+    const raw = renderDisc(u, v, debugFlags().viewAp ?? 0);
     return { u, v, rgb: state.gpu || DEPTH_PASSES.engineView ? raw : equalize(raw), gain: 1, detail: state.settings.detail };
   });
 }
@@ -2030,7 +2031,7 @@ function depthViews() {
 // The colour matrix of the engine's depth views (its final image pipeline: camera colour matrix on the engine's colour units, then the HDTV gamma).
 function engineViewMatrix() {
   const ccm = state.lf && state.lf.cam && state.lf.cam.ccm;
-  const o = globalThis.__lytro || {};
+  const o = debugFlags();
   if (o.engineView === false || state.pp || !state.engineScale || !Array.isArray(ccm) || ccm.length !== 9) return null;
   // the views: the stored matrix (as-shot temperature) with the engine's gains over the camera's (b4-2 against the engine's views: colour error 0.0120 -> 0.0067); the final picture takes its matrix at the engine's temperature instead
   const cct = o.viewCct;
@@ -2086,37 +2087,37 @@ function measureLytro(progress) {
   const infinity = state.lf && state.lf.cam && state.lf.cam.capture && state.lf.cam.capture.infinityLambda;
   const top = Number.isFinite(infinity) ? Math.min(100, Math.floor(infinity) + 3) : 8;
   DEPTH_PASSES.top = Math.max(top, DEPTH_PASSES.first + 8);
-  if ((globalThis.__lytro || {}).logTop) console.log('LYTRO_TOP', infinity, top, DEPTH_PASSES.top);
+  if (debugFlags().logTop) console.log('LYTRO_TOP', infinity, top, DEPTH_PASSES.top);
   DEPTH_PASSES.step = Math.max(1, Math.ceil((DEPTH_PASSES.top - DEPTH_PASSES.first + 1) / 64));
   Object.assign(DEPTH_SEARCH, { min: DEPTH_PASSES.first * DEPTH_PASSES.lambda, max: DEPTH_PASSES.top * DEPTH_PASSES.lambda });
   // The maker's tool compares the views as they are: linear light, full scale (1.0) at the sensor's clip level,
   // no brightness curve and no smoothing (its cost cap 0.2, blown-out level 0.95 and flat level 0.15 are in those units).
   Object.assign(DEPTH_LCOST, { gamma: 1, normQ: 0, fixedTop: state.dev.clip || 1 });
-  DEPTH_PASSES.noisy = (globalThis.__lytro || {}).noisy ?? 0.075;
+  DEPTH_PASSES.noisy = debugFlags().noisy ?? 0.075;
   DEPTH_PASSES.engineView = engineViewMatrix();
-  if ((globalThis.__lytro || {}).printGrid) console.error("ENGINEVIEW", JSON.stringify(DEPTH_PASSES.engineView));
+  if (debugFlags().printGrid) console.error("ENGINEVIEW", JSON.stringify(DEPTH_PASSES.engineView));
   {
     // debug overrides of the estimator's constants
-    const o = globalThis.__lytro || {};
+    const o = debugFlags();
     if (o.cbca) Object.assign(DEPTH_CBCA, o.cbca);
     if (o.trws) Object.assign(DEPTH_TRWS, o.trws);
     if (o.lcost) Object.assign(DEPTH_LCOST, o.lcost);
     if (o.passes) Object.assign(DEPTH_PASSES, o.passes);
   }
-  if ((globalThis.__lytro || {}).depthViews && globalThis.__lytro.depthViews.single) DEPTH_PASSES.refs = [4];
+  if (debugFlags().depthViews && debugFlags().depthViews.single) DEPTH_PASSES.refs = [4];
   let measured = null;
-  const kept = !(globalThis.__lytro || {}).oldEstimator ? depthCacheFor(raster) : null;
+  const kept = !debugFlags().oldEstimator ? depthCacheFor(raster) : null;
   if (kept) {
     measured = { alpha: Float32Array.from(kept.alpha), cost: null, meanCost: null };
     state.depthCacheOut = { key: kept.key, w: kept.w, h: kept.h, alpha: kept.alpha };
   }
   let engineMeasured = false;
-  if (!measured && raster && !(globalThis.__lytro || {}).oldEstimator && state.engineViews) {
+  if (!measured && raster && !debugFlags().oldEstimator && state.engineViews) {
     engineMeasured = true;
     // The engine's own estimator on its views (core/enginedepth.js): in the engine's order, the centre last.
     const colors = viewColors(depthViews(), outW * outH, outW, outH);
     const ordered = [0, 1, 2, 3, 5, 6, 7, 8, 4].map((i) => colors[i]);
-    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuCost) ? (v, w, h, labels) => { try { return engineCostVolumeGpu(state.gpu, v, w, h, labels); } catch (e) { gpuFellBack('The depth cost volume', e); throw e; } } : null, state.gpu && !(globalThis.__lytro && globalThis.__lytro.noGpuSolve) ? (cost, guide, w, h, labels, prog) => { try { return engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog); } catch (e) { gpuFellBack('The depth solver', e); throw e; } } : null);
+    const lam = engineDepthMap(ordered, outW, outH, engineLabels(Number.isFinite(infinity) ? infinity : 5), (stage, p) => progress(0, 1 * p), state.gpu && !debugFlags().noGpuCost ? (v, w, h, labels) => { try { return engineCostVolumeGpu(state.gpu, v, w, h, labels); } catch (e) { gpuFellBack('The depth cost volume', e); throw e; } } : null, state.gpu && !debugFlags().noGpuSolve ? (cost, guide, w, h, labels, prog) => { try { return engineSolveGpu(state.gpu, cost, guide, w, h, labels, prog); } catch (e) { gpuFellBack('The depth solver', e); throw e; } } : null);
     measured = { alpha: Float32Array.from(lam, (v) => v * LAMBDA_TO_ALPHA), cost: null, meanCost: null };
   }
   if (engineMeasured && measured) {
@@ -2131,7 +2132,7 @@ function measureLytro(progress) {
     }
   }
   if (!measured) measured = measureMatch(depthViews(), outW, outH, { onProgress: progress });
-  if (raster && measured && !(globalThis.__lytro || {}).rasterFinish) {
+  if (raster && measured && !debugFlags().rasterFinish) {
     // On the engine's raster the measurement is final as the engine leaves it (sub label estimate, 3 x 3 median); it is read into the picture's frame the way the engine reads its own map.
     const lam = Float32Array.from(measured.alpha, (a) => a / LAMBDA_TO_ALPHA);
     let lo = Infinity;
@@ -2141,8 +2142,8 @@ function measureLytro(progress) {
       if (v > hi) hi = v;
     }
     const map = { width: outW, height: outH, data: Float32Array.from(lam, (v) => (v - lo) / (hi - lo || 1)), min: lo, max: hi };
-    if (globalThis.__rasterDump) globalThis.__rasterDump(lam, outW, outH, state.userDepth);
-    const dbg = globalThis.__lytro || {};
+    if (hook('rasterDump')) hook('rasterDump')(lam, outW, outH, state.userDepth);
+    const dbg = debugFlags();
     const tFrame = Date.now();
     const fr = engineDepthInFrame(map, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL, true);
     state.frameMs = Date.now() - tFrame;
@@ -2158,16 +2159,16 @@ function measureLytro(progress) {
 // The depth map moved to meet the camera's ray correction (core/raywarp.js).
 function rayWarpShift() {
   const warp = activeRayWarp();
-  if (warp && !state.depthRaw.fromLytro && FOCUS_FIELD.own && globalThis.__ownShift === undefined) return (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
-  if (warp && !state.depthRaw.fromLytro && globalThis.__ownShift !== undefined) return globalThis.__ownShift * LAMBDA_TO_ALPHA + (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
-  return (warp ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0) + (globalThis.__extraOffset || 0) * LAMBDA_TO_ALPHA;
+  if (warp && !state.depthRaw.fromLytro && FOCUS_FIELD.own && hook('ownShift') === undefined) return (hook('extraOffset') || 0) * LAMBDA_TO_ALPHA;
+  if (warp && !state.depthRaw.fromLytro && hook('ownShift') !== undefined) return hook('ownShift') * LAMBDA_TO_ALPHA + (hook('extraOffset') || 0) * LAMBDA_TO_ALPHA;
+  return (warp ? warp.alphaShift(state.lf.grid, state.lf.cam.width, state.lf.cam.height) : 0) + (hook('extraOffset') || 0) * LAMBDA_TO_ALPHA;
 }
 
 // The camera's ray correction, for depth maps that came with Lytro Desktop's
 // pictures: they were measured with it in. A depth map measured here is
 // consistent with the plain rays.
 function activeRayWarp() {
-  if (globalThis.__noRayWarp) return null;
+  if (hook('noRayWarp')) return null;
   return state.rayWarp && state.depthRaw && (state.depthRaw.fromLytro || FOCUS_FIELD.own) && state.lf && state.lf.grid ? state.rayWarp : null;
 }
 
@@ -2315,7 +2316,7 @@ function settleDepth(outW, outH, lap = {}) {
   const t0 = Date.now();
   if (EDGE_SNAP_DEPTH.on && state.depthRaw) state.depthRaw = { ...state.depthRaw, alpha: snapDepthEdges(state.depthRaw.alpha, depthColorGuide(centerView()), outW, outH) };
   lap.snap = Date.now() - t0;
-  if (globalThis.__finalDepthDump) globalThis.__finalDepthDump(state.depthRaw.alpha, centerView(), outW, outH);
+  if (hook('finalDepthDump')) hook('finalDepthDump')(state.depthRaw.alpha, centerView(), outW, outH);
   applyDepthSmoothing();
 }
 
@@ -2360,7 +2361,7 @@ async function depthMap({ id, grey = false, contrast = 0 }) {
   const src = await depthSource(id);
   if (!src) return { cancelled: true };
   const { alpha } = src;
-  if (globalThis.__depthDump) globalThis.__depthDump(alpha, src.w, src.h); // debugging aid: the depth values behind the picture
+  if (hook('depthDump')) hook('depthDump')(alpha, src.w, src.h); // debugging aid: the depth values behind the picture
   const sorted = Float32Array.from(alpha).sort();
   // Contrast pulls the ends of the range in (2% and 98% of the picture, up to
   // 30% and 70%) and adds an S curve, so a narrow span of depth fills the colors.

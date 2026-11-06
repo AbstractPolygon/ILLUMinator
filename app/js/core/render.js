@@ -235,7 +235,7 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
     const y = lenses.cy[i] + dv;
     const r = sampleLattice(raw, width, height, rO[0][0], rO[0][1], x, y);
     let g = 0;
-    for (const [gx, gy] of gO) g += sampleLattice(raw, width, height, gx, gy, x, y);
+    for (let k = 0; k < gO.length; k++) g += sampleLattice(raw, width, height, gO[k][0], gO[k][1], x, y);
     g /= gO.length;
     const b = sampleLattice(raw, width, height, bO[0][0], bO[0][1], x, y);
     R[i] = Math.min(clip, Math.max(0, (r - black[0]) * scale[0]));
@@ -251,44 +251,66 @@ function sampleLenses(raw, cam, dev, lenses, grid, u, v, out) {
   const sB = lensBoxSum(B, rows, cols, cr);
   const sY = lensBoxSum(Y, rows, cols, cr);
   const reach = Math.ceil(2 * LUMA_SIGMA);
+  const taps = 2 * reach + 1;
   const inv2s2 = 1 / (2 * LUMA_SIGMA * LUMA_SIGMA);
+  const toY = new Float64Array(3);
+  const wx = new Float64Array(taps);
+  const wy = new Float64Array(taps);
   for (let i = 0; i < n; i++) {
     const yN = sY[i];
     if (!(yN > 1e-9)) {
       out[3 * i] = out[3 * i + 1] = out[3 * i + 2] = 0;
       continue;
     }
-    const frac = [sR[i] / yN, sG[i] / yN, sB[i] / yN];
+    const f0 = sR[i] / yN;
+    const f1 = sG[i] / yN;
+    const f2 = sB[i] / yN;
     // Brightness per unit of each channel's value, from the local color.
-    const toY = frac.map((f) => (f > 1e-4 ? 1 / f : 0));
+    toY[0] = f0 > 1e-4 ? 1 / f0 : 0;
+    toY[1] = f1 > 1e-4 ? 1 / f1 : 0;
+    toY[2] = f2 > 1e-4 ? 1 / f2 : 0;
     const x = lenses.cx[i] + du;
     const y = lenses.cy[i] + dv;
     const x0 = Math.round(x);
     const y0 = Math.round(y);
+    // The Gaussian is the product of one factor per axis: 2 * (2 * reach + 1) exponentials instead of (2 * reach + 1)^2.
+    for (let k = 0; k < taps; k++) {
+      const ex = x0 - reach + k - x;
+      const ey = y0 - reach + k - y;
+      wx[k] = Math.exp(-ex * ex * inv2s2);
+      wy[k] = Math.exp(-ey * ey * inv2s2);
+    }
     let acc = 0;
     let wsum = 0;
     for (let yy = y0 - reach; yy <= y0 + reach; yy++) {
       if (yy < 0 || yy >= height) continue;
-      const ey = yy - y;
+      const wyy = wy[yy - y0 + reach];
       const crow = dev.cfa[yy & 1];
+      const rowBase = yy * width;
       for (let xx = x0 - reach; xx <= x0 + reach; xx++) {
         if (xx < 0 || xx >= width) continue;
-        const ex = xx - x;
-        const w = Math.exp(-(ex * ex + ey * ey) * inv2s2);
+        const w = wyy * wx[xx - x0 + reach];
         const ch = crow[xx & 1];
-        const val = Math.min(clip, Math.max(0, (raw[yy * width + xx] - black[ch]) * scale[ch]));
+        const val = Math.min(clip, Math.max(0, (raw[rowBase + xx] - black[ch]) * scale[ch]));
         acc += w * val * toY[ch];
         wsum += w;
       }
     }
     const lum = wsum > 0 ? Math.min(clip, acc / wsum) : Y[i];
-    out[3 * i] = lum * frac[0];
-    out[3 * i + 1] = lum * frac[1];
-    out[3 * i + 2] = lum * frac[2];
+    out[3 * i] = lum * f0;
+    out[3 * i + 1] = lum * f1;
+    out[3 * i + 2] = lum * f2;
   }
   const edge = dev.chromaEdge ?? CHROMA_EDGE;
   if (edge > 0) edgeAwareChroma(R, G, B, Y, out, rows, cols, cr, edge);
 }
+
+// exp(-t) at EDGE_STEPS + 1 points over [0, EDGE_MAX], for the weights of edgeAwareChroma (the weight of a brightness difference d is exp(k * d^2), k = -1 / (2 sigma^2)): a
+// table with linear interpolation stands in for 49 Math.exp calls per lens (error under 1e-7; weights beyond EDGE_MAX, below 1e-7 as well, are dropped).
+const EDGE_STEPS = 8192;
+const EDGE_MAX = 16;
+const edgeTable = new Float32Array(EDGE_STEPS + 2);
+for (let i = 0; i < edgeTable.length; i++) edgeTable[i] = Math.exp(-(i * EDGE_MAX) / EDGE_STEPS);
 
 // Color from the neighboring lenses whose brightness (in `out`) is like
 // this lens's: color then stops at edges instead of bleeding across them.
@@ -296,24 +318,28 @@ function edgeAwareChroma(R, G, B, Y, out, rows, cols, r, sigma) {
   const n = rows * cols;
   const L = new Float32Array(n);
   for (let i = 0; i < n; i++) L[i] = Math.sqrt(Math.max(0, 0.2126 * out[3 * i] + 0.7152 * out[3 * i + 1] + 0.0722 * out[3 * i + 2]));
-  const k = -1 / (2 * sigma * sigma);
+  // t = d^2 / (2 sigma^2) in table steps
+  const scale = (1 / (2 * sigma * sigma)) * (EDGE_STEPS / EDGE_MAX);
   for (let y = 0; y < rows; y++) {
+    const yLo = Math.max(0, y - r);
+    const yHi = Math.min(rows - 1, y + r);
     for (let x = 0; x < cols; x++) {
       const i = y * cols + x;
       const lc = L[i];
+      const inv = 1 / Math.max(0.02, lc);
+      const xLo = Math.max(0, x - r);
+      const xHi = Math.min(cols - 1, x + r);
       let sr = 0;
       let sg = 0;
       let sb = 0;
       let sy = 0;
-      for (let dy = -r; dy <= r; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= rows) continue;
-        for (let dx = -r; dx <= r; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= cols) continue;
-          const j = yy * cols + xx;
-          const d = (L[j] - lc) / Math.max(0.02, lc);
-          const w = Math.exp(k * d * d);
+      for (let yy = yLo; yy <= yHi; yy++) {
+        for (let j = yy * cols + xLo, end = yy * cols + xHi; j <= end; j++) {
+          const d = (L[j] - lc) * inv;
+          const t = d * d * scale;
+          if (t >= EDGE_STEPS) continue;
+          const k = t | 0;
+          const w = edgeTable[k] + (edgeTable[k + 1] - edgeTable[k]) * (t - k);
           sr += R[j] * w;
           sg += G[j] * w;
           sb += B[j] * w;

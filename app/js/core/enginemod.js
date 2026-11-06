@@ -11,6 +11,7 @@
 //
 // Checked against the engine (batch4-2, eba001cb): S1 rms 1e-6, S2 rms 6e-5, the final rescale to 0.05 %.
 import { MOD_CURVE_B64 } from './enginemod-tables.js';
+import { debugFlags } from './debugflags.js';
 
 let CURVE = null;
 export function curve() {
@@ -213,7 +214,7 @@ export function engineModulationPlane(mod, cam, dev, grid, hot, opts = {}) {
   const dAfter = diskCentre(P, W, H, grid, cfa);
   // E = S2 * D(A) / D(S2), A = S1 * max(A)
   const ratio = [0, 1, 2].map((c) => (dAfter[c] ? (dBefore[c] * amax) / dAfter[c] : 1));
-  if (globalThis.__lytro && globalThis.__lytro.printColor) console.error('DISKC', JSON.stringify({ dA: dBefore.map((d) => d * amax), inv: dBefore.map((d) => 1 / (d * amax)), dAfter }));
+  if (debugFlags().printColor) console.error('DISKC', JSON.stringify({ dA: dBefore.map((d) => d * amax), inv: dBefore.map((d) => 1 / (d * amax)), dAfter }));
   for (let y = 0; y < H; y++) {
     const rowBase = y * W;
     const crow = cfa[y & 1];
