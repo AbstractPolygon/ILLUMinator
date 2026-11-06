@@ -315,7 +315,7 @@ export function removePeriodicPatternRepeatedly(rgb, W, H, options = {}, passes 
 // peaks findPeriodicPeaks finds, give or take 0.05 cycles per pixel), every bin that stands out above the bins around it is pulled down to `ratio` times their level. Smooth
 // detail has a smooth spectrum and is left alone; a lattice is a set of spikes. Works like removePeriodicPattern: on the square root of the luma, the color scaled by the
 // change; in place. Returns the number of peaks that set the ring (0: no pattern, nothing done).
-export function removeLatticeByTiles(rgb, W, H, { ratio = 0.8, tile = 128, prominence = 6, maxSeeds = 48, margin = 0.05, around = 4 } = {}) {
+export function removeLatticeByTiles(rgb, W, H, { ratio = 0.35, tile = 128, prominence = 6, maxSeeds = 48, margin = 0.05, around = 4 } = {}) {
   if (W < 2 * tile || H < 2 * tile) return 0;
   const n = W * H;
   const Y = new Float32Array(n);
