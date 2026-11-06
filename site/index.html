@@ -291,6 +291,20 @@ p.section-title { max-width: none; }
 .dl strong { font-family: var(--display); font-size: 18px; display: flex; align-items: center; gap: 9px; }
 .dl-icon { width: 18px; height: 18px; fill: currentColor; flex: none; }
 .dl span { color: var(--muted); font-size: 14px; }
+/* Latest updates: the last four builds' notes. */
+#updates .wrap { text-align: center; }
+#updates p { margin-inline: auto; max-width: 62ch; }
+.updates { display: grid; gap: 14px; margin: 32px auto 0; max-width: 960px; text-align: left; }
+.upd { padding: 18px 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.upd header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.upd h3 { font-size: 18px; font-weight: 600; }
+.upd time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.upd ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.upd li { font-size: 15px; color: var(--muted); max-width: 80ch; }
+.upd li strong { color: var(--fg); font-weight: 600; }
+.upd li code { font-family: var(--mono); font-size: 13px; }
+.upd-all { margin-top: 18px; }
+
 footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
 
 /* Gallery: Lytro Desktop against Illuminator, photo and depth, with a draggable divider. */
@@ -554,6 +568,47 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
   </div>
 </section>
 
+<section class="band" id="updates">
+  <div class="wrap">
+    <p class="eyebrow">Latest updates</p>
+    <h2 style="font-size:clamp(30px,4vw,46px);font-weight:800;margin-top:10px">What's new.</h2>
+    <p style="margin-top:16px">The changes in the last four builds.</p>
+    <div class="updates" id="updates-list">
+      <article class="upd" data-version="0.5.83">
+        <header><h3>0.5.83</h3><time datetime="2026-11-06">Nov 6, 2026</time></header>
+        <ul>
+        <li><strong>UI code refactor.</strong> The app's interface code was reorganized to make future updates easier.</li>
+        </ul>
+      </article>
+      <article class="upd" data-version="0.5.82">
+        <header><h3>0.5.82</h3><time datetime="2026-11-06">Nov 6, 2026</time></header>
+        <ul>
+        <li><strong>Depth settings are remembered.</strong> Depth map contrast and Smooth edges now come back with each photo; they used to reset when a photo was reopened.</li>
+        <li><strong>Gray depth map.</strong> The option and the guide now use the same spelling as the rest of the app.</li>
+        </ul>
+      </article>
+      <article class="upd" data-version="0.5.81">
+        <header><h3>0.5.81</h3><time datetime="2026-11-06">Nov 6, 2026</time></header>
+        <ul>
+        <li><strong>Update notices show what's new.</strong> The update window now lists the main changes in a release before the download.</li>
+        <li><strong>Simpler Windows installers.</strong> "Add Illuminator to the desktop" sits next to "Run Illuminator" on the last page.</li>
+        <li><strong>Plainer wording.</strong> Tooltips and the guide read more simply.</li>
+        </ul>
+      </article>
+      <article class="upd" data-version="0.5.80">
+        <header><h3>0.5.80</h3><time datetime="2026-11-06">Nov 6, 2026</time></header>
+        <ul>
+        <li><strong>Cleaner depth on shiny things.</strong> Black blotches on metal and glass in the depth map are gone.</li>
+        <li><strong>Diamond pattern fix.</strong> Large full sensor renders (3× and 4×) no longer show a faint diamond grid in blurry areas. A new <em>Lattice filter</em> setting lets you adjust it.</li>
+        <li><strong>Better upscaling.</strong> Each upscaling method now keeps its settings, and the extra upscaling and depth models can be downloaded in the web version too.</li>
+        <li><strong>Smarter lens alignment.</strong> A new <em>Lens centers</em> setting uses your camera's calibration for more accurate renders.</li>
+        </ul>
+      </article>
+    </div>
+    <p class="upd-all"><a class="text-link" href="https://github.com/AbstractPolygon/Illuminator/releases">All releases</a></p>
+  </div>
+</section>
+
 <section class="band" id="about">
   <div class="wrap band-grid">
     <div>
@@ -619,6 +674,72 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       }
       const hero = document.querySelector('.btn-ver');
       if (hero) hero.textContent = version(published[0].tag_name) + ' beta';
+    })
+    .catch(() => {});
+})();
+</script>
+<script>
+// Latest updates: the notes of the last four builds are written into the page.
+// When GitHub has releases whose notes carry a "What's new" list, those join
+// them, newest first, and only the newest four stay.
+(() => {
+  const list = document.getElementById('updates-list');
+  if (!list || !window.fetch) return;
+  const parts = (tag) => String(tag).replace(/^v/i, '').split('.').map(Number);
+  const newer = (a, b) => {
+    const x = parts(a), y = parts(b);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+    }
+    return false;
+  };
+  const inline = (text) => {
+    const frag = document.createDocumentFragment();
+    for (const piece of text.split(/(\*\*.+?\*\*|`.+?`|\*.+?\*)/)) {
+      if (!piece) continue;
+      const tag = piece.startsWith('**') ? 'strong' : piece.startsWith('`') ? 'code' : piece.startsWith('*') ? 'em' : '';
+      if (!tag) { frag.append(piece); continue; }
+      const el = document.createElement(tag);
+      el.textContent = piece.slice(tag === 'strong' ? 2 : 1, tag === 'strong' ? -2 : -1);
+      frag.append(el);
+    }
+    return frag;
+  };
+  const notesOf = (body) => {
+    const m = /^##\s*What.s new\s*$/im.exec(body || '');
+    if (!m) return [];
+    const rest = body.slice(m.index + m[0].length).split(/^##\s|^\*\*Full Changelog/m)[0];
+    return rest.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim());
+  };
+  fetch('https://api.github.com/repos/AbstractPolygon/Illuminator/releases?per_page=20', { headers: { Accept: 'application/vnd.github+json' } })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+    .then((releases) => {
+      const have = new Set([...list.children].map((a) => a.dataset.version));
+      let added = false;
+      for (const rel of releases) {
+        const version = String(rel.tag_name).replace(/^v/i, '');
+        const items = rel.draft ? [] : notesOf(rel.body);
+        if (!items.length || have.has(version)) continue;
+        const a = document.createElement('article');
+        a.className = 'upd';
+        a.dataset.version = version;
+        const head = document.createElement('header');
+        const h = document.createElement('h3');
+        h.textContent = version;
+        const t = document.createElement('time');
+        t.dateTime = String(rel.published_at).slice(0, 10);
+        t.textContent = new Date(rel.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        head.append(h, t);
+        const ul = document.createElement('ul');
+        for (const text of items) { const li = document.createElement('li'); li.append(inline(text)); ul.append(li); }
+        a.append(head, ul);
+        list.append(a);
+        have.add(version);
+        added = true;
+      }
+      if (!added) return;
+      const all = [...list.children].sort((a, b) => (newer(a.dataset.version, b.dataset.version) ? -1 : 1));
+      list.replaceChildren(...all.slice(0, 4));
     })
     .catch(() => {});
 })();
