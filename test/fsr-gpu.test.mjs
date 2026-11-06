@@ -1,3 +1,4 @@
+/* global document, ImageData -- used inside page.evaluate, which runs in the browser */
 // FSR 1 on the graphics card (gpu/upscale.js upscaleImage) puts the picture where it belongs, with and without its sharpening pass: no shift and no zoom at 1.5x, 2x and 3x,
 // the same check core/fsr.js passes on the processor (test/fsr.test.mjs). Runs in a headless browser; skipped where Playwright or a browser is not installed.
 import test from 'node:test';
