@@ -62,3 +62,50 @@ test('rcas with no sharpness only converts to bytes; with sharpness a flat field
   assert.ok(sharp[(3 * W + 6) * 4] >= plain[(3 * W + 6) * 4]);
   assert.ok(sharp[(3 * W + 5) * 4] < plain[(3 * W + 5) * 4] || sharp[(3 * W + 6) * 4] > plain[(3 * W + 6) * 4]);
 });
+
+// Where the enlarged picture lands. A smooth picture known in closed form is enlarged and compared with the same function sampled at the output's pixel centers: the best
+// shift is searched in tenths of an output pixel and the best scale in half a percent, and enlarging must not move the picture or zoom it (a half pixel convention slip would
+// show as a shift of half an input pixel, a wrong ratio as a scale off 1).
+const scene = (u, v) => 0.5 + 0.25 * Math.sin(2 * Math.PI * 3.1 * u + 0.7) * Math.cos(2 * Math.PI * 2.3 * v) + 0.2 * Math.exp(-(((u - 0.4) ** 2 + (v - 0.6) ** 2) / 0.01)) + 0.15 * Math.sin(2 * Math.PI * (2 * u + 3 * v));
+
+function bestPlacement(out, W, H) {
+  let best = null;
+  for (const s of [0.99, 0.995, 1, 1.005, 1.01]) {
+    for (let dx = -0.5; dx <= 0.5001; dx += 0.1) {
+      for (let dy = -0.5; dy <= 0.5001; dy += 0.1) {
+        let e = 0;
+        let n = 0;
+        for (let y = 6; y < H - 6; y += 2) {
+          for (let x = 6; x < W - 6; x += 2) {
+            const u = 0.5 + ((x + 0.5 + dx) / W - 0.5) * s;
+            const v = 0.5 + ((y + 0.5 + dy) / H - 0.5) * s;
+            const d = out(x, y) - scene(u, v) * 255;
+            e += d * d;
+            n++;
+          }
+        }
+        e = Math.sqrt(e / n);
+        if (!best || e < best.e - 1e-9) best = { s, dx: +dx.toFixed(1), dy: +dy.toFixed(1), e };
+      }
+    }
+  }
+  return best;
+}
+
+test('easu enlarges in place: no shift and no zoom at 1.5x, 2x and 3x', () => {
+  const w = 48;
+  const h = 32;
+  const src = rgba(w, h, (x, y) => {
+    const v = scene((x + 0.5) / w, (y + 0.5) / h) * 255;
+    return [v, v, v];
+  });
+  for (const k of [1.5, 2, 3]) {
+    const W = Math.round(w * k);
+    const H = Math.round(h * k);
+    const f = easu(src, W, H);
+    const best = bestPlacement((x, y) => f[(y * W + x) * 4] * 255, W, H);
+    assert.equal(best.s, 1, `scale at ${k}x`);
+    assert.ok(Math.abs(best.dx) <= 0.1 && Math.abs(best.dy) <= 0.1, `shift at ${k}x: ${best.dx}, ${best.dy}`);
+    assert.ok(best.e < 2, `error at ${k}x: ${best.e}`);
+  }
+});
