@@ -14,7 +14,7 @@ const { spawnSync } = require('child_process');
 const DIALOG = 'ExitDialog';
 const CONTROL = 'DesktopCheck';
 
-// The stock page: title at y 20-80, description 70-110, the optional ("Run ...") checkbox at y 190, the bottom line at 234.
+// The stock page: title at y 20-80, description 70-110, the optional ("Run ...") checkbox at y 190, the bottom line at 234; the desktop checkbox sits right above it (y 170) so the two read as one group.
 const CHECKBOX_TEXT = 'Add Illuminator to the desktop';
 // Visible + Enabled + Transparent (the page has a picture behind it).
 const ATTRIBUTES = 3 + 0x10000;
@@ -22,7 +22,7 @@ const ATTRIBUTES = 3 + 0x10000;
 // [existence check, statements]
 function statements() {
   return [
-    `INSERT INTO \`Control\` (\`Dialog_\`, \`Control\`, \`Type\`, \`X\`, \`Y\`, \`Width\`, \`Height\`, \`Attributes\`, \`Property\`, \`Text\`) VALUES ('${DIALOG}', '${CONTROL}', 'CheckBox', 135, 160, 220, 18, ${ATTRIBUTES}, 'ADDTODESKTOP', '${CHECKBOX_TEXT}')`,
+    `INSERT INTO \`Control\` (\`Dialog_\`, \`Control\`, \`Type\`, \`X\`, \`Y\`, \`Width\`, \`Height\`, \`Attributes\`, \`Property\`, \`Text\`) VALUES ('${DIALOG}', '${CONTROL}', 'CheckBox', 135, 170, 220, 18, ${ATTRIBUTES}, 'ADDTODESKTOP', '${CHECKBOX_TEXT}')`,
     // The value a ticked box sets (WiX writes this row for CheckBoxValue="1").
     "INSERT INTO `CheckBox` (`Property`, `Value`) VALUES ('ADDTODESKTOP', '1')",
   ];

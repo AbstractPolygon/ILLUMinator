@@ -89,7 +89,7 @@ test('msi-finish adds the desktop checkbox to the Finish page', { skip: !msibuil
     const row = rows.find((r) => r.startsWith('ExitDialog\tDesktopCheck\t'));
     assert.ok(row, 'the checkbox row');
     const c = row.split('\t');
-    assert.deepEqual(c.slice(2, 10), ['CheckBox', '135', '160', '220', '18', String(3 + 0x10000), 'ADDTODESKTOP', 'Add Illuminator to the desktop']);
+    assert.deepEqual(c.slice(2, 10), ['CheckBox', '135', '170', '220', '18', String(3 + 0x10000), 'ADDTODESKTOP', 'Add Illuminator to the desktop']);
     assert.match(readFileSync(join(dir, 'CheckBox.idt'), 'utf8'), /ADDTODESKTOP\t1/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
