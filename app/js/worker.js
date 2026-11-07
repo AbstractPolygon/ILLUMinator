@@ -55,7 +55,7 @@ import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpat
 import { GpuRenderer } from './gpu/renderer.js';
 import { lytroSplatGpu } from './gpu/lytroengine.js';
 import { debugFlags, hook, setHook } from './core/debugflags.js';
-import { COLOR_SETTINGS } from './settingsmap.js';
+import { preColorKey } from './core/precolorkey.js';
 
 // Requests whose picture is wanted at 16 bits per channel (see finishGpu).
 const bits16Ids = new Set();
@@ -416,9 +416,8 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
   return sharp(toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro && cs.lytro.pre ? { ...cs.lytro, pre: null } : cs.lytro));
 }
 
-// A full sensor picture is kept before its color pass, so a change to the color settings (Process, Optics, local adjustments) makes it again from the kept picture instead
-// of from the sensor. What decides the picture before that pass is the photo, its depth and the settings that are not color settings (`stillKey`); `parts` adds what the
-// request itself carries, and `skip` names settings that only the color pass reads for this kind of picture.
+// A full sensor picture is kept before its color pass (core/precolorkey.js), so a change to the color settings makes it again from the kept picture instead of from the
+// sensor. `parts`: what the request itself carries; `skip`: settings that only the color pass reads for this kind of picture.
 const objectIds = new WeakMap();
 let nextObjectId = 1;
 function objectId(o) {
@@ -430,14 +429,12 @@ function objectId(o) {
   }
   return id;
 }
-const COLOR_PASS_SETTINGS = new Set([...COLOR_SETTINGS.map(([path]) => path.split('.')[0]), 'curve', 'ccm', 'local']);
 function stillKey(parts, skip = []) {
-  const rest = {};
-  for (const [k, v] of Object.entries(state.settings)) if (!COLOR_PASS_SETTINGS.has(k) && !skip.includes(k)) rest[k] = v;
-  return JSON.stringify([
+  const photo = [
     state.gen, objectId(state.sampler), objectId(state.depth), objectId(state.depthPlain), objectId(state.depthRaw), objectId(state.userDepth), objectId(state.vignetting),
-    objectId(state.lensOffsets), state.focusOffset ?? null, objectId(state.modulation), rest, debugFlags(), parts,
-  ]);
+    objectId(state.lensOffsets), state.focusOffset ?? null, objectId(state.modulation), debugFlags(),
+  ];
+  return preColorKey(state.settings, photo, parts, skip);
 }
 // Frees the kept pictures (the photo or its sampler changed).
 function dropKeptStills() {

@@ -10,87 +10,87 @@ Read with `debugFlags().name`. In the worker, a harness usually prepends a line 
 | Name | Kind | Read at | Comment in the code |
 |---|---|---|---|
 | `aiCpu` | tuning value | app/js/core/aiupscale.js:83 |  |
-| `apFraction` | tuning value | app/js/worker.js:1207 |  |
-| `asShotCcm` | tuning value | app/js/worker.js:306 |  |
-| `bank` | tuning value | app/js/worker.js:1239, app/js/worker.js:1260 |  |
-| `bankShift` | tuning value | app/js/worker.js:1252, app/js/worker.js:1253 |  |
-| `bankSize` | tuning value | app/js/worker.js:1253 |  |
-| `blurCheck` | tuning value | app/js/worker.js:2112 |  |
-| `cbca` | tuning value | app/js/worker.js:2264 |  |
-| `cct` | tuning value | app/js/worker.js:197 |  |
+| `apFraction` | tuning value | app/js/worker.js:1265 |  |
+| `asShotCcm` | tuning value | app/js/worker.js:310 |  |
+| `bank` | tuning value | app/js/worker.js:1297, app/js/worker.js:1318 |  |
+| `bankShift` | tuning value | app/js/worker.js:1310, app/js/worker.js:1311 |  |
+| `bankSize` | tuning value | app/js/worker.js:1311 |  |
+| `blurCheck` | tuning value | app/js/worker.js:2172 |  |
+| `cbca` | tuning value | app/js/worker.js:2324 |  |
+| `cct` | tuning value | app/js/worker.js:201 |  |
 | `centreR2` | tuning value | app/js/core/lytroedof.js:445 |  |
 | `centreRad` | tuning value | app/js/core/lytroedof.js:444 |  |
-| `cmpDepth` | prints or dumps | app/js/worker.js:1128 |  |
-| `d5Grow` | tuning value | app/js/worker.js:1165, app/js/worker.js:1176 |  |
-| `d5Round` | tuning value | app/js/worker.js:1167, app/js/worker.js:1178, app/js/worker.js:1183 |  |
-| `depthViews` | tuning value | app/js/worker.js:2167, app/js/worker.js:2269 |  |
-| `dmLevel` | tuning value | app/js/worker.js:1105, app/js/worker.js:1162, app/js/worker.js:1173 |  |
-| `dmSimilar` | tuning value | app/js/worker.js:1105, app/js/worker.js:1162, app/js/worker.js:1173 |  |
-| `dumpField` | prints or dumps | app/js/worker.js:1079 |  |
-| `engineGrid` | tuning value | app/js/worker.js:1199 |  |
-| `engineView` | tuning value | app/js/worker.js:2184 |  |
-| `engineViews` | tuning value | app/js/worker.js:2044 |  |
+| `cmpDepth` | prints or dumps | app/js/worker.js:1131, app/js/worker.js:1186 |  |
+| `d5Grow` | tuning value | app/js/worker.js:1223, app/js/worker.js:1234 |  |
+| `d5Round` | tuning value | app/js/worker.js:1225, app/js/worker.js:1236, app/js/worker.js:1241 |  |
+| `depthViews` | tuning value | app/js/worker.js:2227, app/js/worker.js:2329 |  |
+| `dmLevel` | tuning value | app/js/worker.js:1163, app/js/worker.js:1220, app/js/worker.js:1231 |  |
+| `dmSimilar` | tuning value | app/js/worker.js:1163, app/js/worker.js:1220, app/js/worker.js:1231 |  |
+| `dumpField` | prints or dumps | app/js/worker.js:1131, app/js/worker.js:1137 |  |
+| `engineGrid` | tuning value | app/js/worker.js:1257 |  |
+| `engineView` | tuning value | app/js/worker.js:2244 |  |
+| `engineViews` | tuning value | app/js/worker.js:2104 |  |
 | `heuristicHot` | tuning value | app/js/core/raw.js:248 |  |
-| `lcost` | tuning value | app/js/worker.js:2266 |  |
-| `legacy` | tuning value | app/js/worker.js:722, app/js/worker.js:1396, app/js/worker.js:267 |  |
-| `logTime` | prints or dumps | app/js/worker.js:274, app/js/worker.js:2141 |  |
-| `logTop` | prints or dumps | app/js/worker.js:2252 |  |
-| `noAutoGains` | turns a stage off | app/js/worker.js:290 |  |
-| `noBank` | turns a stage off | app/js/worker.js:1239, app/js/worker.js:1257 |  |
-| `noBisg` | turns a stage off | app/js/worker.js:1206, app/js/worker.js:2106 |  |
-| `noCustomWb` | turns a stage off | app/js/worker.js:298 |  |
+| `lcost` | tuning value | app/js/worker.js:2326 |  |
+| `legacy` | tuning value | app/js/worker.js:755, app/js/worker.js:1456, app/js/worker.js:271 |  |
+| `logTime` | prints or dumps | app/js/worker.js:278, app/js/worker.js:2201 |  |
+| `logTop` | prints or dumps | app/js/worker.js:2312 |  |
+| `noAutoGains` | turns a stage off | app/js/worker.js:294 |  |
+| `noBank` | turns a stage off | app/js/worker.js:1297, app/js/worker.js:1315 |  |
+| `noBisg` | turns a stage off | app/js/worker.js:1264, app/js/worker.js:2166 |  |
+| `noCustomWb` | turns a stage off | app/js/worker.js:302 |  |
 | `noDefect` | turns a stage off | app/js/core/lytroedof.js:509 |  |
-| `noDm5` | turns a stage off | app/js/worker.js:1170 |  |
-| `noDmExact` | turns a stage off | app/js/worker.js:1105 |  |
-| `noEar` | turns a stage off | app/js/worker.js:1265 |  |
-| `noEngineRaster` | turns a stage off | app/js/worker.js:2095 |  |
-| `noEngineWb` | turns a stage off | app/js/worker.js:267 |  |
-| `noExact` | turns a stage off | app/js/worker.js:1396, app/js/worker.js:1100, app/js/worker.js:2044 |  |
-| `noExactDepth` | turns a stage off | app/js/worker.js:1103 |  |
-| `noExtras` | turns a stage off | app/js/worker.js:1145 |  |
-| `noFill` | turns a stage off | app/js/worker.js:1223 |  |
-| `noGpuBlur` | turns a stage off | app/js/worker.js:2111 |  |
-| `noGpuCost` | turns a stage off | app/js/worker.js:2282 |  |
-| `noGpuEngine` | turns a stage off | app/js/worker.js:1209, app/js/worker.js:2106 |  |
-| `noGpuModulation` | turns a stage off | app/js/worker.js:2062 |  |
-| `noGpuNr` | turns a stage off | app/js/worker.js:394, app/js/worker.js:522 |  |
-| `noGpuRegions` | turns a stage off | app/js/worker.js:709 |  |
-| `noGpuSolve` | turns a stage off | app/js/worker.js:2282 |  |
-| `noGpuViews` | turns a stage off | app/js/worker.js:2106 |  |
-| `noisy` | tuning value | app/js/worker.js:2258 |  |
+| `noDm5` | turns a stage off | app/js/worker.js:1228 |  |
+| `noDmExact` | turns a stage off | app/js/worker.js:1163 |  |
+| `noEar` | turns a stage off | app/js/worker.js:1323 |  |
+| `noEngineRaster` | turns a stage off | app/js/worker.js:2155 |  |
+| `noEngineWb` | turns a stage off | app/js/worker.js:271 |  |
+| `noExact` | turns a stage off | app/js/worker.js:1456, app/js/worker.js:1158, app/js/worker.js:2104 |  |
+| `noExactDepth` | turns a stage off | app/js/worker.js:1161 |  |
+| `noExtras` | turns a stage off | app/js/worker.js:1203 |  |
+| `noFill` | turns a stage off | app/js/worker.js:1281 |  |
+| `noGpuBlur` | turns a stage off | app/js/worker.js:2171 |  |
+| `noGpuCost` | turns a stage off | app/js/worker.js:2342 |  |
+| `noGpuEngine` | turns a stage off | app/js/worker.js:1267, app/js/worker.js:2166 |  |
+| `noGpuModulation` | turns a stage off | app/js/worker.js:2122 |  |
+| `noGpuNr` | turns a stage off | app/js/worker.js:398, app/js/worker.js:554 |  |
+| `noGpuRegions` | turns a stage off | app/js/worker.js:742 |  |
+| `noGpuSolve` | turns a stage off | app/js/worker.js:2342 |  |
+| `noGpuViews` | turns a stage off | app/js/worker.js:2166 |  |
+| `noisy` | tuning value | app/js/worker.js:2318 |  |
 | `noLutBlack` | turns a stage off | app/js/core/raw.js:150 |  |
-| `noModulation` | turns a stage off | app/js/worker.js:1196 |  |
-| `noNotch` | turns a stage off | app/js/worker.js:1275 |  |
-| `noTable` | turns a stage off | app/js/worker.js:1201 |  |
-| `noWbCct` | turns a stage off | app/js/worker.js:305 |  |
-| `noWbRel` | turns a stage off | app/js/worker.js:284 |  |
-| `oldEstimator` | tuning value | app/js/worker.js:2271, app/js/worker.js:2277 |  |
-| `own5` | tuning value | app/js/worker.js:1149 |  |
-| `ownField` | tuning value | app/js/worker.js:1123 |  |
-| `ownGain` | tuning value | app/js/worker.js:1145 |  |
-| `ownPlace` | tuning value | app/js/worker.js:1115 |  |
-| `ownShift` | tuning value | app/js/worker.js:1127 |  |
-| `passes` | tuning value | app/js/worker.js:2267 |  |
-| `place` | tuning value | app/js/worker.js:1108 |  |
-| `printColor` | prints or dumps | app/js/core/enginemod.js:218, app/js/core/lytroedof.js:453, app/js/worker.js:244 |  |
-| `printGeo` | prints or dumps | app/js/worker.js:1468 |  |
-| `printGrid` | prints or dumps | app/js/worker.js:747, app/js/worker.js:2260, app/js/worker.js:1144 |  |
-| `rasterFinish` | tuning value | app/js/worker.js:2299 |  |
-| `rawModulation` | tuning value | app/js/worker.js:2052 |  |
-| `rwOpts` | tuning value | app/js/worker.js:1201, app/js/worker.js:2104 |  |
-| `shiftConst` | tuning value | app/js/worker.js:1107, app/js/worker.js:1145, app/js/worker.js:1191 |  |
-| `splat` | tuning value | app/js/worker.js:1219, app/js/worker.js:2140 |  |
-| `trws` | tuning value | app/js/worker.js:2265 |  |
-| `viewAp` | tuning value | app/js/worker.js:2175 |  |
-| `viewCct` | tuning value | app/js/worker.js:2186 |  |
-| `viewKernel` | tuning value | app/js/worker.js:2109, app/js/worker.js:2110, app/js/worker.js:2145 |  |
-| `viewKernelY` | tuning value | app/js/worker.js:2110, app/js/worker.js:2145 |  |
-| `viewOnly` | tuning value | app/js/worker.js:2093 |  |
-| `viewRadius` | tuning value | app/js/worker.js:2090 |  |
-| `viewRing` | tuning value | app/js/worker.js:2091 |  |
-| `viewShiftScale` | tuning value | app/js/worker.js:2160 |  |
-| `viewsPlaced` | tuning value | app/js/worker.js:1122 |  |
-| `vigTiles` | tuning value | app/js/worker.js:1072 |  |
+| `noModulation` | turns a stage off | app/js/worker.js:1254 |  |
+| `noNotch` | turns a stage off | app/js/worker.js:1333 |  |
+| `noTable` | turns a stage off | app/js/worker.js:1259 |  |
+| `noWbCct` | turns a stage off | app/js/worker.js:309 |  |
+| `noWbRel` | turns a stage off | app/js/worker.js:288 |  |
+| `oldEstimator` | tuning value | app/js/worker.js:2331, app/js/worker.js:2337 |  |
+| `own5` | tuning value | app/js/worker.js:1207 |  |
+| `ownField` | tuning value | app/js/worker.js:1181 |  |
+| `ownGain` | tuning value | app/js/worker.js:1203 |  |
+| `ownPlace` | tuning value | app/js/worker.js:1173 |  |
+| `ownShift` | tuning value | app/js/worker.js:1185 |  |
+| `passes` | tuning value | app/js/worker.js:2327 |  |
+| `place` | tuning value | app/js/worker.js:1166 |  |
+| `printColor` | prints or dumps | app/js/core/enginemod.js:218, app/js/core/lytroedof.js:453, app/js/worker.js:248 |  |
+| `printGeo` | prints or dumps | app/js/worker.js:1528 |  |
+| `printGrid` | prints or dumps | app/js/worker.js:780, app/js/worker.js:2320, app/js/worker.js:1202 |  |
+| `rasterFinish` | tuning value | app/js/worker.js:2359 |  |
+| `rawModulation` | tuning value | app/js/worker.js:2112 |  |
+| `rwOpts` | tuning value | app/js/worker.js:1259, app/js/worker.js:2164 |  |
+| `shiftConst` | tuning value | app/js/worker.js:1165, app/js/worker.js:1203, app/js/worker.js:1249 |  |
+| `splat` | tuning value | app/js/worker.js:1277, app/js/worker.js:2200 |  |
+| `trws` | tuning value | app/js/worker.js:2325 |  |
+| `viewAp` | tuning value | app/js/worker.js:2235 |  |
+| `viewCct` | tuning value | app/js/worker.js:2246 |  |
+| `viewKernel` | tuning value | app/js/worker.js:2169, app/js/worker.js:2170, app/js/worker.js:2205 |  |
+| `viewKernelY` | tuning value | app/js/worker.js:2170, app/js/worker.js:2205 |  |
+| `viewOnly` | tuning value | app/js/worker.js:2153 |  |
+| `viewRadius` | tuning value | app/js/worker.js:2150 |  |
+| `viewRing` | tuning value | app/js/worker.js:2151 |  |
+| `viewShiftScale` | tuning value | app/js/worker.js:2220 |  |
+| `viewsPlaced` | tuning value | app/js/worker.js:1180 |  |
+| `vigTiles` | tuning value | app/js/worker.js:1120 |  |
 
 ## Hooks (`globalThis.__<name>`)
 
@@ -99,15 +99,15 @@ Read with `hook('name')`, published with `setHook('name', value)`.
 | Name | Kind | Used at | Comment in the code |
 |---|---|---|---|
 | `appliedSettings` | harness value | app/js/main.js:3570 | for tests: what the page sends the engine |
-| `awbDump` | callback: receives a stage's result | app/js/worker.js:2154 |  |
+| `awbDump` | callback: receives a stage's result | app/js/worker.js:2214 |  |
 | `bankFS` | harness value | app/js/core/lytroedof.js:250 |  |
 | `bisgEngineMatrix` | harness value | app/js/core/lytroedof.js:803 |  |
-| `blurCheckResult` | callback: receives a stage's result | app/js/worker.js:2128, app/js/worker.js:2129 |  |
-| `cmpDump` | callback: receives a stage's result | app/js/worker.js:1141 |  |
-| `depthDump` | callback: receives a stage's result | app/js/worker.js:2548 | debugging aid: the depth values behind the picture |
-| `depthFinal` | harness value | app/js/worker.js:1095 |  |
-| `depthOnly` | harness value | app/js/worker.js:1096 |  |
-| `depthOverride` | override | app/js/worker.js:1094, app/js/worker.js:1967 |  |
+| `blurCheckResult` | callback: receives a stage's result | app/js/worker.js:2188, app/js/worker.js:2189 |  |
+| `cmpDump` | callback: receives a stage's result | app/js/worker.js:1199 |  |
+| `depthDump` | callback: receives a stage's result | app/js/worker.js:2608 | debugging aid: the depth values behind the picture |
+| `depthFinal` | harness value | app/js/worker.js:1131, app/js/worker.js:1153 |  |
+| `depthOnly` | harness value | app/js/worker.js:1131, app/js/worker.js:1154 |  |
+| `depthOverride` | override | app/js/worker.js:1131, app/js/worker.js:1152, app/js/worker.js:2027 |  |
 | `depthProbe` | callback: receives a stage's result | app/js/core/superres.js:753, app/js/core/superres.js:754 |  |
 | `diagBins` | harness value | app/js/core/lytroedof.js:1011, app/js/core/lytroedof.js:1012 |  |
 | `disStats` | callback: receives a stage's result | app/js/core/superres.js:827 |  |
@@ -115,30 +115,30 @@ Read with `hook('name')`, published with `setHook('name', value)`.
 | `dumpSplat` | harness value | app/js/core/lytroedof.js:948, app/js/core/lytroedof.js:949 |  |
 | `dumpSplatAcc` | harness value | app/js/core/lytroedof.js:1193 |  |
 | `earStats` | callback: receives a stage's result | app/js/core/superres.js:822, app/js/core/superres.js:922 |  |
-| `edofLinear` | harness value | app/js/worker.js:1282 |  |
-| `extraOffset` | harness value | app/js/worker.js:2326, app/js/worker.js:2327, app/js/worker.js:2328 |  |
-| `finalDepthDump` | callback: receives a stage's result | app/js/worker.js:2491 |  |
+| `edofLinear` | harness value | app/js/worker.js:1131, app/js/worker.js:1340 |  |
+| `extraOffset` | harness value | app/js/worker.js:2386, app/js/worker.js:2387, app/js/worker.js:2388 |  |
+| `finalDepthDump` | callback: receives a stage's result | app/js/worker.js:2551 |  |
 | `focus` | harness value | app/js/core/superres.js:776, app/js/core/superres.js:787 |  |
-| `focusMetrics` | callback: receives a stage's result | app/js/worker.js:973 |  |
-| `focusOffset` | harness value | app/js/worker.js:975 |  |
-| `forceFullDepth` | override | app/js/worker.js:1822 |  |
-| `forceStyle` | override | app/js/worker.js:1884 |  |
-| `fs` | harness value | app/js/worker.js:89 | test harnesses |
-| `lytroDump` | callback: receives a stage's result | app/js/worker.js:1867, app/js/worker.js:1869 |  |
-| `lytroStats` | callback: receives a stage's result | app/js/worker.js:1283 |  |
+| `focusMetrics` | callback: receives a stage's result | app/js/worker.js:1006 |  |
+| `focusOffset` | harness value | app/js/worker.js:1008 |  |
+| `forceFullDepth` | override | app/js/worker.js:1882 |  |
+| `forceStyle` | override | app/js/worker.js:1944 |  |
+| `fs` | harness value | app/js/worker.js:93 | test harnesses |
+| `lytroDump` | callback: receives a stage's result | app/js/worker.js:1927, app/js/worker.js:1929 |  |
+| `lytroStats` | callback: receives a stage's result | app/js/worker.js:1341 |  |
 | `modBlack` | harness value | app/js/core/lytroedof.js:458 |  |
-| `noRayWarp` | override | app/js/worker.js:2335 |  |
-| `noTableLens` | override | app/js/worker.js:706 |  |
-| `ownShift` | harness value | app/js/worker.js:2326, app/js/worker.js:2327 |  |
-| `probeOnly` | harness value | app/js/worker.js:977 |  |
+| `noRayWarp` | override | app/js/worker.js:2395 |  |
+| `noTableLens` | override | app/js/worker.js:739 |  |
+| `ownShift` | harness value | app/js/worker.js:2386, app/js/worker.js:2387 |  |
+| `probeOnly` | harness value | app/js/worker.js:1010 |  |
 | `radialFix` | harness value | app/js/core/lytroedof.js:519 |  |
-| `rasterDump` | callback: receives a stage's result | app/js/worker.js:2309 |  |
+| `rasterDump` | callback: receives a stage's result | app/js/worker.js:2369 |  |
 | `rayDiag` | callback: receives a stage's result | app/js/core/lytroedof.js:1163, app/js/core/lytroedof.js:1166 |  |
 | `regionProbe` | callback: receives a stage's result | app/js/core/lytroedof.js:1173, app/js/core/lytroedof.js:1174 |  |
 | `robustStats` | callback: receives a stage's result | app/js/core/superres.js:685 |  |
 | `sharpAnyGpu` | harness value | app/js/main.js:1174 | (the flag: tests on a software renderer) |
 | `snapDump` | callback: receives a stage's result | app/js/core/segments.js:627 |  |
-| `state` | harness value | app/js/worker.js:89 | test harnesses |
-| `useGeo` | override | app/js/worker.js:699 |  |
+| `state` | harness value | app/js/worker.js:93 | test harnesses |
+| `useGeo` | override | app/js/worker.js:732 |  |
 | `viewColorsDump` | callback: receives a stage's result | app/js/core/depthmatch.js:131 |  |
 | `viewRawDump` | callback: receives a stage's result | app/js/core/depthmatch.js:114 |  |
