@@ -127,5 +127,5 @@ export function decodeKept(buffer) {
   return { key, w, h, rgb };
 }
 
-// The 16 hex digits naming a picture, from the text of its key.
-export const keptHash = (keyText) => hashKey(keyText);
+// The 16 characters naming a picture, from the text of its key. (hashKey can give 17, with a minus sign, when its second hash goes negative: the header holds 16, so the sign becomes an 'n'.)
+export const keptHash = (keyText) => hashKey(keyText).replace('-', 'n').padEnd(16, '0').slice(0, 16);
