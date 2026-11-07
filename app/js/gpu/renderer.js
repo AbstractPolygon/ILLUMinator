@@ -2883,9 +2883,10 @@ export class GpuRenderer {
 
   // A copy of `src` that later renders leave alone (full float, so drawing
   // from it gives the same picture as drawing from `src`).
-  keep(src, w, h) {
+  // `slot` names another copy (the full sensor still's) that the live view's does not replace.
+  keep(src, w, h, slot = '') {
     const gl = this.gl;
-    const key = `${w}x${h}:kept`;
+    const key = `${w}x${h}:kept${slot ? `:${slot}` : ''}`;
     let t = this.pool.get(key);
     if (!t) {
       t = this.texture(w, h);
@@ -3009,6 +3010,16 @@ export class GpuRenderer {
       this.pool.set(key, t);
     }
     return t;
+  }
+
+  // Frees the full sensor still kept before its color pass (see worker.js stillKey).
+  releaseKeptStill() {
+    for (const [key, t] of this.pool) {
+      if (key.endsWith(':kept:still')) {
+        this.gl.deleteTexture(t);
+        this.pool.delete(key);
+      }
+    }
   }
 
   // Frees the depth work textures (they are large; depth is measured once

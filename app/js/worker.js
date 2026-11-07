@@ -55,6 +55,7 @@ import { parseMasks, activeMasks, packMasks, resolveMasks, hasSpatial, applySpat
 import { GpuRenderer } from './gpu/renderer.js';
 import { lytroSplatGpu } from './gpu/lytroengine.js';
 import { debugFlags, hook, setHook } from './core/debugflags.js';
+import { COLOR_SETTINGS } from './settingsmap.js';
 
 // Requests whose picture is wanted at 16 bits per channel (see finishGpu).
 const bits16Ids = new Set();
@@ -82,6 +83,9 @@ const state = {
   // view()); `kept` is the last view before its color pass, on the GPU.
   gen: 0,
   kept: null,
+  // The last full sensor picture before its color pass (see stillKey): on the GPU (`keptStill`), or as RGB for the engine's all in focus picture (`keptEdof`).
+  keptStill: null,
+  keptEdof: null,
   refocusBuild: null,
   jobs: {},
   scratch: null,
@@ -412,12 +416,42 @@ function toPixels(rgb, w, h, ctx, cs = state, distortionCorrected = false, onGpu
   return sharp(toneMap(defringe(srgb, w, h, f), IDENTITY, exposure, undefined, cs.look, local, grade, cs.lytro && cs.lytro.pre ? { ...cs.lytro, pre: null } : cs.lytro));
 }
 
+// A full sensor picture is kept before its color pass, so a change to the color settings (Process, Optics, local adjustments) makes it again from the kept picture instead
+// of from the sensor. What decides the picture before that pass is the photo, its depth and the settings that are not color settings (`stillKey`); `parts` adds what the
+// request itself carries, and `skip` names settings that only the color pass reads for this kind of picture.
+const objectIds = new WeakMap();
+let nextObjectId = 1;
+function objectId(o) {
+  if (!o || typeof o !== 'object') return o ?? null;
+  let id = objectIds.get(o);
+  if (!id) {
+    id = nextObjectId++;
+    objectIds.set(o, id);
+  }
+  return id;
+}
+const COLOR_PASS_SETTINGS = new Set([...COLOR_SETTINGS.map(([path]) => path.split('.')[0]), 'curve', 'ccm', 'local']);
+function stillKey(parts, skip = []) {
+  const rest = {};
+  for (const [k, v] of Object.entries(state.settings)) if (!COLOR_PASS_SETTINGS.has(k) && !skip.includes(k)) rest[k] = v;
+  return JSON.stringify([
+    state.gen, objectId(state.sampler), objectId(state.depth), objectId(state.depthPlain), objectId(state.depthRaw), objectId(state.userDepth), objectId(state.vignetting),
+    objectId(state.lensOffsets), state.focusOffset ?? null, objectId(state.modulation), rest, debugFlags(), parts,
+  ]);
+}
+// Frees the kept pictures (the photo or its sampler changed).
+function dropKeptStills() {
+  state.keptStill = null;
+  state.keptEdof = null;
+  if (state.gpu && state.gpu.releaseKeptStill) state.gpu.releaseKeptStill();
+}
+
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
 // field and bokeh, then color, defringing and tone mapping) and posts it as
 // an ImageBitmap. `pxPerUnit`: blur pixels per unit of focus difference per
 // unit of `dof`, for this image's size. `keep`: keep the picture as it is
 // before the color pass, so color changes can redraw it (see view()).
-async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, draft = false, mode = undefined, color = null, distortionCorrected = false }, message) {
+async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPerUnit, masks = { focus: alpha }, keep = null, keepStill = null, draft = false, mode = undefined, color = null, distortionCorrected = false }, message) {
   const gpu = state.gpu;
   if (dof > 0 && (await ensureViewDepth(id))) {
     // Whatever really is at the focus depth stays sharp, also where the depth map has it wrong (thin near objects, such as the wires of a fence): see GpuRenderer.focusMask.
@@ -447,6 +481,7 @@ async function presentGpu(id, tex, w, h, { alpha = 0, dof = 0, bokeh = {}, pxPer
   const packed = packedMasks(masks);
   if (packed && packed.spatial) tex = gpu.localSpatial(tex, w, h, packed);
   if (keep) state.kept = { key: keep, tex: gpu.keep(tex, w, h), w, h };
+  if (keepStill) state.keptStill = { key: keepStill, tex: gpu.keep(tex, w, h, 'still'), w, h };
   finishGpu(tex, w, h, packed, message, colorState(color), distortionCorrected, masks, mode || (draft ? 'draft' : undefined));
 }
 
@@ -571,6 +606,7 @@ function rebuildSampler() {
   state.center = null;
   state.engineViews = undefined;
   state.gen++;
+  dropKeptStills();
   state.refocusViews = null;
   state.vignetting = null;
   // From the camera's calibration when it has the white image for this photo
@@ -984,6 +1020,21 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     await renderFullSensor({ alpha: 0, allInFocus: true, u: 0, v: 0, scale, passes: 0, base: await allInFocusBase(id, 0, 0) }, () => {});
     if (state.jobs.superres !== job) return { cancelled: true };
   }
+  // The same picture was made just before (only color settings changed since): its color pass again, from the kept picture.
+  const stillCtx = { focus: alpha, overrides: masks, view: viewOf(u, v) };
+  let keepStill = null;
+  if (state.gpu && !color && !quiet) {
+    const csKept = colorState(color);
+    const lensKey = csKept.lens ? [csKept.lens.k || 0, csKept.lens.k2 || 0, csKept.lens.edge || 0, csKept.lens.zoom || 1] : null;
+    const packedKept = packedMasks(stillCtx);
+    const { W: keptW, H: keptH } = superResParams(sampler, { scale });
+    keepStill = stillKey(['sr', scale, passes, alpha, u, v, aperture, dof, bokeh || null, state.detail, packedKept && packedKept.spatial ? packedKept : null, lensKey]);
+    if (state.keptStill && state.keptStill.key === keepStill && state.keptStill.w === keptW && state.keptStill.h === keptH) {
+      progress(label, 1);
+      finishGpu(state.keptStill.tex, keptW, keptH, packedKept, { id, type: 'result' }, csKept, true, stillCtx, undefined);
+      return undefined;
+    }
+  }
   const opts = apertureOptions({ u, v, aperture });
   // A refocused (not all in focus) base stays on the graphics card when the full render runs there.
   const baseOnGpu = !allInFocus && state.gpu && state.gpu.views && state.gpu.floatBlend;
@@ -1002,7 +1053,7 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
     if (tex) {
       state.lensOffsets = state.gpu.lensOffsets;
       if (state.jobs.superres !== job) return { cancelled: true };
-      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: { focus: alpha, overrides: masks, view: viewOf(u, v) }, distortionCorrected: true }, { id, type: 'result' });
+      await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: stillCtx, keepStill, distortionCorrected: true }, { id, type: 'result' });
       return undefined;
     }
   }
@@ -1076,212 +1127,224 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
   const { W, H } = superResParams(sampler, { scale });
   const cs = colorState(color);
   const dbg = debugFlags();
-  if (dbg.dumpField && lf.rayWarpBytes) {
-    const rw = parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true });
-    const out = new Float64Array(4);
-    const rows = [];
-    for (let j = 0; j <= 6; j++) {
-      const row = [];
-      for (let i = 0; i <= 6; i++) {
-        const cell = rw.lens(-0.49 + (0.98 * i) / 6, -0.49 + (0.98 * j) / 6);
-        rw.fromLens(cell, 0, 0, out);
-        row.push([+(out[0] * lf.cam.width / lf.grid.rowStep).toFixed(2), +(out[1] * lf.cam.height / lf.grid.rowStep).toFixed(2)]);
+  // The same picture was made just before (only color settings changed since; the sharpening and noise reduction and the local adjustments are part of the color pass here):
+  // its rays are not combined again.
+  const keepKey = !color && !quiet ? stillKey(['edof', scale], ['details']) : null;
+  const reuse = !!keepKey && !!state.keptEdof && state.keptEdof.key === keepKey && state.keptEdof.W === W && state.keptEdof.H === H
+    && !dbg.dumpField && !dbg.cmpDepth && !hook('depthOverride') && !hook('depthFinal') && !hook('depthOnly') && !hook('edofLinear');
+  let out;
+  if (reuse) {
+    out = state.keptEdof.out;
+    progress('Splatting the rays', 1);
+  } else {
+    if (dbg.dumpField && lf.rayWarpBytes) {
+      const rw = parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true });
+      const out = new Float64Array(4);
+      const rows = [];
+      for (let j = 0; j <= 6; j++) {
+        const row = [];
+        for (let i = 0; i <= 6; i++) {
+          const cell = rw.lens(-0.49 + (0.98 * i) / 6, -0.49 + (0.98 * j) / 6);
+          rw.fromLens(cell, 0, 0, out);
+          row.push([+(out[0] * lf.cam.width / lf.grid.rowStep).toFixed(2), +(out[1] * lf.cam.height / lf.grid.rowStep).toFixed(2)]);
+        }
+        rows.push(row);
       }
-      rows.push(row);
+      console.log('RAYFIELD', JSON.stringify(rows));
     }
-    console.log('RAYFIELD', JSON.stringify(rows));
-  }
-  if (hook('depthOverride')) state.depth = { ...state.depth, alpha: hook('depthOverride') };
-  if (hook('depthFinal')) hook('depthFinal')(state.depth.alpha, state.sampler.outW, state.sampler.outH);
-  if (hook('depthOnly')) return { cancelled: true };
-  // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
-  // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
-  // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
-  const exactGeo = !dbg.legacy && !dbg.noExact && !!lf.geometryBytes && !!lf.rayWarpBytes && !!lf.metadata;
-  // With the engine's exact geometry its depth map needs no fitted placement: it is read where the ray falls on the sensor.
-  const engineMap = state.depthRaw && state.depthRaw.engineMap ? state.depthRaw.engineMap : state.userDepth && state.depthRaw && state.depthRaw.fromLytro && state.settings.lytroDepth !== false ? state.userDepth : null;
-  const exactDepth = exactGeo && !!engineMap && !dbg.noExactDepth;
-  if (exactDepth && (!state.depthExact || state.depthExact.src !== engineMap || state.depthExact.key !== `${state.sampler.outW}x${state.sampler.outH}`)) {
-    state.depthExact = { src: engineMap, key: `${state.sampler.outW}x${state.sampler.outH}`, ...engineDepthInFrame(engineMap, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL, !dbg.noDmExact) };
-  }
-  const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? (dbg.legacy ? ENGINE_DEPTH_SHIFT : 0)) * LAMBDA_TO_ALPHA : 0;
-  const place = { ...ENGINE_PLACE, ...(dbg.place || {}) };
-  const placeKey = JSON.stringify(place);
-  if (engineShift && (!state.depthEngine || state.depthEngine.key !== placeKey || state.depthEngine.src !== state.depthRaw)) {
-    const { outW, outH } = state.sampler;
-    const alpha = withPlace(place, () => userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH)));
-    state.depthEngine = { key: placeKey, src: state.depthRaw, plain: smoothedDepth(alpha, state.depthRaw.confidence) };
-  }
-  const ownPlace = !engineShift && !state.pp && state.depthPlain && dbg.ownPlace ? { kx: 1, ky: 1, dx: 0, dy: 0, ...dbg.ownPlace } : null;
-  if (ownPlace && (!state.depthOwn || state.depthOwn.key !== JSON.stringify(ownPlace) || state.depthOwn.src !== state.depthPlain)) {
-    state.depthOwn = { key: JSON.stringify(ownPlace), src: state.depthPlain, plain: placedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownPlace) };
-  }
-  // A depth measured here is in the frame of the plain views: the engine's rays start where the ray table puts them (up to +-32 lens pixels at the picture corners on b4-1),
-  // so the depth is read through the table's origin field (b4-1e edge blocks 10.7 8.6 8.3 -> 6.6 7.8 5.9, whole 3.35 -> 3.07; b4-2 5.36 -> 5.33, b4-3 unchanged).
-  // Views rendered through the geometry and ray tables (prepareEngineViews) give a depth that is already in the engine's frame.
-  const viewsEngine = !!state.engineViews && !state.depthRaw?.fromLytro && !dbg.viewsPlaced;
-  const ownField = !engineShift && !state.pp && !viewsEngine && state.depthPlain && state.lf.rayWarpBytes ? (dbg.ownField ?? 1) : 0;
-  if (ownField && (!state.depthOwnF || state.depthOwnF.sign !== ownField || state.depthOwnF.exact !== exactGeo || state.depthOwnF.src !== state.depthPlain)) {
-    state.depthOwnF = { sign: ownField, exact: exactGeo, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField, exactGeo) };
-  }
-  const ownShift = !engineShift && !state.pp && !viewsEngine && state.depthPlain ? ((dbg.ownShift ?? OWN_DEPTH_SHIFT) === 'table' ? Math.max(0, -activeRayWarpForShift() / LAMBDA_TO_ALPHA - 1) : (dbg.ownShift ?? OWN_DEPTH_SHIFT)) * LAMBDA_TO_ALPHA : 0;
-  if (dbg.cmpDepth && state.userDepth) {
-    // debug: our depth against the engine's in the picture's frame (alpha -> lambda): mean difference, spread, and the fit ours = a * engine + b
-    const eng = engineDepthInFrame(state.userDepth, state.sampler, state.lf.cam, 5).plain;
-    const n = eng.length;
-    let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, m = 0;
-    for (let i = 0; i < n; i++) {
-      const a = eng[i] / LAMBDA_TO_ALPHA;
-      const b = (ownField ? state.depthOwnF.plain[i] : state.depthPlain[i]) / LAMBDA_TO_ALPHA;
-      sx += a; sy += b; sxx += a * a; sxy += a * b; syy += b * b; m++;
+    if (hook('depthOverride')) state.depth = { ...state.depth, alpha: hook('depthOverride') };
+    if (hook('depthFinal')) hook('depthFinal')(state.depth.alpha, state.sampler.outW, state.sampler.outH);
+    if (hook('depthOnly')) return { cancelled: true };
+    // The engine reads its depth map upscaled 5 times with edge preserving weights (DmResampler); only where its own depth map is what the picture uses.
+    // Lytro's depth maps seen through the engine's rays sit about 1 lambda off the plain rays (b4-1e -0.9, b4-3 -1.1 from the app's ray table estimate; the estimate is -4.5 on b4-2, where a constant
+    // -1 scores as well as none: MAE against the engine's own picture 5.1 vs 5.3 with the estimate, 35.8 when the x5 map did not move with it).
+    const exactGeo = !dbg.legacy && !dbg.noExact && !!lf.geometryBytes && !!lf.rayWarpBytes && !!lf.metadata;
+    // With the engine's exact geometry its depth map needs no fitted placement: it is read where the ray falls on the sensor.
+    const engineMap = state.depthRaw && state.depthRaw.engineMap ? state.depthRaw.engineMap : state.userDepth && state.depthRaw && state.depthRaw.fromLytro && state.settings.lytroDepth !== false ? state.userDepth : null;
+    const exactDepth = exactGeo && !!engineMap && !dbg.noExactDepth;
+    if (exactDepth && (!state.depthExact || state.depthExact.src !== engineMap || state.depthExact.key !== `${state.sampler.outW}x${state.sampler.outH}`)) {
+      state.depthExact = { src: engineMap, key: `${state.sampler.outW}x${state.sampler.outH}`, ...engineDepthInFrame(engineMap, state.sampler, state.lf.cam, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL, !dbg.noDmExact) };
     }
-    const slope = (m * sxy - sx * sy) / (m * sxx - sx * sx);
-    const icpt = (sy - slope * sx) / m;
-    const corr = (m * sxy - sx * sy) / Math.sqrt((m * sxx - sx * sx) * (m * syy - sy * sy));
-    if (hook('cmpDump')) hook('cmpDump')(eng, ownField ? state.depthOwnF.plain : state.depthPlain, state.sampler.outW, state.sampler.outH);
-    console.error('CMPDEPTH', JSON.stringify({ meanEng: sx / m, meanOurs: sy / m, slope, icpt, corr }));
-  }
-  if (dbg.printGrid) console.error('DEPTHPATH', JSON.stringify({ exactDepth, engineShift, ownField, hasOffsets: !!state.exactOffsets, fromLytro: !!(state.depthRaw && state.depthRaw.fromLytro), pp: !!state.pp, userDepth: !!state.userDepth }));
-  const depthUsed = exactDepth ? Float32Array.from(state.depthExact.plain, (x) => x + (dbg.shiftConst ?? 0) * LAMBDA_TO_ALPHA) : engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
-  state.usmMap = null;
-  state.usmDepth = state.pp ? null : { lambda: Float32Array.from(depthUsed, (a) => a / LAMBDA_TO_ALPHA), w: state.sampler.outW, h: state.sampler.outH };
-  let depth5 = null;
-  if (!state.userDepth && !state.pp && dbg.own5) {
-    // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
-    const { outW, outH } = state.sampler;
-    const k = `own:${outW}x${outH}:${state.depthSmoothingApplied}:${ownPlace ? state.depthOwn.key : ''}`;
-    if (!state.depth5 || state.depth5.key !== k || state.depth5.src !== state.depthPlain) {
-      const lambda = Float32Array.from(ownPlace ? state.depthOwn.plain : state.depthPlain, (a) => a / LAMBDA_TO_ALPHA);
+    const engineShift = state.depthRaw && state.depthRaw.fromLytro && state.depthPlain ? (dbg.shiftConst ?? (dbg.legacy ? ENGINE_DEPTH_SHIFT : 0)) * LAMBDA_TO_ALPHA : 0;
+    const place = { ...ENGINE_PLACE, ...(dbg.place || {}) };
+    const placeKey = JSON.stringify(place);
+    if (engineShift && (!state.depthEngine || state.depthEngine.key !== placeKey || state.depthEngine.src !== state.depthRaw)) {
+      const { outW, outH } = state.sampler;
+      const alpha = withPlace(place, () => userDepthAlpha(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, outW, outH)));
+      state.depthEngine = { key: placeKey, src: state.depthRaw, plain: smoothedDepth(alpha, state.depthRaw.confidence) };
+    }
+    const ownPlace = !engineShift && !state.pp && state.depthPlain && dbg.ownPlace ? { kx: 1, ky: 1, dx: 0, dy: 0, ...dbg.ownPlace } : null;
+    if (ownPlace && (!state.depthOwn || state.depthOwn.key !== JSON.stringify(ownPlace) || state.depthOwn.src !== state.depthPlain)) {
+      state.depthOwn = { key: JSON.stringify(ownPlace), src: state.depthPlain, plain: placedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownPlace) };
+    }
+    // A depth measured here is in the frame of the plain views: the engine's rays start where the ray table puts them (up to +-32 lens pixels at the picture corners on b4-1),
+    // so the depth is read through the table's origin field (b4-1e edge blocks 10.7 8.6 8.3 -> 6.6 7.8 5.9, whole 3.35 -> 3.07; b4-2 5.36 -> 5.33, b4-3 unchanged).
+    // Views rendered through the geometry and ray tables (prepareEngineViews) give a depth that is already in the engine's frame.
+    const viewsEngine = !!state.engineViews && !state.depthRaw?.fromLytro && !dbg.viewsPlaced;
+    const ownField = !engineShift && !state.pp && !viewsEngine && state.depthPlain && state.lf.rayWarpBytes ? (dbg.ownField ?? 1) : 0;
+    if (ownField && (!state.depthOwnF || state.depthOwnF.sign !== ownField || state.depthOwnF.exact !== exactGeo || state.depthOwnF.src !== state.depthPlain)) {
+      state.depthOwnF = { sign: ownField, exact: exactGeo, src: state.depthPlain, plain: fieldPlacedGrid(state.depthPlain, state.sampler.outW, state.sampler.outH, ownField, exactGeo) };
+    }
+    const ownShift = !engineShift && !state.pp && !viewsEngine && state.depthPlain ? ((dbg.ownShift ?? OWN_DEPTH_SHIFT) === 'table' ? Math.max(0, -activeRayWarpForShift() / LAMBDA_TO_ALPHA - 1) : (dbg.ownShift ?? OWN_DEPTH_SHIFT)) * LAMBDA_TO_ALPHA : 0;
+    if (dbg.cmpDepth && state.userDepth) {
+      // debug: our depth against the engine's in the picture's frame (alpha -> lambda): mean difference, spread, and the fit ours = a * engine + b
+      const eng = engineDepthInFrame(state.userDepth, state.sampler, state.lf.cam, 5).plain;
+      const n = eng.length;
+      let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, m = 0;
+      for (let i = 0; i < n; i++) {
+        const a = eng[i] / LAMBDA_TO_ALPHA;
+        const b = (ownField ? state.depthOwnF.plain[i] : state.depthPlain[i]) / LAMBDA_TO_ALPHA;
+        sx += a; sy += b; sxx += a * a; sxy += a * b; syy += b * b; m++;
+      }
+      const slope = (m * sxy - sx * sy) / (m * sxx - sx * sx);
+      const icpt = (sy - slope * sx) / m;
+      const corr = (m * sxy - sx * sy) / Math.sqrt((m * sxx - sx * sx) * (m * syy - sy * sy));
+      if (hook('cmpDump')) hook('cmpDump')(eng, ownField ? state.depthOwnF.plain : state.depthPlain, state.sampler.outW, state.sampler.outH);
+      console.error('CMPDEPTH', JSON.stringify({ meanEng: sx / m, meanOurs: sy / m, slope, icpt, corr }));
+    }
+    if (dbg.printGrid) console.error('DEPTHPATH', JSON.stringify({ exactDepth, engineShift, ownField, hasOffsets: !!state.exactOffsets, fromLytro: !!(state.depthRaw && state.depthRaw.fromLytro), pp: !!state.pp, userDepth: !!state.userDepth }));
+    const depthUsed = exactDepth ? Float32Array.from(state.depthExact.plain, (x) => x + (dbg.shiftConst ?? 0) * LAMBDA_TO_ALPHA) : engineShift ? Float32Array.from(state.depthEngine.plain, (x) => x + engineShift) : ownField ? Float32Array.from(state.depthOwnF.plain, (x, i) => x * (dbg.ownGain ?? 1) + ownShift + (dbg.noExtras ? 0 : state.depth.alpha[i] - state.depthPlain[i])) : ownPlace ? Float32Array.from(state.depthOwn.plain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : ownShift ? Float32Array.from(state.depthPlain, (x) => x * (dbg.ownGain ?? 1) + ownShift) : state.depth.alpha;
+    state.usmMap = null;
+    state.usmDepth = state.pp ? null : { lambda: Float32Array.from(depthUsed, (a) => a / LAMBDA_TO_ALPHA), w: state.sampler.outW, h: state.sampler.outH };
+    let depth5 = null;
+    if (!state.userDepth && !state.pp && dbg.own5) {
+      // A depth measured here goes through the same upscaling (the engine upscales whatever depth it has): the map is in lambda on the sampler's grid.
+      const { outW, outH } = state.sampler;
+      const k = `own:${outW}x${outH}:${state.depthSmoothingApplied}:${ownPlace ? state.depthOwn.key : ''}`;
+      if (!state.depth5 || state.depth5.key !== k || state.depth5.src !== state.depthPlain) {
+        const lambda = Float32Array.from(ownPlace ? state.depthOwn.plain : state.depthPlain, (a) => a / LAMBDA_TO_ALPHA);
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (const v of lambda) {
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        const data = Float32Array.from(lambda, (v) => (v - lo) / (hi - lo));
+        state.depth5 = { key: k, src: state.depthPlain, map: userDepthAlphaUpscaled({ width: outW, height: outH, data, min: lo, max: hi, identity: true }, state.sampler, state.lf.cam, 0, null, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
+      }
+      depth5 = state.depth5.map;
+      const grow = dbg.d5Grow ?? D5_GROW;
+      if (grow) {
+        if (state.depth5.grown?.r !== grow || state.depth5.grown.round !== !!dbg.d5Round) state.depth5.grown = { r: grow, round: !!dbg.d5Round, map: dilateNearest(state.depth5.map, grow, !!dbg.d5Round) };
+        depth5 = state.depth5.grown.map;
+      }
+    } else if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
+      const key = `${state.sampler.outW}x${state.sampler.outH}:${placeKey}`;
+      if (!state.depth5 || state.depth5.key !== key || state.depth5.src !== state.userDepth) {
+        state.depth5 = { key, src: state.userDepth, map: withPlace(place, () => userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL)) };
+      }
+      depth5 = state.depth5.map;
+      const grow = dbg.d5Grow ?? D5_GROW;
+      if (grow) {
+        if (state.depth5.grown?.r !== grow || state.depth5.grown.round !== !!dbg.d5Round) state.depth5.grown = { r: grow, round: !!dbg.d5Round, map: dilateNearest(state.depth5.map, grow, !!dbg.d5Round) };
+        depth5 = state.depth5.grown.map;
+      }
+      // the upscaled map moves with the depth the march range comes from, or the two disagree
+      if (engineShift) {
+        const key2 = `${engineShift}:${grow}:${!!dbg.d5Round}`;
+        if (!state.depth5.shifted || state.depth5.shiftedKey !== key2) {
+          state.depth5.shifted = { ...depth5, data: Float32Array.from(depth5.data, (x) => x + engineShift) };
+          state.depth5.shiftedKey = key2;
+        }
+        depth5 = state.depth5.shifted;
+      }
+    }
+    if (exactDepth) depth5 = dbg.shiftConst ? { ...state.depthExact.up, data: Float32Array.from(state.depthExact.up.data, (x) => x + dbg.shiftConst * LAMBDA_TO_ALPHA) } : state.depthExact.up;
+    progress('Splatting the rays', 0);
+    if (state.modulation === undefined) state.modulation = lf.readModulation ? await loadModulation(lf) : null;
+    const sp = lytroSplat({
+      depth5,
+      modulation: dbg.noModulation ? null : state.modulation,
+      geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
+      lensShift: exactGeo ? await lensShiftForPhoto(id) : null,
+      raw: lf.raw, cam: lf.cam, dev, grid: exactGeo ? engineLatticeIdx(lf) : probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
+      // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
+      rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
+      onProgress: (p) => progress('Splatting the rays', p),
+    }, {
+      ...LYTRO_SPLAT,
+      exact: exactGeo,
+      bisg: exactGeo && !dbg.noBisg,
+      aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, exactGeo ? (dbg.apFraction ?? (exactDepth ? EXACT_APERTURE_FRACTION : EXACT_APERTURE_FRACTION_OWN)) : ENGINE_APERTURE_FRACTION),
+      // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
+      gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
+        try {
+          const acc = lytroSplatGpu(state.gpu, input, (p) => progress('Splatting the rays', p));
+          if (acc) state.lytroGpu = true;
+          return acc;
+        } catch (e) {
+          gpuFellBack('Rendering the sensor rays', e);
+          return null;
+        }
+      } : null,
+      ...(dbg.splat || {}),
+    });
+    if (state.jobs.superres !== job) return { cancelled: true };
+    progress('Filling holes', 0);
+    const filled = dbg.noFill ? null : fillHoles(sp.acc, W, H);
+    const img = new Float32Array(W * H * 3);
+    for (let p = 0; p < W * H; p++) {
+      if (filled) {
+        img[3 * p] = filled[4 * p];
+        img[3 * p + 1] = filled[4 * p + 1];
+        img[3 * p + 2] = filled[4 * p + 2];
+      } else {
+        const a = sp.acc[4 * p + 3] || 1;
+        img[3 * p] = sp.acc[4 * p] / a;
+        img[3 * p + 1] = sp.acc[4 * p + 1] / a;
+        img[3 * p + 2] = sp.acc[4 * p + 2] / a;
+      }
+    }
+    out = img;
+    // The engine's JointAdaptiveFilter (method 10) runs the photo's own reconstruction kernel PNG; the designed filters are only its fallback for photos without one.
+    if (!dbg.noBank && (dbg.bank === 'engine' || (dbg.bank !== 'photo' && !lf.reconFilter))) {
+      progress('Reconstructing with the filter bank', 0);
       let lo = Infinity;
       let hi = -Infinity;
-      for (const v of lambda) {
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
+      for (let p = 0; p < W * H; p++) {
+        const z = sp.zMap[p];
+        if (z < lo) lo = z;
+        if (z > hi) hi = z;
       }
-      const data = Float32Array.from(lambda, (v) => (v - lo) / (hi - lo));
-      state.depth5 = { key: k, src: state.depthPlain, map: userDepthAlphaUpscaled({ width: outW, height: outH, data, min: lo, max: hi, identity: true }, state.sampler, state.lf.cam, 0, null, 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL) };
+      // the standardized lightfield: 14 px disks
+      const imgW = (lf.cam.width * 14) / lf.grid.pitch;
+      const imgH = (lf.cam.height * 14) / lf.grid.pitch;
+      // opts: the engine's filters are keyed by its own lambda, which differs from the plain-ray lambda of a depth measured here by a per-photo amount
+      const bz = dbg.bankShift ? Float32Array.from(sp.zMap, (z) => z + dbg.bankShift) : sp.zMap;
+      const bank = buildEngineBank(W * (dbg.bankSize || 1), H * (dbg.bankSize || 1), imgW, imgH, lo + (dbg.bankShift || 0), hi + (dbg.bankShift || 0));
+      const r = applyBank(img, bz, W, H, bank);
+      out = r.rgb;
+      for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
+    } else if (!dbg.noBank && lf.reconFilter) {
+      progress('Reconstructing with the filter bank', 0);
+      if (!state.reconSource) state.reconSource = bankKernels(await decodePngRgb(new Uint8Array(lf.reconFilter.png)), lf.reconFilter.meta);
+      const bank = buildBank(state.reconSource, W, H, { ...LYTRO_BANK, ...(dbg.bank || {}) });
+      const r = applyBank(img, sp.zMap, W, H, bank);
+      out = r.rgb;
+      for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
     }
-    depth5 = state.depth5.map;
-    const grow = dbg.d5Grow ?? D5_GROW;
-    if (grow) {
-      if (state.depth5.grown?.r !== grow || state.depth5.grown.round !== !!dbg.d5Round) state.depth5.grown = { r: grow, round: !!dbg.d5Round, map: dilateNearest(state.depth5.map, grow, !!dbg.d5Round) };
-      depth5 = state.depth5.grown.map;
-    }
-  } else if (state.userDepth && state.settings.lytroDepth !== false && !dbg.noDm5) {
-    const key = `${state.sampler.outW}x${state.sampler.outH}:${placeKey}`;
-    if (!state.depth5 || state.depth5.key !== key || state.depth5.src !== state.userDepth) {
-      state.depth5 = { key, src: state.userDepth, map: withPlace(place, () => userDepthAlphaUpscaled(state.userDepth, state.sampler, state.lf.cam, 0, lensWarp(state.lens, state.sampler.outW, state.sampler.outH), 5, dbg.dmSimilar ?? 0.8, dbg.dmLevel ?? D5_LEVEL)) };
-    }
-    depth5 = state.depth5.map;
-    const grow = dbg.d5Grow ?? D5_GROW;
-    if (grow) {
-      if (state.depth5.grown?.r !== grow || state.depth5.grown.round !== !!dbg.d5Round) state.depth5.grown = { r: grow, round: !!dbg.d5Round, map: dilateNearest(state.depth5.map, grow, !!dbg.d5Round) };
-      depth5 = state.depth5.grown.map;
-    }
-    // the upscaled map moves with the depth the march range comes from, or the two disagree
-    if (engineShift) {
-      const key2 = `${engineShift}:${grow}:${!!dbg.d5Round}`;
-      if (!state.depth5.shifted || state.depth5.shiftedKey !== key2) {
-        state.depth5.shifted = { ...depth5, data: Float32Array.from(depth5.data, (x) => x + engineShift) };
-        state.depth5.shiftedKey = key2;
+    if (!dbg.noEar) {
+      // EdgeArtifactReduction (cfg 0x1fc8 on): per channel, along rows then columns, where the output depth steps.
+      const plane = new Float32Array(W * H);
+      for (let c = 0; c < 3; c++) {
+        for (let p = 0; p < W * H; p++) plane[p] = out[3 * p + c];
+        edgeArtifactReduce(plane, W, H, sp.zMap);
+        for (let p = 0; p < W * H; p++) out[3 * p + c] = plane[p];
       }
-      depth5 = state.depth5.shifted;
     }
-  }
-  if (exactDepth) depth5 = dbg.shiftConst ? { ...state.depthExact.up, data: Float32Array.from(state.depthExact.up.data, (x) => x + dbg.shiftConst * LAMBDA_TO_ALPHA) } : state.depthExact.up;
-  progress('Splatting the rays', 0);
-  if (state.modulation === undefined) state.modulation = lf.readModulation ? await loadModulation(lf) : null;
-  const sp = lytroSplat({
-    depth5,
-    modulation: dbg.noModulation ? null : state.modulation,
-    geoTable: lf.geometryBytes ? parseGeometryTable(lf.geometryBytes) : null,
-    lensShift: exactGeo ? await lensShiftForPhoto(id) : null,
-    raw: lf.raw, cam: lf.cam, dev, grid: exactGeo ? engineLatticeIdx(lf) : probeGrid(dbg.engineGrid ? engineGrid(lf.metadata, lf.cam.width, lf.cam.height, lf.grid) : lf.grid, dbg), sampleGrid: { ...lf.grid, ox: 0, oy: 0, rotation: 0 }, sampler, vignetting: state.vignetting, depth: depthUsed, scale, lens: cs.lens, W, H,
-    // As the engine loads the table: the chief ray angle is removed and the spatial scale applied, but not the focus plane offset (cfg 0x26c0 is off), so the table keeps its defocus term and the engine depth maps apply as they are.
-    rayWarp: dbg.noTable || !lf.rayWarpBytes ? null : (state.rayWarpEdof ||= parseRayWarp(lf.rayWarpBytes, lf.cam.width, lf.cam.height, { tilt: false, chief: true, ...(dbg.rwOpts || {}) })),
-    onProgress: (p) => progress('Splatting the rays', p),
-  }, {
-    ...LYTRO_SPLAT,
-    exact: exactGeo,
-    bisg: exactGeo && !dbg.noBisg,
-    aperture: dbg.legacy ? engineAperture(lf.cam) : engineAperture(lf.cam, exactGeo ? (dbg.apFraction ?? (exactDepth ? EXACT_APERTURE_FRACTION : EXACT_APERTURE_FRACTION_OWN)) : ENGINE_APERTURE_FRACTION),
-    // The sensor side (corrected plane, demosaic, luma boost, ray splat) on the GPU when there is one; the CPU does it otherwise.
-    gpu: state.gpu && !dbg.noGpuEngine ? (input) => {
-      try {
-        const acc = lytroSplatGpu(state.gpu, input, (p) => progress('Splatting the rays', p));
-        if (acc) state.lytroGpu = true;
-        return acc;
-      } catch (e) {
-        gpuFellBack('Rendering the sensor rays', e);
-        return null;
-      }
-    } : null,
-    ...(dbg.splat || {}),
-  });
-  if (state.jobs.superres !== job) return { cancelled: true };
-  progress('Filling holes', 0);
-  const filled = dbg.noFill ? null : fillHoles(sp.acc, W, H);
-  const img = new Float32Array(W * H * 3);
-  for (let p = 0; p < W * H; p++) {
-    if (filled) {
-      img[3 * p] = filled[4 * p];
-      img[3 * p + 1] = filled[4 * p + 1];
-      img[3 * p + 2] = filled[4 * p + 2];
-    } else {
-      const a = sp.acc[4 * p + 3] || 1;
-      img[3 * p] = sp.acc[4 * p] / a;
-      img[3 * p + 1] = sp.acc[4 * p + 1] / a;
-      img[3 * p + 2] = sp.acc[4 * p + 2] / a;
+    // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 54 at 3x and 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings. The same detection and strength defaults (50, 75) take the pattern down to ~1% of its band energy at both scales.
+    if (scale >= 3 && !debugFlags().noNotch && state.settings.latticeOn !== false) {
+      // the lattice's sharp peaks, and what a drifting frequency leaves of it (core/notch.js); Render settings > Quality > Lattice strength and detection
+      const strength = state.settings.latticeStrength ?? 0.75;
+      const prominence = Math.max(3, 12 - 12 * (state.settings.latticeDetect ?? 0.5));
+      removeLatticeByTiles(out, W, H, { ratio: Math.max(0.05, 1.1 - strength), prominence });
+      removePeriodicPatternRepeatedly(out, W, H, { prominence });
     }
+    if (hook('edofLinear')) hook('edofLinear')(out, W, H);
+    setHook('lytroStats', sp.stats);
+  if (keepKey) state.keptEdof = { key: keepKey, out: out.slice(), W, H };
   }
-  let out = img;
-  // The engine's JointAdaptiveFilter (method 10) runs the photo's own reconstruction kernel PNG; the designed filters are only its fallback for photos without one.
-  if (!dbg.noBank && (dbg.bank === 'engine' || (dbg.bank !== 'photo' && !lf.reconFilter))) {
-    progress('Reconstructing with the filter bank', 0);
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (let p = 0; p < W * H; p++) {
-      const z = sp.zMap[p];
-      if (z < lo) lo = z;
-      if (z > hi) hi = z;
-    }
-    // the standardized lightfield: 14 px disks
-    const imgW = (lf.cam.width * 14) / lf.grid.pitch;
-    const imgH = (lf.cam.height * 14) / lf.grid.pitch;
-    // opts: the engine's filters are keyed by its own lambda, which differs from the plain-ray lambda of a depth measured here by a per-photo amount
-    const bz = dbg.bankShift ? Float32Array.from(sp.zMap, (z) => z + dbg.bankShift) : sp.zMap;
-    const bank = buildEngineBank(W * (dbg.bankSize || 1), H * (dbg.bankSize || 1), imgW, imgH, lo + (dbg.bankShift || 0), hi + (dbg.bankShift || 0));
-    const r = applyBank(img, bz, W, H, bank);
-    out = r.rgb;
-    for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
-  } else if (!dbg.noBank && lf.reconFilter) {
-    progress('Reconstructing with the filter bank', 0);
-    if (!state.reconSource) state.reconSource = bankKernels(await decodePngRgb(new Uint8Array(lf.reconFilter.png)), lf.reconFilter.meta);
-    const bank = buildBank(state.reconSource, W, H, { ...LYTRO_BANK, ...(dbg.bank || {}) });
-    const r = applyBank(img, sp.zMap, W, H, bank);
-    out = r.rgb;
-    for (let p = 0; p < W * H; p++) if (r.wsum[p] > 0) for (let c = 0; c < 3; c++) out[3 * p + c] /= r.wsum[p];
-  }
-  if (!dbg.noEar) {
-    // EdgeArtifactReduction (cfg 0x1fc8 on): per channel, along rows then columns, where the output depth steps.
-    const plane = new Float32Array(W * H);
-    for (let c = 0; c < 3; c++) {
-      for (let p = 0; p < W * H; p++) plane[p] = out[3 * p + c];
-      edgeArtifactReduce(plane, W, H, sp.zMap);
-      for (let p = 0; p < W * H; p++) out[3 * p + c] = plane[p];
-    }
-  }
-  // At 3x and 4x the splat can leave faint lens-lattice peaks (prominence 13 .. 54 at 3x and 4x, none at 2x; the filter's usual cut-off is 25): take out those that stand out from their surroundings. The same detection and strength defaults (50, 75) take the pattern down to ~1% of its band energy at both scales.
-  if (scale >= 3 && !debugFlags().noNotch && state.settings.latticeOn !== false) {
-    // the lattice's sharp peaks, and what a drifting frequency leaves of it (core/notch.js); Render settings > Quality > Lattice strength and detection
-    const strength = state.settings.latticeStrength ?? 0.75;
-    const prominence = Math.max(3, 12 - 12 * (state.settings.latticeDetect ?? 0.5));
-    removeLatticeByTiles(out, W, H, { ratio: Math.max(0.05, 1.1 - strength), prominence });
-    removePeriodicPatternRepeatedly(out, W, H, { prominence });
-  }
-  if (hook('edofLinear')) hook('edofLinear')(out, W, H);
-  setHook('lytroStats', sp.stats);
-  const pixels = toPixels(out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
+  const pixels = toPixels(reuse ? out.slice() : out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
   post({ id, type: 'result', width: W, height: H, pixels: pixels.buffer }, [pixels.buffer]);
   return undefined;
 }
