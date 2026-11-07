@@ -499,8 +499,8 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
       <div><h3>Lens corrections</h3><p>Remove chromatic aberration, distortion, vignetting and lens flare, automatically or with your tweaks.</p></div>
       <div><h3>Camera calibration</h3><p>Import your calibration files from your camera in the desktop app.</p></div>
       <div><h3>First generation cameras</h3><p>Plug in an original Lytro camera and browse its photos with thumbnails before importing. On Windows it is read through its disk, as Lytro Desktop does, so no driver is needed.</p></div>
-      <div><h3>Depth your way</h3><p>Measure depth with Illuminator's various methods, the Classic Desktop way, or a blend of the two, with additional object edge detection for cleaner outlines.</p></div>
-      <div><h3>Quick to reopen</h3><p>The desktop app keeps each photo's measured depth and its latest full sensor renders next to it, so a photo you have opened before comes back in moments.</p></div>
+      <div><h3>Depth your way</h3><p>Measure depth with Illuminator's various methods, Lytro Desktop's style, or a blend of the two, with additional object edge detection for cleaner outlines.</p></div>
+      <div><h3>Quick to reopen</h3><p>The desktop app keeps each photo's measured depth and its latest full sensor renders, so a photo you have edited before reopens in moments.</p></div>
       <div><h3>Free to use</h3><p>Free for (almost) any purpose under the PolyForm Shield license.</p></div>
     </div>
   </div>
@@ -574,6 +574,15 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
     <p class="eyebrow">Latest updates</p>
     <h2 style="font-size:clamp(30px,4vw,46px);font-weight:800;margin-top:10px">What's new.</h2>
     <div class="updates" id="updates-list">
+      <article class="upd" data-version="0.5.84">
+        <header><h3>0.5.84</h3><time datetime="2026-11-07">Nov 7, 2026</time></header>
+        <ul>
+        <li><strong>Faster full sensor edits.</strong> Changing color, tone, sharpening or local adjustments on a full sensor render no longer combines the sensor again, so it updates in moments, and a photo opened again in the desktop app keeps it too.</li>
+        <li><strong>Up to 32 blades.</strong> The Blades setting for bokeh now goes from 3 to 32 sides.</li>
+        <li><strong>Credits name every model.</strong> About lists each optional upscaling and depth model with its author and license.</li>
+        <li><strong>Dialogs scroll only their text.</strong> The title and buttons of the credits and settings stay in place.</li>
+        </ul>
+      </article>
       <article class="upd" data-version="0.5.83">
         <header><h3>0.5.83</h3><time datetime="2026-11-06">Nov 6, 2026</time></header>
         <ul>
@@ -593,15 +602,6 @@ footer { border-top: 1px solid var(--line); padding-block: 32px 48px; color: var
         <li><strong>Update notices show what's new.</strong> The update window now lists the main changes in a release before the download.</li>
         <li><strong>Simpler Windows installers.</strong> "Add Illuminator to the desktop" sits next to "Run Illuminator" on the last page.</li>
         <li><strong>Plainer wording.</strong> Tooltips and the guide read more simply.</li>
-        </ul>
-      </article>
-      <article class="upd" data-version="0.5.80">
-        <header><h3>0.5.80</h3><time datetime="2026-11-06">Nov 6, 2026</time></header>
-        <ul>
-        <li><strong>Cleaner depth on shiny things.</strong> Black blotches on metal and glass in the depth map are gone.</li>
-        <li><strong>Diamond pattern fix.</strong> Large full sensor renders (3× and 4×) no longer show a faint diamond grid in blurry areas. A new <em>Lattice filter</em> setting lets you adjust it.</li>
-        <li><strong>Better upscaling.</strong> Each upscaling method now keeps its settings, and the extra upscaling and depth models can be downloaded in the web version too.</li>
-        <li><strong>Smarter lens alignment.</strong> A new <em>Lens centers</em> setting uses your camera's calibration for more accurate renders.</li>
         </ul>
       </article>
     </div>
