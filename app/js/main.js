@@ -690,6 +690,20 @@ engine.onCache = (msg) => {
   }, 1500);
 };
 
+// The worker made a full sensor picture before its color pass: saved next to the photo (desktop app), so a color change on a photo opened again does not render it again.
+engine.onStillKept = (msg) => {
+  if (!native || !state.lib || !state.current || !state.info || state.info.photoId !== msg.photoId) return;
+  state.lib.saveKeptPicture(state.current.photo, msg.hash, msg.bytes).catch((err) => console.warn('Could not keep the full sensor picture', err));
+};
+// ...and asks for one it may have saved.
+engine.onStillWant = async (msg) => {
+  let bytes = null;
+  if (native && state.lib && state.current && state.info && state.info.photoId === msg.photoId) bytes = await state.lib.keptPicture(state.current.photo, msg.hash).catch(() => null);
+  engine.request('stillData', { nonce: msg.nonce, bytes }, { transfer: bytes ? [bytes] : [] });
+};
+// Only the desktop app keeps them: the worker then reads each picture back and encodes it.
+if (native) engine.request('stillStore', { on: true });
+
 // The depth map from Lytro Desktop, kept with the photo when its library
 // was imported: used instead of measuring depth (core/userdepth.js). An
 // edited one if there is one, else the one Lytro computed (in stack.lfp).

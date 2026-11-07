@@ -189,3 +189,16 @@ test("keeps Lytro Desktop's stack.lfp (its computed depth) with a raw photo", as
   const reloaded = await new Library(store).load();
   assert.equal(reloaded.photos[0].stack, 'stack.lfp');
 });
+
+test('keeps the last two full sensor pictures before their color pass next to the photo', async () => {
+  const store = memoryStorage();
+  const lib = await new Library(store, { readSummary }).load();
+  const [p] = await lib.add([{ name: 'x.lfr', label: 'x', file: file('x.lfr') }]);
+  assert.equal(await lib.keptPicture(p, '0000000000000001'), null);
+  for (const hash of ['0000000000000001', '0000000000000002', '0000000000000003']) await lib.saveKeptPicture(p, hash, new Uint8Array([1, 2, 3, +hash.slice(-1)]).buffer);
+  assert.equal(await lib.keptPicture(p, '0000000000000001'), null);
+  assert.deepEqual([...new Uint8Array(await lib.keptPicture(p, '0000000000000003'))], [1, 2, 3, 3]);
+  assert.deepEqual([...new Uint8Array(await lib.keptPicture(p, '0000000000000002'))], [1, 2, 3, 2]);
+  await lib.remove([p.id]);
+  assert.deepEqual(await store.list('Photos'), []);
+});

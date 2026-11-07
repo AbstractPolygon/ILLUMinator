@@ -56,6 +56,7 @@ import { GpuRenderer } from './gpu/renderer.js';
 import { lytroSplatGpu } from './gpu/lytroengine.js';
 import { debugFlags, hook, setHook } from './core/debugflags.js';
 import { preColorKey } from './core/precolorkey.js';
+import { encodeKept, decodeKept, fingerprint, keptHash } from './core/keptpicture.js';
 
 // Requests whose picture is wanted at 16 bits per channel (see finishGpu).
 const bits16Ids = new Set();
@@ -86,6 +87,8 @@ const state = {
   // The last full sensor picture before its color pass (see stillKey): on the GPU (`keptStill`), or as RGB for the engine's all in focus picture (`keptEdof`).
   keptStill: null,
   keptEdof: null,
+  // The desktop app keeps the pictures next to the photo (see keptHashFor).
+  stillStore: false,
   refocusBuild: null,
   jobs: {},
   scratch: null,
@@ -441,6 +444,52 @@ function dropKeptStills() {
   state.keptStill = null;
   state.keptEdof = null;
   if (state.gpu && state.gpu.releaseKeptStill) state.gpu.releaseKeptStill();
+}
+
+// The same picture kept next to the photo (desktop app), named by what decides it: not the session's object ids (stillKey) but the contents of the depth and the like, so
+// a photo opened again finds it. The app's version is part of it, as the picture can change with the code.
+function keptHashFor(parts, skip = []) {
+  const photo = [
+    VERSION, state.lf.photoId, fingerprint(state.depth), fingerprint(state.depthPlain), fingerprint(state.depthRaw), fingerprint(state.userDepth), fingerprint(state.lensOffsets),
+    state.focusOffset ?? null, useWhites, fingerprint(calibrations), debugFlags(),
+  ];
+  return keptHash(preColorKey(state.settings, photo, parts, skip));
+}
+// Asks the page for the picture it may have kept (an RGB Float32Array of w * h * 3), or null.
+const stillWaits = new Map();
+let nextStillWait = 1;
+function loadKeptPicture(hash, w, h) {
+  return new Promise((resolve) => {
+    const nonce = nextStillWait++;
+    const timer = setTimeout(() => {
+      stillWaits.delete(nonce);
+      resolve(null);
+    }, 8000);
+    stillWaits.set(nonce, (bytes) => {
+      clearTimeout(timer);
+      const kept = bytes ? decodeKept(bytes) : null;
+      resolve(kept && kept.key === hash && kept.w === w && kept.h === h ? kept.rgb : null);
+    });
+    post({ type: 'stillWant', photoId: state.lf.photoId, hash, nonce });
+  });
+}
+async function stillData({ nonce, bytes }) {
+  const done = stillWaits.get(nonce);
+  if (done) {
+    stillWaits.delete(nonce);
+    done(bytes);
+  }
+  return {};
+}
+async function stillStore({ on }) {
+  state.stillStore = !!on;
+  return {};
+}
+// Tells the page to save a picture (a Float32Array of w * h * 3) next to the photo.
+function postKeptPicture(hash, w, h, rgb) {
+  if (!state.stillStore || !state.lf || !state.lf.photoId) return;
+  const bytes = encodeKept({ key: hash, w, h, rgb });
+  post({ type: 'stillKept', photoId: state.lf.photoId, hash, bytes }, [bytes]);
 }
 
 // GPU path: finishes a picture held in a GPU texture (synthetic depth of
@@ -1020,16 +1069,31 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
   // The same picture was made just before (only color settings changed since): its color pass again, from the kept picture.
   const stillCtx = { focus: alpha, overrides: masks, view: viewOf(u, v) };
   let keepStill = null;
+  let diskHash = null;
   if (state.gpu && !color && !quiet) {
     const csKept = colorState(color);
     const lensKey = csKept.lens ? [csKept.lens.k || 0, csKept.lens.k2 || 0, csKept.lens.edge || 0, csKept.lens.zoom || 1] : null;
     const packedKept = packedMasks(stillCtx);
     const { W: keptW, H: keptH } = superResParams(sampler, { scale });
-    keepStill = stillKey(['sr', scale, passes, alpha, u, v, aperture, dof, bokeh || null, state.detail, packedKept && packedKept.spatial ? packedKept : null, lensKey]);
+    const keyParts = ['sr', scale, passes, alpha, u, v, aperture, dof, bokeh || null, state.detail, packedKept && packedKept.spatial ? packedKept : null, lensKey];
+    keepStill = stillKey(keyParts);
     if (state.keptStill && state.keptStill.key === keepStill && state.keptStill.w === keptW && state.keptStill.h === keptH) {
       progress(label, 1);
       finishGpu(state.keptStill.tex, keptW, keptH, packedKept, { id, type: 'result' }, csKept, true, stillCtx, undefined);
       return undefined;
+    }
+    // Or kept next to the photo by an earlier session (desktop app).
+    if (state.stillStore && state.lf.photoId) {
+      diskHash = keptHashFor(keyParts);
+      progress(label, 0);
+      const disk = await loadKeptPicture(diskHash, keptW, keptH);
+      if (state.jobs.superres !== job) return { cancelled: true };
+      if (disk) {
+        state.keptStill = { key: keepStill, tex: state.gpu.keep(state.gpu.uploadRGB(disk, keptW, keptH), keptW, keptH, 'still'), w: keptW, h: keptH };
+        progress(label, 1);
+        finishGpu(state.keptStill.tex, keptW, keptH, packedKept, { id, type: 'result' }, csKept, true, stillCtx, undefined);
+        return undefined;
+      }
     }
   }
   const opts = apertureOptions({ u, v, aperture });
@@ -1051,6 +1115,18 @@ async function superRes({ id, job, alpha = 0, scale, u = 0, v = 0, aperture = 0,
       state.lensOffsets = state.gpu.lensOffsets;
       if (state.jobs.superres !== job) return { cancelled: true };
       await presentGpu(id, tex, params.W, params.H, { alpha, dof, bokeh, color, pxPerUnit: 14 * scale, masks: stillCtx, keepStill, distortionCorrected: true }, { id, type: 'result' });
+      // The picture before its color pass, saved next to the photo (the page keeps the last two).
+      if (diskHash && state.keptStill && state.keptStill.key === keepStill) {
+        const { tex: kept, w: keptW, h: keptH } = state.keptStill;
+        const [r, g, b] = state.gpu.readChannels(kept, keptW, keptH, 3);
+        const rgb = new Float32Array(keptW * keptH * 3);
+        for (let i = 0; i < keptW * keptH; i++) {
+          rgb[3 * i] = r[i];
+          rgb[3 * i + 1] = g[i];
+          rgb[3 * i + 2] = b[i];
+        }
+        postKeptPicture(diskHash, keptW, keptH, rgb);
+      }
       return undefined;
     }
   }
@@ -1129,9 +1205,18 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
   const keepKey = !color && !quiet ? stillKey(['edof', scale], ['details']) : null;
   const reuse = !!keepKey && !!state.keptEdof && state.keptEdof.key === keepKey && state.keptEdof.W === W && state.keptEdof.H === H
     && !dbg.dumpField && !dbg.cmpDepth && !hook('depthOverride') && !hook('depthFinal') && !hook('depthOnly') && !hook('edofLinear');
+  // Or kept next to the photo by an earlier session (desktop app).
+  const diskHash = keepKey && !reuse && state.stillStore && state.lf.photoId && !dbg.dumpField && !dbg.cmpDepth ? keptHashFor(['edof', scale], ['details']) : null;
+  let disk = null;
+  if (diskHash) {
+    progress('Looking for the kept picture', 0);
+    disk = await loadKeptPicture(diskHash, W, H);
+    if (state.jobs.superres !== job) return { cancelled: true };
+  }
   let out;
-  if (reuse) {
-    out = state.keptEdof.out;
+  if (reuse || disk) {
+    out = reuse ? state.keptEdof.out : disk;
+    if (disk) state.keptEdof = { key: keepKey, out: disk, W, H };
     progress('Splatting the rays', 1);
   } else {
     if (dbg.dumpField && lf.rayWarpBytes) {
@@ -1341,8 +1426,10 @@ async function lytroEdof({ id, job, scale = 3, color = null, masks = null, quiet
     setHook('lytroStats', sp.stats);
   if (keepKey) state.keptEdof = { key: keepKey, out: out.slice(), W, H };
   }
-  const pixels = toPixels(reuse ? out.slice() : out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
+  const pixels = toPixels(reuse || disk ? out.slice() : out, W, H, { focus: 0, overrides: masks, view: viewOf(0, 0) }, cs, true);
   post({ id, type: 'result', width: W, height: H, pixels: pixels.buffer }, [pixels.buffer]);
+  // The picture before its color pass, saved next to the photo (the page keeps the last two).
+  if (diskHash && !reuse && !disk && state.keptEdof && state.keptEdof.key === keepKey) postKeptPicture(diskHash, W, H, state.keptEdof.out);
   return undefined;
 }
 
@@ -2923,7 +3010,7 @@ async function setLut({ lut }) {
   return null;
 }
 
-const handlers = { memoryLimits: (limits) => { setMemoryLimits(limits); return {}; }, setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, lytroEdof, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
+const handlers = { stillStore, stillData, memoryLimits: (limits) => { setMemoryLimits(limits); return {}; }, setLut, setCalibrations, measureWhite: measureWhiteImage, open, frames, refocusFrames, superRes, lytroEdof, view, focusAt, depthMap, spreadMask, whiteBalanceAt, prepare, settings, setGrid, rawCrop, outputToSensor, readSection,
   cancel: async ({ kind }) => { state.jobs[kind] = null; } };
 
 self.onmessage = async (event) => {

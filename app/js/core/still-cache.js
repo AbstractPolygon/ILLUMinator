@@ -5,6 +5,10 @@
 export const STILL_INDEX_FILE = 'stills.illuminator.json';
 export const STILLS_KEPT = 4;
 export const stillFileName = (hash) => `still-${hash}.png`;
+// The full sensor picture before its color pass (core/keptpicture.js), kept for the last few settings that shaped it.
+export const KEPT_INDEX_FILE = 'kept.illuminator.json';
+export const KEPT_PICTURES = 2;
+export const keptFileName = (hash) => `kept-${hash}.bin`;
 
 // Two 32 bit FNV-1a hashes with different seeds, as 16 hex digits.
 export function hashKey(text) {

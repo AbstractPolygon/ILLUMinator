@@ -21,6 +21,16 @@ export class Engine {
       if (this.onCache) this.onCache(msg);
       return;
     }
+    // The worker kept a full sensor picture (to save next to the photo), or wants one it may have saved (answered with a 'stillData' request).
+    if (msg.type === 'stillKept') {
+      if (this.onStillKept) this.onStillKept(msg);
+      return;
+    }
+    if (msg.type === 'stillWant') {
+      if (this.onStillWant) this.onStillWant(msg);
+      else this.request('stillData', { nonce: msg.nonce, bytes: null });
+      return;
+    }
     if (msg.type === 'depthReady') {
       if (this.onDepthReady) this.onDepthReady(msg);
       return;

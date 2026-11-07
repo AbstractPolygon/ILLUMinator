@@ -28,7 +28,7 @@ export const EDITS_FILE = 'edits.illuminator.json';
 const INDEX = 'library.json';
 const PHOTOS = 'Photos';
 import { PROCESSED_FILE } from '../core/processed-cache.js';
-import { STILL_INDEX_FILE, stillFileName, touchIndex } from '../core/still-cache.js';
+import { STILL_INDEX_FILE, stillFileName, touchIndex, KEPT_INDEX_FILE, KEPT_PICTURES, keptFileName } from '../core/still-cache.js';
 
 const LIGHT_FIELD = /\.(lfr|lfp|raw)$/i;
 
@@ -284,6 +284,27 @@ export class Library {
     const next = touchIndex(index, hash);
     await this.store.writeText(`${dir}/${STILL_INDEX_FILE}`, JSON.stringify(next.index));
     for (const old of next.dropped) await this.store.remove(`${dir}/${stillFileName(old)}`);
+  }
+
+  // A full sensor picture before its color pass (core/keptpicture.js), kept next to the photo: its bytes, or null.
+  async keptPicture(photo, hash) {
+    const f = await this.store.file(`${PHOTOS}/${photo.id}/${keptFileName(hash)}`).catch(() => null);
+    return f ? f.arrayBuffer() : null;
+  }
+
+  // Keeps one; the oldest beyond the last few are removed.
+  async saveKeptPicture(photo, hash, bytes) {
+    const dir = `${PHOTOS}/${photo.id}`;
+    let index = [];
+    try {
+      index = JSON.parse((await this.store.readText(`${dir}/${KEPT_INDEX_FILE}`)) || '[]');
+    } catch {
+      index = [];
+    }
+    await this.store.writeBlob(`${dir}/${keptFileName(hash)}`, new Blob([bytes]));
+    const next = touchIndex(index, hash, KEPT_PICTURES);
+    await this.store.writeText(`${dir}/${KEPT_INDEX_FILE}`, JSON.stringify(next.index));
+    for (const old of next.dropped) await this.store.remove(`${dir}/${keptFileName(old)}`);
   }
 
   // The photo's Lytro Desktop stack.lfp (holding the depth Lytro computed), or null.
