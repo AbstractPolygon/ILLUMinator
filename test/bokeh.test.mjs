@@ -12,6 +12,16 @@ test('blades: corner up at radius 1, flat sides closer', () => {
   assert.equal(bokehKernel({ shape: 'hexagon' }).blades, 6);
 });
 
+test('blades: from 3 to 32, and a 32-sided shape is nearly round', () => {
+  assert.equal(bokehKernel({ shape: 'blades', blades: 2 }).blades, 3);
+  assert.equal(bokehKernel({ shape: 'blades', blades: 32 }).blades, 32);
+  assert.equal(bokehKernel({ shape: 'blades', blades: 99 }).blades, 32);
+  const k = bokehKernel({ shape: 'blades', blades: 32 });
+  // Flat sides sit at cos(180/32) = 0.9952 of the corner radius.
+  assert.ok(Math.abs(kernelDistance(k, 0, 1) - 1) < 1e-9);
+  assert.ok(kernelDistance(k, 1, 0) > 0.995 && kernelDistance(k, 1, 0) < 1.005);
+});
+
 test('oval narrows the circle and turns with rotation', () => {
   const k = bokehKernel({ shape: 'circle', oval: 1 });
   assert.ok(kernelDistance(k, 0.5, 0) > 1);

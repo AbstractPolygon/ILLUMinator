@@ -19,7 +19,7 @@ export function bokehKernel({ shape = 'smooth', blades = 6, oval = 0, rotation =
   const a = (rotation * Math.PI) / 180;
   return {
     kind,
-    blades: Math.max(3, Math.min(12, Math.round(shape === 'hexagon' ? 6 : blades))),
+    blades: Math.max(3, Math.min(32, Math.round(shape === 'hexagon' ? 6 : blades))),
     aspect: kind === 1 ? 1 - 0.6 * Math.max(0, Math.min(1, oval)) : 1,
     cos: Math.cos(a),
     sin: Math.sin(a),
